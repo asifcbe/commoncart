@@ -1,0 +1,66 @@
+# ─── Dependencies ────────────────────────────────────────────
+node_modules/
+.pnp
+.pnp.js
+backend/node_modules
+frontend/node_modules
+website/node_modules
+# ─── Build outputs ───────────────────────────────────────────
+dist/
+build/
+out/
+.vite/
+
+# ─── Environment & secrets ───────────────────────────────────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+backend/.env
+backend/connectionstring.txt
+
+# ─── Uploaded files (user content, not source) ───────────────
+backend/uploads/products/*
+!backend/uploads/products/.gitkeep
+
+# ─── Logs ────────────────────────────────────────────────────
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── OS / editor junk ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ─── Package manager locks (keep one) ────────────────────────
+# Uncomment if you want to ignore lock files:
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# ─── Testing ─────────────────────────────────────────────────
+coverage/
+.nyc_output/
+
+# ─── Misc ────────────────────────────────────────────────────
+prompt.md
+*.local
+.cache/
+.parcel-cache/
+.turbo/
+sample app/
