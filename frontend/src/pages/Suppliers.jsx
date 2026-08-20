@@ -13,6 +13,7 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { formatDate } from '../utils/date';
 
 const PAYMENT_METHODS = ['CASH', 'BANK_TRANSFER', 'CHEQUE', 'UPI', 'OTHER'];
 const METHOD_LABELS = { CASH: 'Cash', BANK_TRANSFER: 'Bank Transfer', CHEQUE: 'Cheque', UPI: 'UPI', OTHER: 'Other' };
@@ -201,7 +202,7 @@ function DeletePaymentModal({ supplierId, payment, onClose, onSaved }) {
           <AlertTriangle size={18} className="text-red-500 mt-0.5 shrink-0" />
           <p className="text-sm text-red-700">
             Delete payment of <span className="font-semibold">₹{payment.amount.toFixed(2)}</span> ({METHOD_LABELS[payment.method]})
-            on {new Date(payment.createdAt).toLocaleDateString()}? The supplier balance will be restored.
+            on {formatDate(payment.createdAt)}? The supplier balance will be restored.
           </p>
         </div>
         <div className="flex justify-end gap-3 pt-2 border-t">
@@ -379,7 +380,7 @@ function SupplierAccount({ supplierId, onBack }) {
                 <tbody className="divide-y">
                   {withBalance.map((entry) => (
                     <tr key={`${entry.type}-${entry.id}`} className={`hover:bg-gray-50 ${entry.type === 'credit' ? 'bg-green-50/30' : ''}`}>
-                      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{new Date(entry.date).toLocaleDateString()}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">{formatDate(entry.date)}</td>
                       <td className="px-4 py-3">
                         <div className="font-medium text-gray-800">{entry.label}</div>
                         {entry.sub && <div className="text-xs text-gray-400 mt-0.5">{entry.sub}</div>}

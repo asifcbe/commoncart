@@ -18,7 +18,7 @@ function blankBill(id) {
     couponData: null,
     discountMode: '%',
     discountInput: '',
-    roundOff: false,
+    roundOff: 0, // rupee adjustment from the +/- round-off stepper (can be negative)
     paymentMethod: 'CASH',
     splitMode: false,
     splitRows: [{ method: 'CASH', amount: '' }, { method: 'CARD', amount: '' }],

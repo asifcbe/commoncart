@@ -19,6 +19,7 @@ import { Card } from '../components/ui/Card';
 import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 import { computeGst, printBillHTML, shareBillWhatsApp, carriedSettlementOf } from '../utils/bill';
+import { formatDateTime } from '../utils/date';
 
 const DEFAULT_PAYMENT_MODES = [
   { key: 'CASH', label: 'Cash' },
@@ -45,11 +46,12 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
   const netPayable = grandTotal + (carried?.amount || 0);
   const pointsEarned = saleData?.pointsEarned || 0;
   const pointsRedeemed = saleData?.pointsRedeemed || 0;
+  const pointsRedeemedValue = saleData?.pointsRedeemedValue ?? pointsRedeemed;
   const pointsEarnedRedeemedNow = saleData?.pointsEarnedRedeemedNow || 0;
   const balancePoints = saleData?.customer?.creditPoints ?? null;
   const splitPayments = transaction.splitPayments || [];
 
-  const billExtra = { pointsEarned, pointsRedeemed, pointsEarnedRedeemedNow, balancePoints, customer: saleData?.customer };
+  const billExtra = { pointsEarned, pointsRedeemed, pointsRedeemedValue, pointsEarnedRedeemedNow, balancePoints, customer: saleData?.customer };
 
   return (
     <Modal open onClose={onClose} title="Receipt" size="sm">
@@ -59,7 +61,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
           {business?.addressLine && <div className="text-[11px] text-gray-500">{business.addressLine}</div>}
           {business?.phone && <div className="text-[11px] text-gray-500">Ph: {business.phone}</div>}
           {business?.gstin && <div className="text-[11px] text-gray-600">GSTIN: {business.gstin}</div>}
-          <div className="text-xs text-gray-500 mt-1">{new Date(transaction.createdAt).toLocaleString()}</div>
+          <div className="text-xs text-gray-500 mt-1">{formatDateTime(transaction.createdAt)}</div>
           <div className="text-sm font-bold mt-1">Bill No: {transaction.transactionId}</div>
           {customerName && <div className="text-xs text-gray-600 mt-0.5">Customer: {customerName}</div>}
         </div>
@@ -529,6 +531,10 @@ export default function POS() {
   const [couponValidating, setCouponValidating] = useState(false);
   const [creditConfig, setCreditConfig] = useState({ rupeesPerPoint: 1000, pointValue: 1 });
   const scanRef = useRef(null);
+  // Round-off stepper: repeated clicks in the same direction widen the
+  // denomination (₹1 → ₹10 → ₹100 → …); switching direction or editing the
+  // cart resets it back to ₹1.
+  const roundStepRef = useRef({ dir: null, scale: 1 });
 
   // Fullscreen + kiosk lock — confines the browser to this page (see Layout.jsx
   // for the route guard) until the current user re-enters their password.
@@ -705,7 +711,7 @@ export default function POS() {
         redeemEarnedNow: earnedNowDiscount > 0,
         soldBy,
         manualDiscount,
-        roundOff: roundOff ? roundOffAmount : 0,
+        roundOff: roundOffAmount,
         carryForward: carryForward || undefined,
         splitPayments: splitMode ? splitRows.filter((r) => Number(r.amount) > 0).map((r) => ({ method: r.method, amount: Number(r.amount) })) : undefined,
       });
@@ -716,6 +722,7 @@ export default function POS() {
         const billExtra = {
           pointsEarned: result.pointsEarned || 0,
           pointsRedeemed: result.pointsRedeemed || 0,
+          pointsRedeemedValue: result.pointsRedeemedValue ?? result.pointsRedeemed ?? 0,
           pointsEarnedRedeemedNow: result.pointsEarnedRedeemedNow || 0,
           balancePoints: result.customer?.creditPoints ?? null,
           customer: result.customer,
@@ -747,9 +754,36 @@ export default function POS() {
   const earnedNowDiscount = (loyaltyCustomer && redeemEarnedNow) ? pointsEarnedThisBill * (creditConfig.pointValue || 1) : 0;
   const totalDiscount = pointsDiscount + couponDiscount + manualDiscount + earnedNowDiscount;
   const preRound = Math.max(0, cartTotal - totalDiscount);
-  const roundOffAmount = roundOff ? (Math.round(preRound) - preRound) : 0;
+  const roundOffAmount = Number(roundOff) || 0;
   const carryForwardAmount = carryForward?.amount || 0;
   const finalTotal = preRound + roundOffAmount + carryForwardAmount;
+
+  // Step the round-off adjustment down/up through widening denominations.
+  // First click snaps to the nearest whole rupee; each further click in the
+  // *same* direction widens the scale ×10 (rupee → ten → hundred → …), so
+  // repeated clicks walk e.g. 1234.4 → 1234 → 1230 → 1200. Switching
+  // direction restarts at the ₹1 scale.
+  const stepRoundOff = (dir) => {
+    const current = Math.round((preRound + roundOffAmount) * 100) / 100;
+    const streak = roundStepRef.current;
+    const scale = streak.dir === dir ? streak.scale * 10 : 1;
+    roundStepRef.current = { dir, scale };
+    const snapped = dir === 'down' ? Math.floor(current / scale) * scale : Math.ceil(current / scale) * scale;
+    const target = snapped !== current ? snapped : (dir === 'down' ? current - scale : current + scale);
+    patchBill({ roundOff: Math.round((target - preRound) * 100) / 100 });
+  };
+
+  // Any change to what's owed invalidates the click streak — otherwise the
+  // next +/- press would jump by a stale denomination against a new total.
+  useEffect(() => { roundStepRef.current = { dir: null, scale: 1 }; }, [preRound]);
+
+  // "Redeem now" only has an effect (and is only shown) while this bill
+  // actually earns points — if editing the balance-redeem field, cart, or
+  // discounts drops that to 0, uncheck it instead of leaving stale state
+  // behind that has no visible checkbox to turn off.
+  useEffect(() => {
+    if (redeemEarnedNow && pointsEarnedThisBill === 0) patchBill({ redeemEarnedNow: false });
+  }, [pointsEarnedThisBill, redeemEarnedNow]);
 
   const maxRedeemable = loyaltyCustomer ? Math.floor(Math.min(loyaltyCustomer.creditPoints, cartTotal)) : 0;
 
@@ -851,8 +885,8 @@ export default function POS() {
               </div>
               <CustomerPicker
                 selected={loyaltyCustomer}
-                onSelect={(c) => { patchBill({ loyaltyCustomer: c, redeemPoints: '' }); goNextStep(); }}
-                onClear={() => patchBill({ loyaltyCustomer: null, redeemPoints: '' })}
+                onSelect={(c) => { patchBill({ loyaltyCustomer: c, redeemPoints: '', redeemEarnedNow: false }); goNextStep(); }}
+                onClear={() => patchBill({ loyaltyCustomer: null, redeemPoints: '', redeemEarnedNow: false })}
                 onEnterAdvance={goNextStep}
               />
               {!loyaltyCustomer && (
@@ -1082,23 +1116,29 @@ export default function POS() {
                 </div>
               </div>
 
-              {/* Round off */}
+              {/* Round off — step down/up through ₹1 → ₹10 → ₹100 denominations */}
               <div className="flex items-center justify-between">
-                <label className="text-xs text-gray-500 flex items-center gap-1 cursor-pointer" onClick={() => patchBill({ roundOff: !roundOff })}>
-                  Round Off Total
-                </label>
+                <label className="text-xs text-gray-500">Round Off Total</label>
                 <div className="flex items-center gap-2">
-                  {roundOff && roundOffAmount !== 0 && (
-                    <span className={`text-xs font-medium ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                      {roundOffAmount > 0 ? '+' : ''}₹{roundOffAmount.toFixed(2)}
-                    </span>
+                  {roundOffAmount !== 0 && (
+                    <>
+                      <span className={`text-xs font-medium ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                        {roundOffAmount > 0 ? '+' : ''}₹{roundOffAmount.toFixed(2)}
+                      </span>
+                      <button type="button" onClick={() => { roundStepRef.current = { dir: null, scale: 1 }; patchBill({ roundOff: 0 }); }}
+                        className="text-gray-400 hover:text-red-500" title="Clear round off">
+                        <X size={12} />
+                      </button>
+                    </>
                   )}
-                  <div
-                    onClick={() => patchBill({ roundOff: !roundOff })}
-                    className={`relative w-9 h-5 rounded-full transition-colors cursor-pointer ${roundOff ? 'bg-blue-500' : 'bg-gray-300'}`}
-                  >
-                    <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${roundOff ? 'translate-x-4' : ''}`} />
-                  </div>
+                  <button type="button" onClick={() => stepRoundOff('down')}
+                    className="h-6 w-6 rounded border flex items-center justify-center hover:bg-gray-50 bg-white" title="Round down">
+                    <Minus size={12} />
+                  </button>
+                  <button type="button" onClick={() => stepRoundOff('up')}
+                    className="h-6 w-6 rounded border flex items-center justify-center hover:bg-gray-50 bg-white" title="Round up">
+                    <Plus size={12} />
+                  </button>
                 </div>
               </div>
 
@@ -1150,7 +1190,7 @@ export default function POS() {
                   <span>-₹{manualDiscount.toFixed(2)}</span>
                 </div>
               )}
-              {roundOff && roundOffAmount !== 0 && (
+              {roundOffAmount !== 0 && (
                 <div className={`flex justify-between text-xs ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
                   <span>Round Off</span>
                   <span>{roundOffAmount > 0 ? '+' : ''}₹{roundOffAmount.toFixed(2)}</span>

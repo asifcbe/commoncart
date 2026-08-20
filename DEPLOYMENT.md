@@ -43,17 +43,19 @@ Layout used throughout this doc (**replace `yourdomain.com` with your real domai
 
 In Hostinger: **hPanel → Domains → yourdomain.com → DNS / Nameservers → DNS Records**
 
-Add three `A` records, all pointing to the **Elastic IP** from Part 1:
+Add four `A` records, all pointing to the **Elastic IP** from Part 1 (the `www` record matters — Part 7's Certbot command requests a cert for it too, and will fail with `NXDOMAIN` if it's missing):
 
 | Type | Name | Points to | TTL |
 |---|---|---|---|
 | A | `@` | `<Elastic IP>` | 300 (or default) |
+| A | `www` | `<Elastic IP>` | 300 |
 | A | `admin` | `<Elastic IP>` | 300 |
 | A | `api` | `<Elastic IP>` | 300 |
 
-DNS propagation can take a few minutes to a few hours. Check with:
+DNS propagation can take a few minutes to a few hours. **Check every one of these resolves before moving on to Part 7 (SSL)** — Certbot fails the whole request if even one domain doesn't resolve yet:
 ```bash
 dig +short yourdomain.com
+dig +short www.yourdomain.com
 dig +short admin.yourdomain.com
 dig +short api.yourdomain.com
 ```
@@ -198,6 +200,14 @@ This produces `~/commoncart/website/dist/`.
 ---
 
 ## Part 6 — Configure Nginx (reverse proxy + static hosting)
+
+> **Ubuntu gotcha:** `/home/ubuntu` defaults to `750` permissions — only the `ubuntu` user can traverse into it. Nginx runs as `www-data`, so serving `frontend/dist`/`website/dist` from under `~/commoncart` will 500 with `stat() ... Permission denied` in `/var/log/nginx/error.log` unless you open that up:
+> ```bash
+> sudo chmod 711 /home/ubuntu
+> find ~/commoncart/frontend/dist ~/commoncart/website/dist -type d -exec chmod 755 {} \;
+> find ~/commoncart/frontend/dist ~/commoncart/website/dist -type f -exec chmod 644 {} \;
+> ```
+> Do this once now (or right after each build) — it's cheap to run early rather than debug the 500 later.
 
 Create three server blocks — one per subdomain.
 

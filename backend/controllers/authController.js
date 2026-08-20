@@ -17,6 +17,9 @@ const PurchaseReturn = require('../models/PurchaseReturn');
 const Attendance = require('../models/Attendance');
 const SalaryPayment = require('../models/SalaryPayment');
 const Counter = require('../models/Counter');
+const CreditNote = require('../models/CreditNote');
+const ReplacementNote = require('../models/ReplacementNote');
+const Settlement = require('../models/Settlement');
 
 const signToken = (id) =>
   jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
@@ -133,7 +136,9 @@ exports.resetAll = async (req, res) => {
     const valid = await user.comparePassword(password);
     if (!valid) return res.status(401).json({ message: 'Incorrect password' });
 
-    // Wipe EVERYTHING — including all users and counters.
+    // Wipe EVERYTHING — including all users and counters. Every model under
+    // backend/models/ must have a deleteMany() here; when adding a new model,
+    // add it to this list too, or "Delete All Data" will silently leave it behind.
     await Promise.all([
       Product.deleteMany({}),
       SaleTransaction.deleteMany({}),
@@ -151,6 +156,9 @@ exports.resetAll = async (req, res) => {
       AppSettings.deleteMany({}),
       Counter.deleteMany({}),
       User.deleteMany({}),
+      CreditNote.deleteMany({}),
+      ReplacementNote.deleteMany({}),
+      Settlement.deleteMany({}),
     ]);
 
     // Remove uploaded product images from disk so nothing is left orphaned

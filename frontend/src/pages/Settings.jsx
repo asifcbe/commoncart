@@ -17,6 +17,8 @@ import PermissionEditor from '../components/PermissionEditor';
 import { SECTIONS } from '../config/permissions';
 import { LABEL_SIZES, DEFAULT_LABEL_PRINT } from '../utils/labels';
 import api from '../utils/api';
+import { formatDate } from '../utils/date';
+import useDisplayConfigStore from '../store/useDisplayConfigStore';
 
 const DEFAULT_STAFF_PERMS = { sections: ['dashboard', 'pos', 'products', 'sales'], viewCostPrice: false };
 
@@ -308,6 +310,9 @@ export default function Settings() {
   const [billPrint, setBillPrint] = useState({ paperSize: '80mm', customWidthMm: 80 });
   const [savingBillPrint, setSavingBillPrint] = useState(false);
 
+  const [displayConfig, setDisplayConfig] = useState({ dateFormat: 'DD/MM/YYYY' });
+  const [savingDisplayConfig, setSavingDisplayConfig] = useState(false);
+
   const [barcodeConfig, setBarcodeConfig] = useState({ startFrom: 1000000 });
   const [barcodeNextVal, setBarcodeNextVal] = useState(null);
   const [savingBarcodeConfig, setSavingBarcodeConfig] = useState(false);
@@ -355,6 +360,7 @@ export default function Settings() {
     api.get('/settings/auto-delete-config').then(({ data }) => setAutoDelete(data.config)).catch(() => {});
     api.get('/settings/label-print-config').then(({ data }) => setLabelPrint({ ...DEFAULT_LABEL_PRINT, ...data.config, content: { ...DEFAULT_LABEL_PRINT.content, ...(data.config?.content || {}) } })).catch(() => {});
     api.get('/settings/bill-print-config').then(({ data }) => setBillPrint(data.config)).catch(() => {});
+    api.get('/settings/display-config').then(({ data }) => setDisplayConfig(data.config)).catch(() => {});
     api.get('/settings/variant-config').then(({ data }) => { setVariants(data.config?.variants || []); setSizes(data.config?.sizes || []); }).catch(() => {});
     api.get('/settings/payment-modes-config').then(({ data }) => setPaymentModes(data.config?.modes || [])).catch(() => {});
     api.get('/settings/barcode-config').then(({ data }) => { setBarcodeConfig(data.config); setBarcodeNextVal(data.nextBarcode); }).catch(() => {});
@@ -425,6 +431,20 @@ export default function Settings() {
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to save', type: 'error' });
     } finally { setSavingBillPrint(false); }
+  };
+
+  const handleSaveDisplayConfig = async () => {
+    setSavingDisplayConfig(true);
+    try {
+      const { data } = await api.put('/settings/display-config', displayConfig);
+      setDisplayConfig(data.config);
+      // Apply immediately app-wide — formatDate()/formatDateTime() read this
+      // store, so every open page picks up the new format without a reload.
+      useDisplayConfigStore.getState().setDateFormat(data.config.dateFormat);
+      toast({ message: 'Date format saved', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Failed to save', type: 'error' });
+    } finally { setSavingDisplayConfig(false); }
   };
 
   const handleSaveBarcodeConfig = async () => {
@@ -759,7 +779,7 @@ export default function Settings() {
                           )}
                         </td>
                         <td className="px-4 py-3 text-xs text-gray-400">
-                          {new Date(u.createdAt).toLocaleDateString()}
+                          {formatDate(u.createdAt)}
                         </td>
                         <td className="px-4 py-3">
                           {currentUser?.role === 'ADMIN' && (
@@ -1453,6 +1473,39 @@ export default function Settings() {
                   <Button onClick={handleSaveBillPrint} disabled={savingBillPrint}>
                     {savingBillPrint ? <Spinner size="sm" className="mr-2" /> : null}
                     Save Bill Settings
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Clock size={16} className="text-blue-500" /> Date Format
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-500 mb-4">
+                Controls how dates are shown everywhere in the app — lists, detail views, and printed/exported bills.
+              </p>
+              <div className="space-y-5">
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    ['DD/MM/YYYY', 'dd/mm/yyyy', `e.g. ${formatDate(new Date())}`],
+                    ['SYSTEM', 'Browser default', 'Uses this device’s locale format'],
+                  ].map(([id, lbl, desc]) => (
+                    <button key={id} type="button" onClick={() => setDisplayConfig((c) => ({ ...c, dateFormat: id }))}
+                      className={`text-left px-3 py-2 rounded-lg border-2 transition-colors text-xs ${displayConfig.dateFormat === id ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-gray-200 hover:border-gray-300'}`}>
+                      <div className="font-semibold">{lbl}</div>
+                      <div className="text-gray-400 mt-0.5">{desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex justify-end pt-2 border-t">
+                  <Button onClick={handleSaveDisplayConfig} disabled={savingDisplayConfig}>
+                    {savingDisplayConfig ? <Spinner size="sm" className="mr-2" /> : null}
+                    Save Date Format
                   </Button>
                 </div>
               </div>

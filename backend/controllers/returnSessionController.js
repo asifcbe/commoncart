@@ -45,7 +45,24 @@ exports.processReturnSession = async (req, res) => {
   const mongoSession = await mongoose.startSession();
   try {
     let result;
-    await mongoSession.withTransaction(async () => {
+    // Retry the whole transaction on a duplicate-key error (Mongo code 11000)
+    // from a drifted CN/RN number counter — everything inside withTransaction
+    // rolls back atomically on any throw, so re-running from scratch (which
+    // draws a fresh number) is safe and leaves no partial state behind.
+    let attempt = 0;
+    const maxAttempts = 3;
+    while (true) {
+      try {
+        await mongoSession.withTransaction(() => runReturnSession());
+        break;
+      } catch (err) {
+        attempt += 1;
+        if (err?.code === 11000 && attempt < maxAttempts) continue;
+        throw err;
+      }
+    }
+
+    async function runReturnSession() {
       const sale = await SaleTransaction.findById(saleId).session(mongoSession);
       if (!sale) throw Object.assign(new Error('Sale not found'), { status: 404 });
 
@@ -120,8 +137,31 @@ exports.processReturnSession = async (req, res) => {
         const gstFallbackUsed = !gstBasis;
         const effectiveGst = gstBasis || await getGstSnapshot();
 
-        const returnTotal = returnLines.reduce((s, l) => s + l.price * l.qty, 0);
+        // The bill's discount and round-off apply to the whole invoice, not
+        // any one line — so a partial return must refund each line's fair
+        // share of what the customer actually paid, not its full list price.
+        // grossBillTotal = sum of every original line's price×qty (pre-discount).
+        // netPayableRatio = what fraction of that gross the customer ended up
+        // paying once the bill's discount + round-off were applied — e.g. a
+        // ₹110 bill discounted+rounded down to ₹95 has ratio 0.8636, so
+        // returning one ₹11 line refunds ₹11 × 0.8636 = ₹9.50, not ₹11.
+        const grossBillTotal = sale.items.reduce((s, it) => s + it.price * it.qty, 0);
+        const roundOffAmt = sale.roundOffAmount || 0; // 0 for sales predating this field
+        const netPayable = Math.max(0, grossBillTotal - (sale.discountAmount || 0)) + roundOffAmt;
+        const netPayableRatio = grossBillTotal > 0 ? netPayable / grossBillTotal : 1;
+
+        const returnGrossTotal = returnLines.reduce((s, l) => s + l.price * l.qty, 0);
+        const returnTotal = Math.round(returnGrossTotal * netPayableRatio * 100) / 100;
         const gstCalc = computeGstFromSnapshot(returnTotal, effectiveGst);
+
+        // Loyalty points reversal — same proportional share of this session's
+        // returned value against the bill's own totals. Each return session
+        // acts on a disjoint slice of the original items (enforced by the
+        // `consumed` check above), so summing every session's share always
+        // adds up to the full bill's points if every item is eventually returned.
+        const valueRatio = netPayable > 0 ? returnTotal / netPayable : 0;
+        const pointsClawedBack = Math.min(sale.creditPointsEarned || 0, Math.floor((sale.creditPointsEarned || 0) * valueRatio));
+        const pointsRestored = Math.min(sale.creditPointsRedeemed || 0, Math.round((sale.creditPointsRedeemed || 0) * valueRatio));
 
         const creditNoteNumber = await generateInvoiceNumber('CN');
         creditNote = new CreditNote({
@@ -139,10 +179,24 @@ exports.processReturnSession = async (req, res) => {
           sgstAmount: gstCalc ? gstCalc.sgst : 0,
           igstAmount: 0,
           creditNoteTotal: returnTotal,
+          netPayableRatio,
+          pointsClawedBack,
+          pointsRestored,
           reason: returnLines.map((l) => l.reason).filter(Boolean).join('; '),
           note: note || '',
           processedBy: req.user._id,
         });
+
+        // Apply the points reversal to the customer's balance now (independent
+        // of the settlement method chosen below — points move regardless of
+        // whether the refund itself is cash, card, or store credit).
+        if (sale.customerId && (pointsClawedBack > 0 || pointsRestored > 0)) {
+          const custDoc = await Customer.findById(sale.customerId).session(mongoSession);
+          if (custDoc) {
+            custDoc.creditPoints = Math.max(0, custDoc.creditPoints + pointsRestored - pointsClawedBack);
+            await custDoc.save({ session: mongoSession });
+          }
+        }
 
         for (const line of returnLines) {
           const product = await Product.findById(line.productId).session(mongoSession);
@@ -244,7 +298,7 @@ exports.processReturnSession = async (req, res) => {
         settlement: settlementDoc ? settlementDoc.toObject() : null,
         originalSale: sale.toObject(),
       };
-    });
+    }
 
     req.io?.emit('return-session:created', {
       originalTransactionId: result.originalSale.transactionId,

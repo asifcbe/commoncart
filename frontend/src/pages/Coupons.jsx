@@ -10,6 +10,7 @@ import { Card, CardContent } from '../components/ui/Card';
 import { useToast } from '../components/ui/Toast';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { formatDate } from '../utils/date';
 
 const EMPTY_FORM = {
   code: '', description: '', type: 'PERCENTAGE', value: '',
@@ -236,7 +237,7 @@ export default function Coupons() {
                     <td className="px-4 py-3 text-xs">
                       {c.expiresAt ? (
                         <span className={isExpired(c) ? 'text-red-600 font-medium' : 'text-gray-600'}>
-                          {new Date(c.expiresAt).toLocaleDateString()}
+                          {formatDate(c.expiresAt)}
                           {isExpired(c) && ' (expired)'}
                         </span>
                       ) : <span className="text-gray-400">Never</span>}

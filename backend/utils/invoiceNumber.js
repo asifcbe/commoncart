@@ -65,4 +65,28 @@ async function generateInvoiceNumber(prefix = 'INV', date = new Date()) {
   return `${yy}${mm}${pad(seq)}`;
 }
 
-module.exports = { generateInvoiceNumber };
+// Generate a document number and hand it to `createFn`, retrying with a
+// fresh number if the underlying Counter has drifted behind what's actually
+// in the collection (e.g. from data created outside the counter, or a prior
+// partial migration) and `createFn` hits a duplicate-key error (Mongo code
+// 11000) on that number's unique field. Counter.next() is itself atomic, so
+// this only ever fires on genuine drift, not concurrent requests racing —
+// but when it does fire, this makes the caller self-heal instead of
+// surfacing a 500 to the user.
+async function withUniqueDocNumber(prefix, createFn, { date, maxAttempts = 3 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const number = await generateInvoiceNumber(prefix, date);
+    try {
+      return await createFn(number);
+    } catch (err) {
+      if (err?.code !== 11000) throw err;
+      lastErr = err;
+      // Leave the counter as-is (it's already past this number) and just
+      // draw the next one on retry.
+    }
+  }
+  throw lastErr;
+}
+
+module.exports = { generateInvoiceNumber, withUniqueDocNumber };

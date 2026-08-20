@@ -3,6 +3,7 @@
 // only fetched when the user actually exports something.
 
 import { buildBillBodyHTML, resolveBillPaper, computeGst, invoiceLayout, buildCreditNoteHTML, buildReplacementNoteHTML, carriedSettlementOf } from './bill';
+import { formatDateTime } from './date';
 
 // Credit Notes / Replacement Notes are always full-page documents — fixed A4
 // content width, independent of the shop's thermal-receipt billConfig.
@@ -78,7 +79,7 @@ function saleSheetRows(sale, business) {
   rows.push([b.businessName]);
   if (b.addressLine) rows.push([b.addressLine]);
   if (b.gstin) rows.push([`GSTIN: ${b.gstin}`]);
-  rows.push([`Bill No: ${sale.transactionId}`, '', `Date: ${new Date(sale.createdAt).toLocaleString()}`]);
+  rows.push([`Bill No: ${sale.transactionId}`, '', `Date: ${formatDateTime(sale.createdAt)}`]);
   rows.push([]);
   rows.push(['#', 'Item', 'Qty', 'Unit Price', 'Amount']);
   sale.items.forEach((it, i) => rows.push([i + 1, it.name + (it.isDiscounted ? ' (Discounted)' : ''), it.qty, it.price, it.price * it.qty]));
@@ -120,7 +121,7 @@ export function buildPurchaseBodyHTML(purchase, business, kind = 'roll') {
     business: b,
     meta: [
       ['Purchase ID', purchase.purchaseId],
-      ['Date', new Date(purchase.purchaseDate || purchase.createdAt).toLocaleString()],
+      ['Date', formatDateTime(purchase.purchaseDate || purchase.createdAt)],
       ['Supplier', supplier],
     ],
     columns: ['#', 'Item', 'Variant', 'Size', 'Qty', 'Cost', 'Amount'],
@@ -152,7 +153,7 @@ export function buildPurchaseBodyHTML(purchase, business, kind = 'roll') {
 <div style="text-align:center;border-bottom:1px dashed #ccc;padding-bottom:8px;margin-bottom:8px;">
   ${header}<br/>
   <span style="font-size:12px;font-weight:600;">PURCHASE BILL</span><br/>
-  <span style="font-size:11px;">${new Date(purchase.purchaseDate || purchase.createdAt).toLocaleString()}</span><br/>
+  <span style="font-size:11px;">${formatDateTime(purchase.purchaseDate || purchase.createdAt)}</span><br/>
   <span style="font-size:10px;">Purchase ID: ${purchase.purchaseId}</span><br/>
   <span style="font-size:10px;">Supplier: ${supplier}</span>
 </div>
@@ -205,7 +206,7 @@ function purchaseSheetRows(purchase, business) {
   const rows = [];
   rows.push([b.businessName]);
   rows.push(['PURCHASE BILL']);
-  rows.push([`Purchase ID: ${purchase.purchaseId}`, '', `Date: ${new Date(purchase.purchaseDate || purchase.createdAt).toLocaleString()}`]);
+  rows.push([`Purchase ID: ${purchase.purchaseId}`, '', `Date: ${formatDateTime(purchase.purchaseDate || purchase.createdAt)}`]);
   rows.push([`Supplier: ${purchase.supplier || (purchase.supplierId && purchase.supplierId.name) || '—'}`]);
   rows.push([]);
   rows.push(['#', 'Item', 'Variant', 'Size', 'Qty', 'Cost/Unit', 'Amount']);
@@ -249,12 +250,17 @@ function creditNoteSheetRows(creditNote, business) {
   const rows = [];
   rows.push([b.businessName]);
   rows.push(['CREDIT NOTE']);
-  rows.push([`Credit Note No: ${creditNote.creditNoteNumber}`, '', `Date: ${new Date(creditNote.createdAt).toLocaleString()}`]);
+  rows.push([`Credit Note No: ${creditNote.creditNoteNumber}`, '', `Date: ${formatDateTime(creditNote.createdAt)}`]);
   rows.push([`Against Invoice: ${creditNote.originalTransactionId}`]);
   rows.push([]);
   rows.push(['#', 'Item', 'Qty', 'Rate', 'Amount', 'Type']);
   creditNote.items.forEach((it, i) => rows.push([i + 1, it.name, it.qty, it.price, it.price * it.qty, it.lineType === 'EXCHANGE_OUT' ? 'Exchanged' : 'Returned']));
   rows.push([]);
+  const itemTotal = creditNote.items.reduce((s, it) => s + it.price * it.qty, 0);
+  rows.push(['', '', '', '', 'Item Total', itemTotal]);
+  if (creditNote.netPayableRatio != null && creditNote.netPayableRatio !== 1) {
+    rows.push(['', '', '', '', 'Bill Discount / Round-off Share', creditNote.creditNoteTotal - itemTotal]);
+  }
   if (creditNote.gst?.enabled) {
     rows.push(['', '', '', '', 'Taxable Value', creditNote.taxableValue]);
     rows.push(['', '', '', '', `CGST @ ${creditNote.gst.cgstPercent}%`, creditNote.cgstAmount]);
@@ -294,7 +300,7 @@ export async function exportReplacementNoteExcel(note, business) {
   const b = { businessName: 'CommonCart Store', ...(business || {}) };
   const rows = [
     [b.businessName], ['REPLACEMENT NOTE'],
-    [`Replacement No: ${note.replacementNumber}`, '', `Date: ${new Date(note.createdAt).toLocaleString()}`],
+    [`Replacement No: ${note.replacementNumber}`, '', `Date: ${formatDateTime(note.createdAt)}`],
     [`Against Invoice: ${note.originalTransactionId}`], [],
     ['#', 'Item', 'Qty'],
     ...note.items.map((it, i) => [i + 1, it.name, it.qty]),

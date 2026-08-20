@@ -1,4 +1,4 @@
-const { generateInvoiceNumber } = require('../utils/invoiceNumber');
+const { withUniqueDocNumber } = require('../utils/invoiceNumber');
 const { getGstSnapshot } = require('../utils/gstSnapshot');
 const { getConsumedQtyByProduct } = require('./returnSessionController');
 const SaleTransaction = require('../models/SaleTransaction');
@@ -7,6 +7,7 @@ const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
 const Customer = require('../models/Customer');
 const AppSettings = require('../models/AppSettings');
+const Settlement = require('../models/Settlement');
 const { validateAndGetCoupon } = require('./couponController');
 
 const DEFAULT_CREDIT = { rupeesPerPoint: 1000, pointValue: 1 };
@@ -73,12 +74,18 @@ exports.processStoreSale = async (req, res) => {
       }
     }
 
-    // Redeem credit points already on the customer's balance (from past visits)
+    // Redeem credit points already on the customer's balance (from past visits).
+    // Tracked separately from `pointsRedeemed` (the bill-level total used for
+    // display/reversal) because only *this* portion actually needs deducting
+    // from customer.creditPoints below — earned-and-redeemed-now points never
+    // touched the balance, so they must not be subtracted from it too.
+    let pointsRedeemedFromBalance = 0;
     if (customer && redeemPoints && Number(redeemPoints) > 0) {
       const pointsToRedeem = Math.min(Number(redeemPoints), customer.creditPoints);
       const pointDiscount = pointsToRedeem * creditConfig.pointValue;
       discountAmount += pointDiscount;
       pointsRedeemed = pointsToRedeem;
+      pointsRedeemedFromBalance = pointsToRedeem;
     }
 
     // Manual discount (flat ₹ amount already computed on the frontend)
@@ -131,7 +138,6 @@ exports.processStoreSale = async (req, res) => {
       }
     }
 
-    const transactionId = await generateInvoiceNumber('INV');
     const gst = await getGstSnapshot();
 
     // Attribute the sale to a chosen staff member if provided (defaults to the logged-in user)
@@ -142,7 +148,10 @@ exports.processStoreSale = async (req, res) => {
       if (staff) soldByUser = staff._id;
     }
 
-    const transaction = await SaleTransaction.create({
+    // withUniqueDocNumber retries with a fresh transactionId if the INV
+    // counter has drifted behind an existing document (self-heals instead of
+    // failing checkout on a stale counter).
+    const transaction = await withUniqueDocNumber('INV', (transactionId) => SaleTransaction.create({
       transactionId,
       channel: 'STORE',
       items: resolvedItems,
@@ -156,14 +165,16 @@ exports.processStoreSale = async (req, res) => {
       customerName: customer?.name || (customerName || '').trim(),
       couponCode: appliedCouponCode,
       discountAmount,
+      roundOffAmount: roundOffAdj,
       creditPointsEarned: pointsEarned,
       creditPointsRedeemed: pointsRedeemed,
       note: note || '',
       gst,
       carriedSettlement: carriedAmount
-        ? { amount: carriedAmount, sourceLabel: carryForward?.sourceLabel || '' }
+        ? { amount: carriedAmount, sourceLabel: carryForward?.sourceLabel || '', settlementId: carryForward?.settlementId || null }
         : undefined,
-    });
+    }));
+    const transactionId = transaction.transactionId;
 
     for (const item of resolvedItems) {
       const product = await Product.findById(item.productId);
@@ -186,12 +197,16 @@ exports.processStoreSale = async (req, res) => {
       req.io.emit('stock:updated', { productId: item.productId.toString(), quantity: product.quantity, reservedQty: product.reservedQty });
     }
 
-    // Apply loyalty points changes. `pointsRedeemed` includes any earned-and-
-    // redeemed-now points (already spent, so they must not also land in the
-    // balance) — only the portion of pointsEarned NOT redeemed now is banked.
+    // Apply loyalty points changes to the balance:
+    //  - subtract only points actually redeemed FROM the balance (not
+    //    earned-and-redeemed-now points — those were never in the balance,
+    //    so they must never be subtracted from it; that was the bug where a
+    //    100-point customer using "Redeem Now" saw their balance drop by the
+    //    bill's own just-earned points instead of staying untouched)
+    //  - add only points earned that WEREN'T redeemed now (banked for later)
     if (customer) {
       const pointsToBank = pointsEarned - pointsEarnedRedeemedNow;
-      customer.creditPoints = Math.max(0, customer.creditPoints - pointsRedeemed) + pointsToBank;
+      customer.creditPoints = Math.max(0, customer.creditPoints - pointsRedeemedFromBalance) + pointsToBank;
       await customer.save();
     }
     if (appliedCoupon) {
@@ -206,6 +221,12 @@ exports.processStoreSale = async (req, res) => {
       transaction,
       pointsEarned,
       pointsRedeemed,
+      // Rupee value of `pointsRedeemed` (points aren't always worth ₹1 each —
+      // see CREDIT_CONFIG.pointValue). Lets receipts show a "Points Redeemed"
+      // line in rupees without assuming a 1:1 conversion, and lets them show
+      // a "Discount" line that excludes this amount instead of double-listing
+      // it (discountAmount already has the points' rupee value folded in).
+      pointsRedeemedValue: pointsRedeemed * creditConfig.pointValue,
       pointsEarnedRedeemedNow,
       discountAmount,
       customer: customer
@@ -223,7 +244,7 @@ exports.processStoreSale = async (req, res) => {
  */
 exports.listSales = async (req, res) => {
   try {
-    const { channel, startDate, endDate, soldBy, page = 1, limit = 20 } = req.query;
+    const { channel, startDate, endDate, soldBy, search, page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const dateFilter = {};
@@ -237,12 +258,29 @@ exports.listSales = async (req, res) => {
       }
     }
 
+    // Search by customer phone or name — case-insensitive partial match.
+    const searchTerm = (search || '').trim();
+    let matchingCustomerIds = null;
+    if (searchTerm) {
+      matchingCustomerIds = await Customer.find(
+        { $or: [{ phone: { $regex: searchTerm, $options: 'i' } }, { name: { $regex: searchTerm, $options: 'i' } }] },
+        '_id'
+      ).lean().then((rows) => rows.map((r) => r._id));
+    }
+
     let combined = [];
 
     // STORE transactions
     if (!channel || channel === 'STORE') {
       const storeQuery = { ...dateFilter };
       if (soldBy) storeQuery.soldBy = soldBy;
+      if (searchTerm) {
+        storeQuery.$or = [
+          { customerPhone: { $regex: searchTerm, $options: 'i' } },
+          { customerName: { $regex: searchTerm, $options: 'i' } },
+          { customerId: { $in: matchingCustomerIds } },
+        ];
+      }
       const storeSales = await SaleTransaction.find(storeQuery)
         .sort('-createdAt')
         .populate('soldBy', 'name email')
@@ -270,9 +308,11 @@ exports.listSales = async (req, res) => {
 
     // WEB orders
     if (!channel || channel === 'WEB') {
-      const webOrders = await Order.find({ ...dateFilter })
+      const webQuery = { ...dateFilter };
+      if (searchTerm) webQuery.customerId = { $in: matchingCustomerIds };
+      const webOrders = await Order.find(webQuery)
         .sort('-createdAt')
-        .populate('customerId', 'name email')
+        .populate('customerId', 'name email phone')
         .lean();
 
       combined.push(
@@ -327,6 +367,26 @@ exports.findByNumber = async (req, res) => {
     if (order) return res.json({ _id: order._id, channel: 'WEB' });
 
     return res.status(404).json({ message: `No bill found for "${raw}"` });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// Look up the sale/order that sold a given product barcode (used by the
+// scanner in Sales History to jump straight from a scanned item to its bill).
+// Most recent match wins if the barcode was ever reused.
+exports.findByItemBarcode = async (req, res) => {
+  try {
+    const raw = (req.params.barcode || '').trim();
+    if (!raw) return res.status(400).json({ message: 'Barcode is required' });
+
+    const txn = await SaleTransaction.findOne({ 'items.barcode': raw }).sort('-createdAt').select('_id');
+    if (txn) return res.json({ _id: txn._id, channel: 'STORE' });
+
+    const order = await Order.findOne({ 'items.barcode': raw }).sort('-createdAt').select('_id');
+    if (order) return res.json({ _id: order._id, channel: 'WEB' });
+
+    return res.status(404).json({ message: `No bill found for item barcode "${raw}"` });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -436,6 +496,7 @@ exports.getDashboardStats = async (_req, res) => {
       todayWebOrders,
       recentStoreSales,
       recentWebOrders,
+      todayRefunds,
     ] = await Promise.all([
       Product.countDocuments({ isActive: true }),
 
@@ -464,7 +525,28 @@ exports.getDashboardStats = async (_req, res) => {
         .limit(5)
         .populate('customerId', 'name')
         .lean(),
+
+      // Cash/card/mobile/other refunds paid out today (see getDayBook for the
+      // full explanation) — subtracted below so "today's revenue" reflects
+      // what's actually still in the till, not the gross pre-refund total.
+      // STORE_CREDIT settlements never moved real money, so they're excluded.
+      Settlement.find({ createdAt: { $gte: today }, direction: 'REFUND_TO_CUSTOMER', method: { $ne: 'STORE_CREDIT' } })
+        .select('netAmount')
+        .lean(),
     ]);
+
+    // Same double-count guard as the Day Book: a refund already netted into
+    // a later carry-forward sale (created today) is already reflected in
+    // that sale's own totalAmount, so don't subtract it a second time here.
+    const todaysCarriedSettlementIds = new Set(
+      (await SaleTransaction.find({ createdAt: { $gte: today }, 'carriedSettlement.settlementId': { $ne: null } })
+        .select('carriedSettlement.settlementId')
+        .lean())
+        .map((s) => String(s.carriedSettlement.settlementId))
+    );
+    const todayRefundTotal = todayRefunds
+      .filter((r) => !todaysCarriedSettlementIds.has(String(r._id)))
+      .reduce((sum, r) => sum + Math.abs(r.netAmount), 0);
 
     // Merge recent transactions
     const recentSales = [
@@ -497,7 +579,10 @@ exports.getDashboardStats = async (_req, res) => {
     const outOfStock = allProducts.filter((p) => p.quantity - p.reservedQty <= 0).length;
 
     const storeCount   = todayStoreSales[0]?.count   || 0;
-    const storeRevenue = todayStoreSales[0]?.revenue  || 0;
+    // Net of today's cash/card/mobile/other refunds — see todayRefundTotal
+    // above. A gross-only figure here would overstate what's actually still
+    // in the till whenever a return/exchange refund happened today.
+    const storeRevenue = (todayStoreSales[0]?.revenue || 0) - todayRefundTotal;
     const webCount     = todayWebOrders[0]?.count     || 0;
     const webRevenue   = todayWebOrders[0]?.revenue   || 0;
 
@@ -507,6 +592,7 @@ exports.getDashboardStats = async (_req, res) => {
       todayRevenue:      storeRevenue + webRevenue,
       todayStoreSales:   { count: storeCount, revenue: storeRevenue },
       todayWebOrders:    { count: webCount, revenue: webRevenue },
+      todayRefundTotal,
       lowStockCount: lowStock,
       recentSales,
       stockHealth: { inStock, lowStock, outOfStock },

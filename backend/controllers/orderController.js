@@ -1,4 +1,4 @@
-const { generateInvoiceNumber } = require('../utils/invoiceNumber');
+const { withUniqueDocNumber } = require('../utils/invoiceNumber');
 const Order = require('../models/Order');
 const Product = require('../models/Product');
 const StockMovement = require('../models/StockMovement');
@@ -125,7 +125,6 @@ exports.placeOrder = async (req, res) => {
     // Reserve stock (throws on insufficient stock)
     await reserveStock(resolvedItems, req.io);
 
-    const orderId = await generateInvoiceNumber('ORD');
     const totalAmount = discountedSubtotal + Number(shippingCost);
 
     // Deduct redeemed points immediately on placement
@@ -137,7 +136,10 @@ exports.placeOrder = async (req, res) => {
       await Coupon.findByIdAndUpdate(appliedCoupon._id, { $inc: { usedCount: 1 } });
     }
 
-    const order = await Order.create({
+    // withUniqueDocNumber retries with a fresh orderId if the ORD counter has
+    // drifted behind an existing document (self-heals instead of failing the
+    // order after stock was already reserved above).
+    const order = await withUniqueDocNumber('ORD', (orderId) => Order.create({
       orderId,
       customerId: req.customer._id,
       items: resolvedItems,
@@ -152,7 +154,7 @@ exports.placeOrder = async (req, res) => {
       creditPointsRedeemed: pointsRedeemed,
       stockReserved: true,
       stockDeducted: false,
-    });
+    }));
 
     req.io.emit('order:new', {
       orderId: order.orderId,

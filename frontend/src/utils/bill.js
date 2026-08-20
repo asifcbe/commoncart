@@ -2,6 +2,7 @@
 // Centralises business header + GST breakup so every bill is consistent.
 
 import JsBarcode from 'jsbarcode';
+import { formatDateTime } from './date';
 
 // Render a CODE128 barcode for the bill number into a PNG data-URI.
 // The bill number itself is the barcode value, so scanning it returns the number.
@@ -93,7 +94,12 @@ export function carriedSettlementOf(sale) {
 // `extra` may carry { pointsEarned, pointsRedeemed, pointsEarnedRedeemedNow, balancePoints, customer }
 export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   const b = { ...DEFAULT_BUSINESS, ...(business || {}) };
+  // sale.discountAmount bundles coupon + manual discount + points redeemed
+  // (both from-balance and redeemed-now) into one figure — split the points
+  // portion back out so the "Discount" and "Points Redeemed" lines below
+  // don't both list the same rupees (they used to double-count).
   const discount = sale.discountAmount || 0;
+  const nonPointsDiscount = Math.max(0, discount - (Number(extra.pointsRedeemedValue ?? extra.pointsRedeemed) || 0));
   const gst = computeGst(sale.totalAmount, b);
   const hasDiscounted = sale.items.some((i) => i.isDiscounted);
   const grand = gst ? gst.grandTotal : sale.totalAmount;
@@ -101,6 +107,10 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   const netPayable = grand + (carried?.amount || 0);
   const pointsEarned = Number(extra.pointsEarned) || 0;
   const pointsRedeemed = Number(extra.pointsRedeemed) || 0;
+  // Rupee value of pointsRedeemed — NOT the same number as the point count
+  // whenever CREDIT_CONFIG.pointValue isn't 1. Falls back to the point count
+  // for older callers that don't pass this yet.
+  const pointsRedeemedValue = extra.pointsRedeemedValue != null ? Number(extra.pointsRedeemedValue) : pointsRedeemed;
   const pointsEarnedRedeemedNow = Number(extra.pointsEarnedRedeemedNow) || 0;
   const balancePoints = extra.balancePoints != null ? Number(extra.balancePoints) : null;
   const customerName = extra.customer?.name || sale.customer?.name || null;
@@ -123,7 +133,7 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
     barcodeImg,
     meta: [
       ['Bill No', sale.transactionId],
-      ['Date', new Date(sale.createdAt).toLocaleString()],
+      ['Date', formatDateTime(sale.createdAt)],
       ['Payment', paymentLabel],
       ...(customerName ? [['Customer', customerPhone ? `${customerName} (${customerPhone})` : customerName]] : []),
     ],
@@ -138,8 +148,8 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
     ]),
     totals: [
       ...(discount > 0 ? [['Bill Value', `₹${billValue.toFixed(2)}`, true]] : []),
-      ...(discount > 0 ? [['Discount', `-₹${discount.toFixed(2)}`, false]] : []),
-      ...(pointsRedeemed > 0 ? [[`Points Redeemed (${pointsRedeemed} pts)`, `-₹${pointsRedeemed.toFixed(2)}`, false]] : []),
+      ...(nonPointsDiscount > 0 ? [['Discount', `-₹${nonPointsDiscount.toFixed(2)}`, false]] : []),
+      ...(pointsRedeemed > 0 ? [[`Points Redeemed (${pointsRedeemed} pts)`, `-₹${pointsRedeemedValue.toFixed(2)}`, false]] : []),
       ...(gst ? [
         ['Taxable Value', `₹${gst.net.toFixed(2)}`, false],
         [`CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}`, `₹${gst.cgst.toFixed(2)}`, false],
@@ -179,7 +189,7 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
     : '';
   const pointsHTML = (pointsRedeemed > 0 || pointsEarned > 0 || balancePoints !== null)
     ? `<div style="border-top:1px dashed #ccc;margin-top:6px;padding-top:6px;">
-        ${pointsRedeemed > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#b45309;"><span>Points Redeemed (${pointsRedeemed} pts)</span><span>-₹${pointsRedeemed.toFixed(2)}</span></div>` : ''}
+        ${pointsRedeemed > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#b45309;"><span>Points Redeemed (${pointsRedeemed} pts)</span><span>-₹${pointsRedeemedValue.toFixed(2)}</span></div>` : ''}
         ${pointsEarnedRedeemedNow > 0
           ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#b45309;"><span>Points Earned &amp; Redeemed This Bill</span><span>+${pointsEarnedRedeemedNow} pts (-₹${pointsEarnedRedeemedNow.toFixed(2)})</span></div>`
           : (pointsEarned > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#1d4ed8;"><span>Points Earned</span><span>+${pointsEarned} pts</span></div>` : '')}
@@ -190,14 +200,14 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   return `
 <div style="text-align:center;border-bottom:1px dashed #ccc;padding-bottom:8px;margin-bottom:8px;">
   ${headerLines}<br/>
-  <span style="font-size:11px;">${new Date(sale.createdAt).toLocaleString()}</span><br/>
+  <span style="font-size:11px;">${formatDateTime(sale.createdAt)}</span><br/>
   <span style="font-size:12px;font-weight:bold;">Bill No: ${sale.transactionId}</span>
   ${customerName ? `<br/><span style="font-size:11px;">Customer: ${customerName}${customerPhone ? ` (${customerPhone})` : ''}</span>` : ''}
 </div>
 ${itemsHTML}
 <div style="border-top:1px dashed #ccc;margin-top:6px;padding-top:6px;">
   ${discount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;"><span>Bill Value</span><span>₹${billValue.toFixed(2)}</span></div>` : ''}
-  ${discount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:green;"><span>Discount</span><span>-₹${discount.toFixed(2)}</span></div>` : ''}
+  ${nonPointsDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:green;"><span>Discount</span><span>-₹${nonPointsDiscount.toFixed(2)}</span></div>` : ''}
   ${gstHTML}
   ${carriedHTML}
   <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:4px;"><span>${carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL'}</span><span>₹${Math.abs(netPayable).toFixed(2)}</span></div>
@@ -276,7 +286,7 @@ export function buildCreditNoteHTML(creditNote, business) {
     business: b,
     meta: [
       ['Credit Note No', creditNote.creditNoteNumber],
-      ['Date', new Date(creditNote.createdAt).toLocaleString()],
+      ['Date', formatDateTime(creditNote.createdAt)],
       ['Against Invoice', creditNote.originalTransactionId],
       ...(creditNote.linkedNewTransactionId ? [['New Invoice', creditNote.linkedNewTransactionId]] : []),
     ],
@@ -287,6 +297,10 @@ export function buildCreditNoteHTML(creditNote, business) {
       it.lineType === 'EXCHANGE_OUT' ? 'Exchanged' : 'Returned',
     ]),
     totals: [
+      ['Item Total', `₹${creditNote.items.reduce((s, it) => s + it.price * it.qty, 0).toFixed(2)}`, false],
+      ...(creditNote.netPayableRatio != null && creditNote.netPayableRatio !== 1 ? [
+        ['Bill Discount / Round-off Share', `${creditNote.netPayableRatio < 1 ? '-' : '+'}₹${Math.abs(creditNote.items.reduce((s, it) => s + it.price * it.qty, 0) - creditNote.creditNoteTotal).toFixed(2)}`, false],
+      ] : []),
       ...(creditNote.gst?.enabled ? [
         ['Taxable Value', `₹${creditNote.taxableValue.toFixed(2)}`, false],
         [`CGST @ ${creditNote.gst.cgstPercent}%`, `₹${creditNote.cgstAmount.toFixed(2)}`, false],
@@ -308,7 +322,7 @@ export function buildReplacementNoteHTML(note, business) {
     business: b,
     meta: [
       ['Replacement No', note.replacementNumber],
-      ['Date', new Date(note.createdAt).toLocaleString()],
+      ['Date', formatDateTime(note.createdAt)],
       ['Against Invoice', note.originalTransactionId],
     ],
     columns: ['#', 'Item', 'Qty'],
@@ -417,14 +431,19 @@ export function shareBillWhatsApp(sale, phone, business, extra = {}) {
   if (b.addressLine) lines.push(b.addressLine);
   if (b.gstin) lines.push(`GSTIN: ${b.gstin}`);
   lines.push(`Bill #${sale.transactionId}`);
-  lines.push(new Date(sale.createdAt).toLocaleString());
+  lines.push(formatDateTime(sale.createdAt));
   lines.push('--------------------------');
   sale.items.forEach((it, i) => {
     lines.push(`${i + 1}. ${it.name} x${it.qty}  -  ₹${(it.price * it.qty).toFixed(2)}`);
   });
   lines.push('--------------------------');
+  // sale.discountAmount bundles coupon + manual discount + points redeemed —
+  // split the points portion out so it isn't listed twice (once here, once
+  // in the "Points Redeemed" line below).
+  const pointsRedeemedValue = extra.pointsRedeemedValue != null ? Number(extra.pointsRedeemedValue) : (Number(extra.pointsRedeemed) || 0);
+  const nonPointsDiscount = Math.max(0, (sale.discountAmount || 0) - pointsRedeemedValue);
   if (sale.discountAmount > 0) lines.push(`*Bill Value: ₹${(sale.totalAmount + sale.discountAmount).toFixed(2)}*`);
-  if (sale.discountAmount > 0) lines.push(`Discount: -₹${sale.discountAmount.toFixed(2)}`);
+  if (nonPointsDiscount > 0) lines.push(`Discount: -₹${nonPointsDiscount.toFixed(2)}`);
   if (gst) {
     lines.push(`Taxable: ₹${gst.net.toFixed(2)}`);
     lines.push(`CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}: ₹${gst.cgst.toFixed(2)}`);
@@ -437,7 +456,7 @@ export function shareBillWhatsApp(sale, phone, business, extra = {}) {
   lines.push(`*${carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL'}: ₹${Math.abs(netPayable).toFixed(2)}*`);
   const splitPayments = sale.splitPayments || [];
   lines.push(`Payment: ${splitPayments.length ? splitPayments.map((p) => `${p.method} ₹${Number(p.amount).toFixed(2)}`).join(' + ') : sale.paymentMethod}`);
-  if (extra.pointsRedeemed > 0) lines.push(`Points Redeemed: ${extra.pointsRedeemed} pts (-₹${Number(extra.pointsRedeemed).toFixed(2)})`);
+  if (extra.pointsRedeemed > 0) lines.push(`Points Redeemed: ${extra.pointsRedeemed} pts (-₹${pointsRedeemedValue.toFixed(2)})`);
   if (extra.pointsEarnedRedeemedNow > 0) lines.push(`Points Earned & Redeemed This Bill: +${extra.pointsEarnedRedeemedNow} pts (-₹${Number(extra.pointsEarnedRedeemedNow).toFixed(2)})`);
   else if (extra.pointsEarned > 0) lines.push(`Points Earned: +${extra.pointsEarned} pts`);
   if (extra.balancePoints != null) lines.push(`Balance Points: ${extra.balancePoints} pts`);

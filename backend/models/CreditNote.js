@@ -45,7 +45,24 @@ const creditNoteSchema = new mongoose.Schema(
     cgstAmount: { type: Number, default: 0 },
     sgstAmount: { type: Number, default: 0 },
     igstAmount: { type: Number, default: 0 },
+    // creditNoteTotal is the actual refund owed — the returned lines' gross
+    // value scaled by the original bill's net-payable ratio (so the
+    // customer's own discount/round-off share on those lines is honoured,
+    // not their full list price). See `netPayableRatio` below.
     creditNoteTotal: { type: Number, required: true },
+    // The original sale's (totalAmount + roundOffAmount already included in
+    // totalAmount... see controller) net-payable ÷ gross-goods ratio used to
+    // compute creditNoteTotal from the returned lines' gross value. Purely
+    // informational/audit — recomputing it later would need the original
+    // sale's numbers anyway.
+    netPayableRatio: { type: Number, default: 1 },
+
+    // Loyalty points reversal for this session's returned lines, proportional
+    // to the value returned. pointsClawedBack = earned points removed from
+    // the customer's balance; pointsRestored = previously-redeemed points
+    // credited back (the discount they funded no longer applies to a kept item).
+    pointsClawedBack: { type: Number, default: 0 },
+    pointsRestored: { type: Number, default: 0 },
 
     // Set when this Credit Note funded (wholly or partly) a new Tax Invoice
     // created during an exchange in the same session.

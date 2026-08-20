@@ -16,6 +16,7 @@ import ManagedSelect from '../components/ManagedSelect';
 import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { formatDateTime } from '../utils/date';
 
 function DeleteConfirmModal({ product, onConfirm, onClose }) {
   const [confirming, setConfirming] = useState(false);
@@ -268,7 +269,7 @@ function StockHistory({ productId, onClose }) {
                   <span className="text-xs text-gray-500">{m.channel}</span>
                 </div>
                 {m.note && <div className="text-xs text-gray-500 mt-1">{m.note}</div>}
-                <div className="text-xs text-gray-400">{new Date(m.createdAt).toLocaleString()}</div>
+                <div className="text-xs text-gray-400">{formatDateTime(m.createdAt)}</div>
               </div>
               <div className="text-right">
                 <div className={`text-sm font-bold ${m.quantityChanged > 0 ? 'text-green-600' : 'text-red-600'}`}>

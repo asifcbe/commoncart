@@ -43,6 +43,12 @@ const saleTransactionSchema = new mongoose.Schema(
     customerName: { type: String, default: '' },
     couponCode: { type: String, default: '' },
     discountAmount: { type: Number, default: 0 },
+    // Signed rupee round-off adjustment folded into totalAmount at checkout
+    // (positive = rounded up, negative = rounded down). Stored separately so
+    // a later return/exchange session can back it out of the goods total
+    // instead of re-deriving it. Absent (undefined) on sales made before this
+    // field existed — treated as 0 by any reader.
+    roundOffAmount: { type: Number, default: 0 },
     creditPointsEarned: { type: Number, default: 0 },
     creditPointsRedeemed: { type: Number, default: 0 },
     note: { type: String, default: '' },
@@ -69,6 +75,12 @@ const saleTransactionSchema = new mongoose.Schema(
     carriedSettlement: {
       amount: { type: Number, default: 0 }, // positive = customer owed money in, negative = shop owes customer
       sourceLabel: { type: String, default: '' }, // e.g. "Credit Note CN-000004"
+      // Links back to the Settlement this amount was netted from, so reports
+      // (Day Book) can tell this Settlement's cash movement was already
+      // absorbed into this sale's own total instead of double-counting it —
+      // or, when a Settlement has no sale pointing back at it, know that
+      // refund was paid out on its own and must be booked independently.
+      settlementId: { type: mongoose.Schema.Types.ObjectId, ref: 'Settlement', default: null },
     },
   },
   { timestamps: true }

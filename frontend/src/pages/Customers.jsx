@@ -10,6 +10,7 @@ import { Card, CardContent } from '../components/ui/Card';
 import { useToast } from '../components/ui/Toast';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { formatDate } from '../utils/date';
 
 function AdjustPointsModal({ customer, onClose, onDone }) {
   const toast = useToast();
@@ -269,7 +270,7 @@ export default function Customers() {
                         </span>
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-400">{new Date(c.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-400">{formatDate(c.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Button

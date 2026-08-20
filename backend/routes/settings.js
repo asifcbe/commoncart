@@ -9,6 +9,7 @@ const {
   getAutoDeleteConfig, updateAutoDeleteConfig, runAutoDeleteNow,
   getLabelPrintConfig, updateLabelPrintConfig,
   getBillPrintConfig, updateBillPrintConfig,
+  getDisplayConfig, updateDisplayConfig,
   getAgingConfig, updateAgingConfig, applyAgingNow, getAgedProducts,
   getClearanceProducts,
   getBarcodeConfig, updateBarcodeConfig, reserveBarcodes,
@@ -48,6 +49,10 @@ router.put('/label-print-config', protect, adminOnly, updateLabelPrintConfig);
 // Bill / receipt print formatting — readable by any logged-in user, writable by admin
 router.get('/bill-print-config', protect, getBillPrintConfig);
 router.put('/bill-print-config', protect, adminOnly, updateBillPrintConfig);
+
+// App-wide date display format — readable by any logged-in user, writable by admin
+router.get('/display-config', protect, getDisplayConfig);
+router.put('/display-config', protect, adminOnly, updateDisplayConfig);
 
 router.get('/aging-config', protect, getAgingConfig);
 router.put('/aging-config', protect, adminOnly, updateAgingConfig);

@@ -10,6 +10,7 @@ import { Card, CardContent } from '../components/ui/Card';
 import { useToast } from '../components/ui/Toast';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { formatDateTime } from '../utils/date';
 
 const FULFILLMENT_STATUSES = ['PENDING', 'PROCESSING', 'SHIPPED', 'DELIVERED', 'CANCELLED'];
 const PAYMENT_STATUSES = ['PENDING', 'PAID', 'REFUNDED'];
@@ -93,7 +94,7 @@ function OrderDetailModal({ orderId, onClose, onUpdated }) {
           {/* Header info */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">Order ID:</span> <span className="font-mono font-medium">{order.orderId}</span></div>
-            <div><span className="text-gray-500">Date:</span> {new Date(order.createdAt).toLocaleString()}</div>
+            <div><span className="text-gray-500">Date:</span> {formatDateTime(order.createdAt)}</div>
             <div>
               <span className="text-gray-500">Customer:</span>{' '}
               <span className="font-medium">{order.customerId?.name || '—'}</span>
@@ -311,7 +312,7 @@ export default function WebOrders() {
                 {orders.map((o) => (
                   <tr key={o._id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">{o.orderId}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(o.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(o.createdAt)}</td>
                     <td className="px-4 py-3">
                       <div className="font-medium text-sm">{o.customerId?.name || '—'}</div>
                       {o.customerId?.email && <div className="text-xs text-gray-400">{o.customerId.email}</div>}

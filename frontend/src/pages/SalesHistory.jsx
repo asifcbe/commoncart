@@ -28,9 +28,10 @@ import {
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import useAuthStore from '../store/useAuthStore';
 import { canManage } from '../config/permissions';
+import { formatDateTime } from '../utils/date';
 
 const FULFILLMENT_VARIANT = { PENDING: 'warning', PROCESSING: 'info', SHIPPED: 'secondary', DELIVERED: 'success', CANCELLED: 'danger' };
-const ACTIONS = ['KEEP', 'RETURN', 'EXCHANGE', 'REPLACE'];
+const ACTIONS = ['KEEP', 'RETURN', 'EXCHANGE'];
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 
 // Phone for sharing a bill (registered customer phone, then captured phone)
@@ -38,8 +39,8 @@ function customerPhoneOf(sale) {
   return sale.customer?.phone || sale.customerPhone || '';
 }
 
-// ─── Per-item action row (Keep / Return / Exchange / Replace) ───
-// Renders the 4-way selector plus whatever inline controls the selected
+// ─── Per-item action row (Keep / Return / Exchange) ───
+// Renders the 3-way selector plus whatever inline controls the selected
 // action needs. All state lives in the parent's `itemActions` map — this
 // component is a pure view over one line's slice of that map.
 function ItemActionRow({ item, remaining, state, onChange, disabled }) {
@@ -48,7 +49,7 @@ function ItemActionRow({ item, remaining, state, onChange, disabled }) {
   const set = (patch) => onChange({ ...state, action, qty, ...patch });
 
   if (disabled) {
-    return <span className="text-xs text-gray-400 italic">No return/exchange/replace</span>;
+    return <span className="text-xs text-gray-400 italic">No return/exchange</span>;
   }
 
   return (
@@ -62,7 +63,6 @@ function ItemActionRow({ item, remaining, state, onChange, disabled }) {
               action === a
                 ? a === 'RETURN' ? 'border-green-400 bg-green-100 text-green-800'
                   : a === 'EXCHANGE' ? 'border-blue-400 bg-blue-100 text-blue-800'
-                  : a === 'REPLACE' ? 'border-amber-400 bg-amber-100 text-amber-800'
                   : 'border-gray-300 bg-gray-100 text-gray-700'
                 : 'border-gray-200 text-gray-500 hover:bg-gray-50'
             }`}>
@@ -74,7 +74,7 @@ function ItemActionRow({ item, remaining, state, onChange, disabled }) {
 
       {action !== 'KEEP' && (
         <div className={`p-2.5 rounded-lg border space-y-2 ${
-          action === 'RETURN' ? 'bg-green-50 border-green-200' : action === 'EXCHANGE' ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'
+          action === 'RETURN' ? 'bg-green-50 border-green-200' : 'bg-blue-50 border-blue-200'
         }`}>
           <div className="flex items-center gap-3 flex-wrap">
             <div>
@@ -90,7 +90,7 @@ function ItemActionRow({ item, remaining, state, onChange, disabled }) {
             <div className="flex-1 min-w-32">
               <p className="text-[11px] text-gray-500 mb-1">Reason</p>
               <Input value={state?.reason || ''} onChange={(e) => set({ reason: e.target.value })}
-                placeholder={action === 'REPLACE' ? 'Manufacturing defect…' : 'Defective, wrong size…'} className="text-xs h-7" />
+                placeholder="Defective, wrong size…" className="text-xs h-7" />
             </div>
           </div>
           {action === 'EXCHANGE' && (
@@ -111,7 +111,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   const [loading, setLoading] = useState(true);
 
   // Edit mode — metadata only (payment method, note, customer). Item/price
-  // edits are never allowed here — use Return / Exchange / Replace instead.
+  // edits are never allowed here — use Return / Exchange instead.
   const [editing, setEditing] = useState(false);
   const [editForm, setEditForm] = useState({ paymentMethod: 'CASH', note: '', customerPhone: '', customerName: '' });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -119,8 +119,8 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   const [billConfig, setBillConfig] = useState(null);
   const [paymentModes, setPaymentModes] = useState([{ key: 'CASH', label: 'Cash' }, { key: 'CARD', label: 'Card' }, { key: 'MOBILE', label: 'Mobile' }, { key: 'OTHER', label: 'Other' }]);
 
-  // Per-line action state for the Return/Exchange/Replace session:
-  // { [productId]: { action: 'KEEP'|'RETURN'|'EXCHANGE'|'REPLACE', qty, reason, newItem } }
+  // Per-line action state for the Return/Exchange session:
+  // { [productId]: { action: 'KEEP'|'RETURN'|'EXCHANGE', qty, reason, newItem } }
   const [itemActions, setItemActions] = useState({});
   const [settlementMethod, setSettlementMethod] = useState('CASH');
   const [sessionNote, setSessionNote] = useState('');
@@ -200,7 +200,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
     } finally { setSavingEdit(false); }
   };
 
-  // ── Return/Exchange/Replace session ──
+  // ── Return/Exchange session ──
   const setItemAction = (productId, patch) => {
     setItemActions((prev) => ({ ...prev, [productId]: { ...prev[productId], ...patch } }));
     setSessionResult(null);
@@ -214,14 +214,22 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   // Client-side preview only — the server recomputes and is authoritative.
   // RETURN and EXCHANGE both fund a Credit Note; EXCHANGE carries that balance
   // forward into a new POS sale instead of building a new invoice here.
+  // Mirrors the server's proportional refund: each returned line gets its
+  // fair share of the bill's own discount + round-off, not full list price.
+  const grossBillTotal = sale?.items.reduce((s, it) => s + it.price * it.qty, 0) || 0;
+  const netPayable = sale ? Math.max(0, grossBillTotal - (sale.discountAmount || 0)) + (sale.roundOffAmount || 0) : 0;
+  const netPayableRatio = grossBillTotal > 0 ? netPayable / grossBillTotal : 1;
   const creditNotePreviewTotal = activeActions
     .filter(([, v]) => v.action === 'RETURN' || v.action === 'EXCHANGE')
     .reduce((s, [pid, v]) => {
       const item = sale?.items.find((it) => (typeof it.productId === 'object' ? it.productId._id : it.productId) === pid);
-      return s + (item ? item.price * v.qty : 0);
+      return s + (item ? item.price * v.qty * netPayableRatio : 0);
     }, 0);
   const hasFinancialLines = activeActions.some(([, v]) => v.action === 'RETURN' || v.action === 'EXCHANGE');
-  const hasReplaceLines = activeActions.some(([, v]) => v.action === 'REPLACE');
+  // Points preview — same proportional share the server will apply.
+  const previewValueRatio = netPayable > 0 ? creditNotePreviewTotal / netPayable : 0;
+  const previewPointsClawedBack = Math.min(sale?.creditPointsEarned || 0, Math.floor((sale?.creditPointsEarned || 0) * previewValueRatio));
+  const previewPointsRestored = Math.min(sale?.creditPointsRedeemed || 0, Math.round((sale?.creditPointsRedeemed || 0) * previewValueRatio));
 
   const handleConfirmSession = async () => {
     const actions = activeActions.map(([productId, v]) => ({
@@ -252,6 +260,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
             carryForward: {
               amount: owedToCustomer ? -Math.abs(s.netAmount) : Math.abs(s.netAmount),
               sourceLabel: `Credit Note ${result.creditNote?.creditNoteNumber || ''}`.trim(),
+              settlementId: s._id,
             },
             customerPhone: sale.customer?.phone || sale.customerPhone || '',
             customerName: sale.customer?.name || sale.customerName || '',
@@ -276,7 +285,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
           {/* Sale meta */}
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">ID:</span> <span className="font-mono font-medium">{sale.transactionId}</span></div>
-            <div><span className="text-gray-500">Date:</span> {new Date(sale.createdAt).toLocaleString()}</div>
+            <div><span className="text-gray-500">Date:</span> {formatDateTime(sale.createdAt)}</div>
             <div><span className="text-gray-500">Channel:</span> <Badge variant={sale.channel === 'STORE' ? 'info' : 'secondary'}>{sale.channel}</Badge></div>
             <div><span className="text-gray-500">Payment:</span> {sale.paymentMethod}</div>
             {isOrder ? (
@@ -327,7 +336,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                   <Input value={editForm.note} onChange={(e) => setEditForm((f) => ({ ...f, note: e.target.value }))} placeholder="Optional" />
                 </div>
               </div>
-              <p className="text-xs text-gray-500">Item, quantity, and price changes must go through Return / Exchange / Replace below — the original invoice's items are never edited directly.</p>
+              <p className="text-xs text-gray-500">Item, quantity, and price changes must go through Return / Exchange below — the original invoice's items are never edited directly.</p>
               <div className="flex justify-end gap-2 pt-1 border-t border-blue-200">
                 <Button variant="outline" size="sm" onClick={() => setEditing(false)}>Cancel</Button>
                 <Button size="sm" onClick={handleSaveEdit} disabled={savingEdit}>
@@ -338,7 +347,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
             </div>
           )}
 
-          {/* Items — per-item Keep/Return/Exchange/Replace (hidden while editing) */}
+          {/* Items — per-item Keep/Return/Exchange (hidden while editing) */}
           {!editing && (
           <>
           <div className="flex gap-1 items-center">
@@ -434,7 +443,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
             </p>
           )}
 
-          {/* Return/Exchange/Replace session summary */}
+          {/* Return/Exchange session summary */}
           {!editing && !isOrder && activeActions.length > 0 && (
             <div className="p-3 bg-gray-50 border rounded-lg space-y-2">
               <p className="text-sm font-semibold text-gray-700">Session Summary</p>
@@ -444,6 +453,12 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                     <span>Shop refunds</span>
                     <span className="text-green-600">₹{creditNotePreviewTotal.toFixed(2)}</span>
                   </div>
+                  {(previewPointsClawedBack > 0 || previewPointsRestored > 0) && (
+                    <div className="text-xs text-gray-500 space-y-0.5">
+                      {previewPointsClawedBack > 0 && <div>Loyalty points removed: <span className="text-red-500 font-medium">-{previewPointsClawedBack}</span></div>}
+                      {previewPointsRestored > 0 && <div>Redeemed points restored: <span className="text-green-600 font-medium">+{previewPointsRestored}</span></div>}
+                    </div>
+                  )}
                   <div className="flex items-center gap-2 pt-1">
                     <label className="text-xs text-gray-500">Settlement method</label>
                     <select value={settlementMethod} onChange={(e) => setSettlementMethod(e.target.value)}
@@ -455,9 +470,6 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                     <p className="text-xs text-blue-700">Confirming will take you to POS to pick the exchanged item(s), carrying this balance forward.</p>
                   )}
                 </>
-              )}
-              {hasReplaceLines && !hasFinancialLines && (
-                <p className="text-xs text-gray-500">Replacement only — no refund, no GST impact, no new invoice.</p>
               )}
               <Input value={sessionNote} onChange={(e) => setSessionNote(e.target.value)} placeholder="Session note (optional)" className="text-sm h-8" />
               <div className="flex justify-end">
@@ -487,6 +499,12 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                   </Button>
                 )}
               </div>
+              {(sessionResult.creditNote?.pointsClawedBack > 0 || sessionResult.creditNote?.pointsRestored > 0) && (
+                <p className="text-xs text-indigo-700">
+                  {sessionResult.creditNote.pointsClawedBack > 0 && <>Removed {sessionResult.creditNote.pointsClawedBack} loyalty point(s). </>}
+                  {sessionResult.creditNote.pointsRestored > 0 && <>Restored {sessionResult.creditNote.pointsRestored} redeemed point(s).</>}
+                </p>
+              )}
             </div>
           )}
 
@@ -605,7 +623,7 @@ function CreditNotesList({ onViewSale, business }) {
                 {creditNotes.map((cn) => (
                   <tr key={cn._id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs">{cn.creditNoteNumber}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(cn.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(cn.createdAt)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-blue-600 cursor-pointer hover:underline"
                       onClick={() => onViewSale && onViewSale(cn.originalTransactionId)}>
                       {cn.originalTransactionId}
@@ -695,7 +713,7 @@ function ReplacementNotesList({ onViewSale, business }) {
                 {notes.map((n) => (
                   <tr key={n._id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs">{n.replacementNumber}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(n.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(n.createdAt)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-blue-600 cursor-pointer hover:underline"
                       onClick={() => onViewSale && onViewSale(n.originalTransactionId)}>
                       {n.originalTransactionId}
@@ -777,7 +795,7 @@ function LegacyReturnsList({ onViewSale }) {
                 {returns.map((r) => (
                   <tr key={r._id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs">{r.returnId}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(r.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(r.createdAt)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-blue-600 cursor-pointer hover:underline"
                       onClick={() => onViewSale && onViewSale(r.originalTransactionId)}>
                       {r.originalTransactionId}
@@ -847,7 +865,7 @@ function LegacyExchangesList({ onViewSale }) {
                 {exchanges.map((ex) => (
                   <tr key={ex._id} className="hover:bg-gray-50">
                     <td className="px-3 py-2 font-mono text-xs">{ex.exchangeId}</td>
-                    <td className="px-3 py-2 text-xs text-gray-500">{new Date(ex.createdAt).toLocaleString()}</td>
+                    <td className="px-3 py-2 text-xs text-gray-500">{formatDateTime(ex.createdAt)}</td>
                     <td className="px-3 py-2 font-mono text-xs text-blue-600 cursor-pointer hover:underline"
                       onClick={() => onViewSale && onViewSale(ex.originalTransactionId)}>
                       {ex.originalTransactionId}
@@ -893,6 +911,7 @@ export default function SalesHistory() {
   const [channel, setChannel] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  const [search, setSearch] = useState('');
   const [detailSaleId, setDetailSaleId] = useState(null);
   const [scanInput, setScanInput] = useState('');
   const [scanning, setScanning] = useState(false);
@@ -903,12 +922,19 @@ export default function SalesHistory() {
 
   const fetchSales = (silent = false) => {
     if (!silent) setLoading(true);
-    api.get('/sales', { params: { channel: channel || undefined, startDate: startDate || undefined, endDate: endDate || undefined, page, limit: 20 } })
+    api.get('/sales', { params: { channel: channel || undefined, startDate: startDate || undefined, endDate: endDate || undefined, search: search || undefined, page, limit: 20 } })
       .then(({ data }) => { setSales(data.sales); setTotal(data.total); setPages(data.pages); })
       .finally(() => { if (!silent) setLoading(false); });
   };
 
-  useEffect(() => { if (tab === 'sales') fetchSales(); }, [channel, startDate, endDate, page, tab]);
+  useEffect(() => { if (tab === 'sales') fetchSales(); }, [channel, startDate, endDate, search, page, tab]);
+
+  // Debounce the phone/name search box, then reset to page 1
+  const [searchInput, setSearchInput] = useState('');
+  useEffect(() => {
+    const t = setTimeout(() => { setSearch(searchInput); setPage(1); }, 350);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   useEffect(() => {
     api.get('/settings/business-config').then(({ data }) => setBusiness(data.config)).catch(() => {});
@@ -916,7 +942,7 @@ export default function SalesHistory() {
   }, []);
 
   // Clear selection whenever the visible list changes (filters/page/tab).
-  useEffect(() => { setSelected(new Set()); }, [channel, startDate, endDate, page, tab]);
+  useEffect(() => { setSelected(new Set()); }, [channel, startDate, endDate, search, page, tab]);
 
   const toggleOne = (id) => setSelected((prev) => {
     const next = new Set(prev);
@@ -949,7 +975,7 @@ export default function SalesHistory() {
   // Auto-refresh the sales list (silent — no spinner flash). Skip while a bill is open.
   useAutoRefresh(() => {
     if (tab === 'sales' && !detailSaleId) fetchSales(true);
-  }, 30000, [tab, page, channel, startDate, endDate, detailSaleId]);
+  }, 30000, [tab, page, channel, startDate, endDate, search, detailSaleId]);
 
   // Live-refresh when a new POS sale is recorded elsewhere (e.g. on the POS screen)
   useEffect(() => {
@@ -957,7 +983,7 @@ export default function SalesHistory() {
     const onSaleCreated = () => { if (tab === 'sales' && page === 1) fetchSales(); };
     socket.on('sale:created', onSaleCreated);
     return () => socket.off('sale:created', onSaleCreated);
-  }, [tab, page, channel, startDate, endDate]);
+  }, [tab, page, channel, startDate, endDate, search]);
 
   // Open a bill's preview by its bill number (used by Returns/Exchanges links and the scanner)
   const openByBillNumber = async (billNumber) => {
@@ -974,12 +1000,28 @@ export default function SalesHistory() {
   };
   const handleViewByTxnId = (txnId) => { openByBillNumber(txnId); };
 
-  // Barcode scan: the bill number is the barcode value → open that bill's preview
+  // Open a bill's preview by an item's product barcode (fallback when the
+  // scanned code isn't a bill number — e.g. scanning a product label instead).
+  const openByItemBarcode = async (barcode) => {
+    const code = (barcode || '').trim();
+    if (!code) return false;
+    try {
+      const { data } = await api.get(`/sales/by-item-barcode/${encodeURIComponent(code)}`);
+      setTab('sales');
+      setDetailSaleId(data._id);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // Barcode scan: try the bill number first, then fall back to a product
+  // barcode so scanning either a printed bill or an item label both work.
   const handleScan = async (raw) => {
     const code = (raw || '').trim();
     if (!code) return;
     setScanning(true);
-    const ok = await openByBillNumber(code);
+    const ok = (await openByBillNumber(code)) || (await openByItemBarcode(code));
     setScanning(false);
     if (ok) setScanInput('');
     else toast({ message: `No bill found for "${code}"`, type: 'error' });
@@ -1010,19 +1052,19 @@ export default function SalesHistory() {
 
       {tab === 'sales' && (
         <>
-          {/* Scan a bill barcode to open it (for quick return / exchange) */}
+          {/* Scan a bill or item barcode to open the bill (for quick return / exchange) */}
           <Card className="border-blue-200 bg-blue-50/40">
             <CardContent className="pt-4">
               <div className="flex items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 text-blue-700 text-sm font-medium shrink-0">
-                  <ScanLine size={18} /> Scan Bill Barcode
+                  <ScanLine size={18} /> Scan Barcode
                 </div>
                 <div className="relative flex-1 min-w-56">
                   <ScanLine size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <Input
                     autoFocus
                     className="pl-9"
-                    placeholder="Scan or type the bill number, then Enter…"
+                    placeholder="Scan or type a bill number or product barcode, then Enter…"
                     value={scanInput}
                     onChange={(e) => setScanInput(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleScan(scanInput); }}
@@ -1033,13 +1075,22 @@ export default function SalesHistory() {
                   Open Bill
                 </Button>
               </div>
-              <p className="text-xs text-gray-500 mt-2">Scanning a printed bill's barcode opens it instantly — ready to return or exchange items.</p>
+              <p className="text-xs text-gray-500 mt-2">Scanning a printed bill's barcode — or any item sold on it — opens the bill instantly, ready to return or exchange items.</p>
             </CardContent>
           </Card>
 
           <Card>
             <CardContent className="pt-4">
               <div className="flex flex-wrap gap-3">
+                <div className="relative w-56">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    className="pl-8"
+                    placeholder="Search customer phone or name…"
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                  />
+                </div>
                 <Select value={channel} onChange={(e) => { setChannel(e.target.value); setPage(1); }} className="w-40">
                   <option value="">All Channels</option>
                   <option value="STORE">Store (POS)</option>
@@ -1050,8 +1101,8 @@ export default function SalesHistory() {
                   <span className="text-gray-400 text-sm">to</span>
                   <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-40" />
                 </div>
-                {(channel || startDate || endDate) && (
-                  <Button variant="ghost" size="sm" onClick={() => { setChannel(''); setStartDate(''); setEndDate(''); setPage(1); }}>Clear filters</Button>
+                {(channel || startDate || endDate || searchInput) && (
+                  <Button variant="ghost" size="sm" onClick={() => { setChannel(''); setStartDate(''); setEndDate(''); setSearchInput(''); setPage(1); }}>Clear filters</Button>
                 )}
                 <Button variant="outline" size="sm" className="ml-auto" onClick={fetchSales} disabled={loading}>
                   <RefreshCw size={13} className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
@@ -1097,7 +1148,7 @@ export default function SalesHistory() {
                           <input type="checkbox" className="rounded" checked={selected.has(s._id)} onChange={() => toggleOne(s._id)} />
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-gray-700">{s.transactionId}</td>
-                        <td className="px-4 py-3 text-xs text-gray-500">{new Date(s.createdAt).toLocaleString()}</td>
+                        <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(s.createdAt)}</td>
                         <td className="px-4 py-3"><Badge variant={s.channel === 'STORE' ? 'info' : 'secondary'}>{s.channel}</Badge></td>
                         <td className="px-4 py-3 text-gray-600">{s.items.length} item(s)</td>
                         <td className="px-4 py-3 text-gray-600">{s.paymentMethod}</td>

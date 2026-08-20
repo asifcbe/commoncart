@@ -19,6 +19,7 @@ import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import useAuthStore from '../store/useAuthStore';
 import { canManage } from '../config/permissions';
+import { formatDateTime } from '../utils/date';
 
 // Live SVG barcode previews are expensive (one JsBarcode render + DOM node each) —
 // cap how many render at once so large purchases (100s of units) don't lock up the page.
@@ -324,6 +325,13 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
 
   const removeVariantRow = (idx) => setVariantRows((prev) => prev.filter((_, i) => i !== idx));
 
+  // Clear all assigned rows — every unit goes back to being an unassigned slot
+  const resetVariantAssignments = () => {
+    if (variantRows.length === 0) return;
+    if (!window.confirm('Clear all assigned variant rows? This removes their reserved barcodes too.')) return;
+    setVariantRows([]);
+  };
+
   const updateDraft = (draftIdx, field, value) => {
     setSlotDrafts((prev) => prev.map((d, i) => i !== draftIdx ? d : { ...d, [field]: value }));
   };
@@ -547,13 +555,18 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
           {totalN > 0 && (
             <Card>
               <CardHeader className="pb-2">
-                <div>
-                  <CardTitle className="text-sm">Step 2 — Assign Variant &amp; Size</CardTitle>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {assignedQty} of {totalN} assigned
-                    {overAssigned && <span className="ml-1 text-red-600 font-semibold">· {assignedQty - totalN} over</span>}
-                    {!overAssigned && assignedQty === totalN && assignedQty > 0 && <span className="ml-1 text-green-600 font-semibold">· All assigned ✓</span>}
-                  </p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-sm">Step 2 — Assign Variant &amp; Size</CardTitle>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {assignedQty} of {totalN} assigned
+                      {overAssigned && <span className="ml-1 text-red-600 font-semibold">· {assignedQty - totalN} over</span>}
+                      {!overAssigned && assignedQty === totalN && assignedQty > 0 && <span className="ml-1 text-green-600 font-semibold">· All assigned ✓</span>}
+                    </p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={resetVariantAssignments} disabled={variantRows.length === 0}>
+                    <RotateCcw size={13} className="mr-1.5" /> Reset
+                  </Button>
                 </div>
               </CardHeader>
               <CardContent className="pt-0">
@@ -1050,7 +1063,7 @@ function PurchaseDetailModal({ purchaseId, onClose }) {
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">Purchase ID:</span> <span className="font-mono font-medium">{purchase.purchaseId}</span></div>
-            <div><span className="text-gray-500">Date:</span> {new Date(purchase.purchaseDate || purchase.createdAt).toLocaleString()}</div>
+            <div><span className="text-gray-500">Date:</span> {formatDateTime(purchase.purchaseDate || purchase.createdAt)}</div>
             <div><span className="text-gray-500">Supplier:</span> {purchase.supplierId?.name || purchase.supplier || '—'}</div>
             <div><span className="text-gray-500">Recorded by:</span> {purchase.purchasedBy?.name || '—'}</div>
             {purchase.note && <div className="col-span-2"><span className="text-gray-500">Note:</span> {purchase.note}</div>}
@@ -1187,7 +1200,7 @@ function PurchaseReturnsList() {
                 {returns.map((r) => (
                   <tr key={r._id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-mono text-xs">{r.returnId}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(r.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(r.createdAt)}</td>
                     <td className="px-4 py-3 font-mono text-xs text-blue-600">{r.originalPurchaseRef}</td>
                     <td className="px-4 py-3 text-gray-600">{r.supplier || '—'}</td>
                     <td className="px-4 py-3 text-gray-600">{r.items.length} item(s)</td>
@@ -1556,7 +1569,7 @@ export default function Purchase() {
                       <input type="checkbox" className="rounded" checked={selected.has(p._id)} onChange={() => toggleOne(p._id)} />
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">{p.purchaseId}</td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(p.purchaseDate || p.createdAt).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(p.purchaseDate || p.createdAt)}</td>
                     <td className="px-4 py-3 text-gray-700">{p.supplierId?.name || p.supplier || <span className="text-gray-400">—</span>}</td>
                     <td className="px-4 py-3 text-gray-600">{p.items.length} item(s)</td>
                     <td className="px-4 py-3 font-semibold text-green-700">₹{p.totalCost.toFixed(2)}</td>

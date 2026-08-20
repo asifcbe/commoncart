@@ -13,6 +13,7 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+import { formatDateTime } from '../utils/date';
 
 function RestockForm({ product, onDone, onClose }) {
   const [qty, setQty] = useState('');
@@ -604,7 +605,7 @@ export default function Inventory() {
                 <tbody className="divide-y">
                   {movements.map((m) => (
                     <tr key={m._id} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 text-xs text-gray-500">{new Date(m.createdAt).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{formatDateTime(m.createdAt)}</td>
                       <td className="px-4 py-3 font-medium">{m.productId?.name || '—'}</td>
                       <td className="px-4 py-3"><Badge variant={typeColors[m.type]}>{m.type}</Badge></td>
                       <td className="px-4 py-3 text-xs text-gray-500">{m.channel}</td>

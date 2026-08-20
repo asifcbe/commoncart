@@ -56,6 +56,12 @@ const DEFAULT_BILL_PRINT = {
   customWidthMm: 80,        // roll width when paperSize === 'custom'
 };
 
+// App-wide date display format — applies everywhere a date is shown (lists,
+// detail views, bill/receipt prints, exports), not just bills.
+const DISPLAY_KEY = 'DISPLAY_CONFIG';
+const VALID_DATE_FORMATS = ['DD/MM/YYYY', 'SYSTEM'];
+const DEFAULT_DISPLAY = { dateFormat: 'DD/MM/YYYY' };
+
 // Barcode counter — sequential barcodes starting from a configured number
 const BARCODE_KEY = 'BARCODE_CONFIG';
 const DEFAULT_BARCODE_CONFIG = { startFrom: 100000 };
@@ -563,6 +569,26 @@ exports.updateBillPrintConfig = async (req, res) => {
       customWidthMm: Math.max(40, Math.min(210, Number(req.body?.customWidthMm) || DEFAULT_BILL_PRINT.customWidthMm)),
     };
     await AppSettings.set(BILL_PRINT_KEY, config);
+    res.json({ config });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.getDisplayConfig = async (_req, res) => {
+  try {
+    const saved = await AppSettings.get(DISPLAY_KEY, {});
+    res.json({ config: { ...DEFAULT_DISPLAY, ...saved } });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+exports.updateDisplayConfig = async (req, res) => {
+  try {
+    const dateFormat = VALID_DATE_FORMATS.includes(req.body?.dateFormat) ? req.body.dateFormat : DEFAULT_DISPLAY.dateFormat;
+    const config = { dateFormat };
+    await AppSettings.set(DISPLAY_KEY, config);
     res.json({ config });
   } catch (err) {
     res.status(500).json({ message: err.message });

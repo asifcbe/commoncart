@@ -5,7 +5,7 @@ const StockMovement = require('../models/StockMovement');
 const SaleTransaction = require('../models/SaleTransaction');
 const Order = require('../models/Order');
 const { generateEAN13 } = require('../utils/generateBarcode');
-const { generateInvoiceNumber } = require('../utils/invoiceNumber');
+const { withUniqueDocNumber } = require('../utils/invoiceNumber');
 const { ensureCategoryEntries, ensureVariantSizeEntries } = require('./settingsController');
 
 // Resolve items: each unit (qty=1 each) gets its own unique barcode and product entry.
@@ -97,7 +97,6 @@ exports.createPurchase = async (req, res) => {
     }
 
     const { resolvedItems, totalCost, createdProducts } = await resolveItems(items, resolvedSupplierName);
-    const purchaseId = await generateInvoiceNumber('PUR');
 
     // New category/sub-category/color/size typed ad hoc on this purchase join
     // the managed catalog so they appear as real options everywhere next time.
@@ -106,7 +105,10 @@ exports.createPurchase = async (req, res) => {
       ensureVariantSizeEntries({ colors: items.map((it) => it.color), sizes: items.map((it) => it.size) }),
     ]);
 
-    const purchase = await Purchase.create({
+    // withUniqueDocNumber retries with a fresh purchaseId if the PUR counter
+    // has drifted behind an existing document (self-heals instead of failing
+    // the purchase after products were already created above).
+    const purchase = await withUniqueDocNumber('PUR', (purchaseId) => Purchase.create({
       purchaseId,
       supplierId: resolvedSupplierId,
       supplier: resolvedSupplierName,
@@ -115,7 +117,8 @@ exports.createPurchase = async (req, res) => {
       totalCost,
       note: note || '',
       purchasedBy: req.user._id,
-    });
+    }));
+    const purchaseId = purchase.purchaseId;
 
     // Each product was already created with quantity:1 (its full restocked amount) —
     // no separate read-modify-write needed. Write all stock movements in one batch.

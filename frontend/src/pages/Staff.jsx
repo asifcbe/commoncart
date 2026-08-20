@@ -13,6 +13,7 @@ import Badge from '../components/ui/Badge';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import PermissionEditor from '../components/PermissionEditor';
 import api from '../utils/api';
+import { formatDate } from '../utils/date';
 
 const DEFAULT_STAFF_PERMS = { sections: ['dashboard', 'pos', 'products', 'sales'], viewCostPrice: false, canManage: false };
 
@@ -132,7 +133,7 @@ function StaffDirectory() {
                 <td className="px-4 py-3"><Badge variant={s.role === 'ADMIN' ? 'default' : 'secondary'}>{s.role}</Badge></td>
                 <td className="px-4 py-3 text-gray-600">{s.phone || <span className="text-gray-300">—</span>}</td>
                 <td className="px-4 py-3 text-gray-700">{s.monthlySalary ? `₹${s.monthlySalary.toLocaleString()}` : <span className="text-gray-300">—</span>}</td>
-                <td className="px-4 py-3 text-gray-500 text-xs">{s.joinDate ? new Date(s.joinDate).toLocaleDateString() : <span className="text-gray-300">—</span>}</td>
+                <td className="px-4 py-3 text-gray-500 text-xs">{s.joinDate ? formatDate(s.joinDate) : <span className="text-gray-300">—</span>}</td>
                 <td className="px-4 py-3">{s.isActive === false ? <Badge variant="danger">Inactive</Badge> : <Badge variant="success">Active</Badge>}</td>
                 <td className="px-4 py-3">
                   <button onClick={() => setEditing(s)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="Edit HR details">
@@ -371,7 +372,7 @@ function SalaryTab() {
               <tbody className="divide-y">
                 {payments.map((p) => (
                   <tr key={p._id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 text-xs text-gray-500">{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td className="px-4 py-3 text-xs text-gray-500">{formatDate(p.createdAt)}</td>
                     <td className="px-4 py-3 font-medium">{p.userId?.name || '—'}</td>
                     <td className="px-4 py-3"><Badge variant={p.type === 'DEDUCTION' ? 'danger' : p.type === 'ADVANCE' ? 'warning' : p.type === 'BONUS' ? 'info' : 'secondary'}>{p.type}</Badge></td>
                     <td className="px-4 py-3 text-gray-600">{p.periodLabel || '—'}</td>
