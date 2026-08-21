@@ -82,7 +82,37 @@ function getPageStyle(sizeConfig, columns) {
   const wMm = parseFloat(sizeConfig.width) || 80;
   const hMm = parseFloat(sizeConfig.height) || 40;
   const totalW = wMm * Math.max(1, Number(columns) || 1);
+  if (sizeConfig.portraitPrint) {
+    // This label feeds narrow-edge-first — the physical page is hMm wide ×
+    // totalW tall (dimensions swapped from the label's own W×H), and the
+    // content (still laid out at its normal totalW × hMm) is rotated 90° to
+    // fit — see getPortraitRotation() below.
+    return `@page { size: ${hMm}mm ${totalW}mm; margin: 0; } body { margin: 0; padding: 0; }`;
+  }
   return `@page { size: ${totalW}mm ${hMm}mm; margin: 0; } body { margin: 0; padding: 0; }`;
+}
+
+// Wraps the printed content so it rotates 90° to fit a portraitPrint page
+// (see getPageStyle) — the content itself keeps its normal totalW × hMm
+// layout, centered in a page-sized (hMm × totalW) box and rotated in place.
+// Returns { pageStyle, contentStyle } — both {} (no-op) for every other
+// label size, so this only ever changes behavior for sizes explicitly
+// flagged portraitPrint.
+function getPortraitRotation(sizeConfig, columns) {
+  if (!sizeConfig.portraitPrint) return { pageStyle: {}, contentStyle: {} };
+  const wMm = parseFloat(sizeConfig.width) || 80;
+  const hMm = parseFloat(sizeConfig.height) || 40;
+  const totalW = wMm * Math.max(1, Number(columns) || 1);
+  return {
+    pageStyle: {
+      width: `${hMm}mm`, height: `${totalW}mm`,
+      position: 'relative', overflow: 'hidden',
+    },
+    contentStyle: {
+      position: 'absolute', top: '50%', left: '50%',
+      transform: 'translate(-50%, -50%) rotate(90deg)',
+    },
+  };
 }
 
 // Loads the label design saved in Settings (fields, zones, styling) plus its
@@ -141,6 +171,7 @@ export function BarcodeDialog({ item, businessName, onClose }) {
   const finalCopies = Math.max(1, Number(copies) || 1);
   const finalColumns = Math.max(1, Number(columns) || 1);
   const printEntries = labelItem ? [{ item: labelItem, copies: finalCopies }] : [];
+  const rotation = getPortraitRotation(sizeConfig, finalColumns);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -233,7 +264,10 @@ export function BarcodeDialog({ item, businessName, onClose }) {
       {/* Off-screen (not display:none — react-to-print needs the source node
           actually laid out/painted, same as DigitZebra's barcode dialogs) */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-        <BulkLabelSheet ref={printRef} entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={finalColumns} mode={printMode} />
+        <div ref={printRef} style={rotation.pageStyle}>
+          <BulkLabelSheet entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={finalColumns} mode={printMode}
+            extraStyle={rotation.contentStyle} />
+        </div>
       </div>
     </Modal>
   );
@@ -274,6 +308,7 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   });
   const totalLabels = entries.reduce((s, e) => s + e.copies, 0);
   const printEntries = entries.filter((e) => e.copies > 0).map((e) => ({ item: e.item, copies: e.copies }));
+  const rotation = getPortraitRotation(sizeConfig, columnsNum);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -369,7 +404,10 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
 
       {/* Off-screen (not display:none — see BarcodeDialog's comment above) */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-        <BulkLabelSheet ref={printRef} entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={columnsNum} mode={printMode} />
+        <div ref={printRef} style={rotation.pageStyle}>
+          <BulkLabelSheet entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={columnsNum} mode={printMode}
+            extraStyle={rotation.contentStyle} />
+        </div>
       </div>
     </Modal>
   );
