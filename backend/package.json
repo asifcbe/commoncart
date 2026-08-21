@@ -1,6 +1,6 @@
 {
   "name": "commoncart-backend",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "description": "MERN Inventory Management System - Backend",
   "main": "server.js",
   "scripts": {
