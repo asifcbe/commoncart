@@ -12,14 +12,14 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import CategoryFields from '../components/CategoryFields';
 import ManagedSelect from '../components/ManagedSelect';
-import LabelPrintModal from '../components/LabelPrintModal';
+import { BulkBarcodeDialog } from '../components/BarcodeLabelPrintDialog';
 import ExportMenu from '../components/ExportMenu';
 import { printPurchaseHTML, exportPurchasePDF, exportPurchaseExcel, exportPurchaseImage } from '../utils/exporters';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import useAuthStore from '../store/useAuthStore';
 import { canManage } from '../config/permissions';
-import { formatDateTime } from '../utils/date';
+import { formatDateTime, toLocalDateTimeInput } from '../utils/date';
 
 // Live SVG barcode previews are expensive (one JsBarcode render + DOM node each) —
 // cap how many render at once so large purchases (100s of units) don't lock up the page.
@@ -195,7 +195,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [note, setNote] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(() => new Date().toISOString().slice(0, 16));
+  const [purchaseDate, setPurchaseDate] = useState(() => toLocalDateTimeInput(new Date()));
 
   // ── NEW: product header
   const [prodName, setProdName] = useState('');
@@ -234,6 +234,10 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   // (quick "print this label" action instead of zeroing out every other row).
   const [printOnlyBarcode, setPrintOnlyBarcode] = useState(null);
   const [showDelete, setShowDelete] = useState(false);
+  const [businessName, setBusinessName] = useState('');
+  useEffect(() => {
+    api.get('/settings/business-config').then(({ data }) => setBusinessName(data.config?.businessName || '')).catch(() => {});
+  }, []);
 
   // Load existing purchase
   useEffect(() => {
@@ -246,7 +250,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
         setSupplierName(p.supplier || '');
         setNote(p.note || '');
         const d = p.purchaseDate ? new Date(p.purchaseDate) : new Date(p.createdAt);
-        setPurchaseDate(d.toISOString().slice(0, 16));
+        setPurchaseDate(toLocalDateTimeInput(d));
         const overrides = {};
         p.items.forEach((item, i) => {
           overrides[i] = {
@@ -944,7 +948,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
       )}
 
       {showPrintModal && (
-        <LabelPrintModal
+        <BulkBarcodeDialog
           items={(isEdit ? editPrintItems : printableVariants)
             .map((it, i) => {
               const code = it._previewBarcode || it.barcode || '';
@@ -953,11 +957,10 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                 name: it.name, barcode: code,
                 price: it.price ?? it.costPrice, discountPrice: it.discountPrice,
                 color: it.color, size: it.size, SKU: it.SKU,
-                _qty: Number(it.qty) || 1,
               };
             })
             .filter((it) => !printOnlyBarcode || it.barcode === printOnlyBarcode)}
-          defaultQty={(it) => it._qty || 1}
+          businessName={businessName}
           onClose={() => { setShowPrintModal(false); setPrintOnlyBarcode(null); }}
         />
       )}

@@ -15,10 +15,26 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import PermissionEditor from '../components/PermissionEditor';
 import { SECTIONS } from '../config/permissions';
-import { LABEL_SIZES, DEFAULT_LABEL_PRINT } from '../utils/labels';
+import { LABEL_SIZES, DEFAULT_BARCODE_LABEL, buildSizeConfig, resolveZoneLayout } from '../utils/barcodeLabel';
+import ZoneLayoutEditor from '../components/ZoneLayoutEditor';
+import { BarcodeLabel } from '../components/BarcodeLabel';
 import api from '../utils/api';
 import { formatDate } from '../utils/date';
 import useDisplayConfigStore from '../store/useDisplayConfigStore';
+
+// Sample product shown in the live preview while editing the label layout —
+// filled-in-enough that every field has something to display.
+const SAMPLE_LABEL_ITEM = {
+  id: 'sample',
+  name: 'Sample Product',
+  itemCode: 'SKU-1001',
+  barcode: '8901234567890',
+  category: 'Apparel',
+  size: 'M',
+  variant: 'Blue',
+  mrp: 999,
+  salePrice: 799,
+};
 
 const DEFAULT_STAFF_PERMS = { sections: ['dashboard', 'pos', 'products', 'sales'], viewCostPrice: false };
 
@@ -304,8 +320,16 @@ export default function Settings() {
   const [savingAutoDelete, setSavingAutoDelete] = useState(false);
   const [runningAutoDelete, setRunningAutoDelete] = useState(false);
 
-  const [labelPrint, setLabelPrint] = useState(DEFAULT_LABEL_PRINT);
+  const [labelPrint, setLabelPrint] = useState({ ...DEFAULT_BARCODE_LABEL, zones: resolveZoneLayout(DEFAULT_BARCODE_LABEL) });
   const [savingLabelPrint, setSavingLabelPrint] = useState(false);
+  // ZoneLayoutEditor expects a standalone `zones` value/setter — both are
+  // thin wrappers over the one `labelPrint` state so the whole card (fields,
+  // zones, styling, size/copies) saves together via one Save Defaults click.
+  const labelPrintZones = labelPrint.zones || resolveZoneLayout(labelPrint);
+  const setLabelPrintZones = (updater) => setLabelPrint((prev) => ({
+    ...prev,
+    zones: typeof updater === 'function' ? updater(prev.zones || resolveZoneLayout(prev)) : updater,
+  }));
 
   const [billPrint, setBillPrint] = useState({ paperSize: '80mm', customWidthMm: 80 });
   const [savingBillPrint, setSavingBillPrint] = useState(false);
@@ -358,7 +382,10 @@ export default function Settings() {
     api.get('/settings/business-config').then(({ data }) => setBusiness(data.config)).catch(() => {});
     api.get('/settings/category-config').then(({ data }) => setCategories(data.config?.categories || [])).catch(() => {});
     api.get('/settings/auto-delete-config').then(({ data }) => setAutoDelete(data.config)).catch(() => {});
-    api.get('/settings/label-print-config').then(({ data }) => setLabelPrint({ ...DEFAULT_LABEL_PRINT, ...data.config, content: { ...DEFAULT_LABEL_PRINT.content, ...(data.config?.content || {}) } })).catch(() => {});
+    api.get('/settings/label-print-config').then(({ data }) => {
+      const c = { ...DEFAULT_BARCODE_LABEL, ...data.config };
+      setLabelPrint({ ...c, zones: resolveZoneLayout(c) });
+    }).catch(() => {});
     api.get('/settings/bill-print-config').then(({ data }) => setBillPrint(data.config)).catch(() => {});
     api.get('/settings/display-config').then(({ data }) => setDisplayConfig(data.config)).catch(() => {});
     api.get('/settings/variant-config').then(({ data }) => { setVariants(data.config?.variants || []); setSizes(data.config?.sizes || []); }).catch(() => {});
@@ -415,7 +442,8 @@ export default function Settings() {
     setSavingLabelPrint(true);
     try {
       const { data } = await api.put('/settings/label-print-config', labelPrint);
-      setLabelPrint({ ...DEFAULT_LABEL_PRINT, ...data.config, content: { ...DEFAULT_LABEL_PRINT.content, ...(data.config?.content || {}) } });
+      const c = { ...DEFAULT_BARCODE_LABEL, ...data.config };
+      setLabelPrint({ ...c, zones: resolveZoneLayout(c) });
       toast({ message: 'Label printing defaults saved', type: 'success' });
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to save', type: 'error' });
@@ -1180,7 +1208,7 @@ export default function Settings() {
       )}
 
       {tab === 'labels' && (
-        <div className="max-w-2xl">
+        <div className="max-w-5xl">
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
@@ -1189,93 +1217,83 @@ export default function Settings() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-gray-500 mb-4">
-                These defaults are applied whenever a barcode-label print dialog opens (Barcode Management, Purchase entry).
-                They can still be changed per print job. Works with roll/label printers (Zebra, DYMO, TSC, Brother) and standard A4 sheet printers.
+                This is the only place the label's design is set — drag fields (and the barcode/QR itself) into place, then
+                Save. Products and Purchase entry only preview and print this design; they can't change it, so the label
+                stays consistent everywhere. Works with roll/label printers (Zebra, DYMO, TSC, Brother) and standard A4 sheet printers.
               </p>
 
-              <div className="space-y-5">
-                {/* Default size */}
+              <div className="grid grid-cols-1 lg:grid-cols-[1fr_20rem] gap-6">
+                {/* Left: zone drag-and-drop editor */}
                 <div>
-                  <label className="text-sm font-medium block mb-2">Default Label Size</label>
-                  <Select value={labelPrint.sizeId} onChange={(e) => setLabelPrint((c) => ({ ...c, sizeId: e.target.value }))} className="w-full">
-                    {LABEL_SIZES.map((s) => <option key={s.id} value={s.id}>{s.label} — {s.desc}</option>)}
-                    <option value="custom">Custom size…</option>
-                  </Select>
-                  {labelPrint.sizeId === 'custom' && (
-                    <div className="flex items-center gap-2 mt-2">
-                      <Input type="number" min="10" max="300" value={labelPrint.customWidthMm}
-                        onChange={(e) => setLabelPrint((c) => ({ ...c, customWidthMm: Number(e.target.value) }))} className="w-28" />
-                      <span className="text-gray-400 text-sm">×</span>
-                      <Input type="number" min="10" max="300" value={labelPrint.customHeightMm}
-                        onChange={(e) => setLabelPrint((c) => ({ ...c, customHeightMm: Number(e.target.value) }))} className="w-28" />
-                      <span className="text-gray-400 text-sm">mm</span>
-                    </div>
-                  )}
+                  <ZoneLayoutEditor
+                    lbl={labelPrint}
+                    setLbl={setLabelPrint}
+                    zones={labelPrintZones}
+                    setZones={setLabelPrintZones}
+                  />
                 </div>
 
-                {/* Layout + symbology */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Right: live preview + print-run mechanics */}
+                <div className="space-y-4">
                   <div>
-                    <label className="text-sm font-medium block mb-2">Default Layout</label>
-                    <Select value={labelPrint.layout} onChange={(e) => setLabelPrint((c) => ({ ...c, layout: e.target.value }))}>
-                      <option value="1up">1 label per row</option>
-                      <option value="2up">2 labels per row (2-up)</option>
+                    <p className="text-[0.7rem] font-bold uppercase tracking-wider text-gray-500 mb-2">Live Preview</p>
+                    <div className="flex justify-center border border-gray-200 rounded-lg p-4" style={{ background: '#f8f8f8' }}>
+                      <BarcodeLabel
+                        item={SAMPLE_LABEL_ITEM}
+                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale), width: 'auto', height: 'auto' }}
+                        lbl={labelPrint}
+                      />
+                    </div>
+                    <p className="text-[0.65rem] text-gray-400 mt-2">
+                      Sample data — an item without a barcode falls back to a QR code in the print dialogs.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block mb-2">Default Label Size</label>
+                    <Select value={labelPrint.defaultLabelSize} onChange={(e) => setLabelPrint((c) => ({ ...c, defaultLabelSize: e.target.value }))} className="w-full">
+                      {LABEL_SIZES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </Select>
                   </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">Default Copies</label>
+                      <Input type="number" min="1" max="500" value={labelPrint.copies ?? 1}
+                        onChange={(e) => setLabelPrint((c) => ({ ...c, copies: Math.max(1, Math.min(500, Number(e.target.value) || 1)) }))} />
+                    </div>
+                    <div>
+                      <label className="text-xs font-medium text-gray-600 block mb-1">Default Columns</label>
+                      <Input type="number" min="1" max="8" value={labelPrint.columns ?? 1}
+                        onChange={(e) => setLabelPrint((c) => ({ ...c, columns: Math.max(1, Math.min(8, Number(e.target.value) || 1)) }))} />
+                    </div>
+                  </div>
+
                   <div>
-                    <label className="text-sm font-medium block mb-2">Default Barcode Type</label>
-                    <Select value={labelPrint.symbology} onChange={(e) => setLabelPrint((c) => ({ ...c, symbology: e.target.value }))}>
-                      <option value="CODE128">CODE128</option>
-                      <option value="EAN13">EAN-13</option>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Default content */}
-                <div>
-                  <label className="text-sm font-medium block mb-2">Default Label Content</label>
-                  <div className="flex gap-4 flex-wrap">
-                    {[['company', 'Company Name'], ['name', 'Product Name'], ['price', 'Price'], ['variant', 'Variant'], ['size', 'Size'], ['sku', 'SKU']].map(([k, lbl]) => (
-                      <label key={k} className="flex items-center gap-2 cursor-pointer text-sm">
-                        <input type="checkbox" checked={!!labelPrint.content[k]}
-                          onChange={(e) => setLabelPrint((c) => ({ ...c, content: { ...c.content, [k]: e.target.checked } }))}
-                          className="rounded" />
-                        {lbl}
-                      </label>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Default price labels */}
-                <div>
-                  <label className="text-sm font-medium block mb-2">Default Price Labels</label>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-xs font-medium text-gray-600 block mb-1">Price label (before regular price)</label>
-                      <Input value={labelPrint.pricePrefix ?? ''} onChange={(e) => setLabelPrint((c) => ({ ...c, pricePrefix: e.target.value }))} placeholder="e.g. MRP" />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">Content Size</label>
+                      <span className="text-xs font-bold text-teal-600">{Math.round((labelPrint.contentScale ?? 1) * 100)}%</span>
                     </div>
-                    <div>
-                      <label className="text-xs font-medium text-gray-600 block mb-1">Discount label (before discount price)</label>
-                      <Input value={labelPrint.discountPrefix ?? ''} onChange={(e) => setLabelPrint((c) => ({ ...c, discountPrefix: e.target.value }))} placeholder="e.g. Offer Price" />
-                    </div>
+                    <input type="range" min="0.4" max="2.0" step="0.05" value={labelPrint.contentScale ?? 1}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, contentScale: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
                   </div>
-                  <p className="text-xs text-gray-400 mt-1">Printed before each price on the label (e.g. "MRP: ₹100", "Offer Price: ₹80"). Leave blank for none. Editable at print time.</p>
-                </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">Code Size</label>
+                      <span className="text-xs font-bold text-teal-600">{Math.round((labelPrint.codeScale ?? 1) * 100)}%</span>
+                    </div>
+                    <input type="range" min="0.3" max="3.0" step="0.05" value={labelPrint.codeScale ?? 1}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, codeScale: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                  </div>
 
-                {/* Default copies */}
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Default Copies per Label</label>
-                  <Input type="number" min="1" max="50" value={labelPrint.defaultCopies ?? 1}
-                    onChange={(e) => setLabelPrint((c) => ({ ...c, defaultCopies: Math.max(1, Math.min(50, Number(e.target.value) || 1)) }))}
-                    className="w-28" />
-                  <p className="text-xs text-gray-400 mt-1">How many copies of each label print by default. Editable at print time.</p>
-                </div>
-
-                <div className="flex justify-end pt-2 border-t">
-                  <Button onClick={handleSaveLabelPrint} disabled={savingLabelPrint}>
-                    {savingLabelPrint ? <Spinner size="sm" className="mr-2" /> : null}
-                    Save Defaults
-                  </Button>
+                  <div className="flex justify-end pt-2 border-t">
+                    <Button onClick={handleSaveLabelPrint} disabled={savingLabelPrint}>
+                      {savingLabelPrint ? <Spinner size="sm" className="mr-2" /> : null}
+                      Save Defaults
+                    </Button>
+                  </div>
                 </div>
               </div>
             </CardContent>

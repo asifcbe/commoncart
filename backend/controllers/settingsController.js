@@ -36,17 +36,45 @@ const VARIANT_KEY = 'VARIANT_CONFIG';
 const DEFAULT_VARIANTS = { variants: [], sizes: [] };
 
 // Default barcode-label printing preferences applied when a print dialog opens.
+// Shape matches DigitZebra's `config.barcodeLabel` (ported UI in
+// BarcodeLabelPrint.jsx) — free-form JSON (see AppSettings.value: Mixed),
+// not a fixed schema, since the label builder adds new per-field style/order
+// keys over time and both sides must be able to add fields without a backend
+// migration.
 const LABEL_PRINT_KEY = 'LABEL_PRINT_CONFIG';
 const DEFAULT_LABEL_PRINT = {
-  sizeId: '50x25',          // built-in preset id, or 'custom'
-  customWidthMm: 50,        // used when sizeId === 'custom'
-  customHeightMm: 25,
-  layout: '1up',            // '1up' | '2up'
-  symbology: 'CODE128',     // 'CODE128' | 'EAN13'
-  content: { company: true, name: true, price: true, variant: true, size: true, sku: false },
-  pricePrefix: 'MRP',       // printed before the regular price, e.g. "MRP: ₹100"
-  discountPrefix: 'Offer Price', // printed before the discounted price
-  defaultCopies: 1,         // default number of copies per label when a print dialog opens
+  defaultLabelSize: 'standard', // LABEL_SIZES key (see frontend LABEL_SIZES)
+  copies: 1,
+  columns: 1,
+  contentScale: 1.0,
+  codeScale: 1.0,
+  codePosition: 'top',      // 'top' | 'middle' | 'bottom' | 'left' | 'right'
+  contentAlign: 'center',   // 'left' | 'center' | 'right'
+  borderStyle: 'solid',     // 'solid' | 'dashed' | 'none'
+  backgroundColor: '#ffffff',
+  textColor: '#000000',
+  // Field visibility — matches ALL_LABEL_FIELDS keys in the frontend.
+  showBusinessName: false,
+  showItemName: true,
+  showItemCode: true,
+  showCategory: false,
+  showSize: true,
+  showVariant: true,
+  showHsn: false,
+  showMrp: true,
+  showSalePrice: true,
+  showBarcode: true,
+  showBarcodeNumber: true,
+  showExtraFields: false,
+  fieldOrder: [],           // ordered list of ALL_LABEL_FIELDS keys (legacy, pre-zone-editor)
+  fieldStyles: {},          // { [fieldKey]: { size, color } }
+  fieldLabels: {},          // { [fieldKey]: customPrefixText }
+  // 5-zone drag-and-drop placement (top/left/center/right/bottom), each an
+  // ordered list of field keys + the special '__code__' barcode/QR marker —
+  // see resolveZoneLayout() on the frontend. null until the user first opens
+  // the print dialog's Layout & Settings panel; that panel's own default
+  // (DEFAULT_ZONE_LAYOUT) fills in until then.
+  zones: null,
 };
 
 // Bill / receipt print formatting (POS + purchase bills).
@@ -511,7 +539,9 @@ exports.getLabelPrintConfig = async (_req, res) => {
     const config = {
       ...DEFAULT_LABEL_PRINT,
       ...saved,
-      content: { ...DEFAULT_LABEL_PRINT.content, ...(saved?.content || {}) },
+      fieldStyles: { ...(saved?.fieldStyles || {}) },
+      fieldLabels: { ...(saved?.fieldLabels || {}) },
+      fieldOrder: Array.isArray(saved?.fieldOrder) ? saved.fieldOrder : DEFAULT_LABEL_PRINT.fieldOrder,
     };
     res.json({ config });
   } catch (err) {
@@ -519,28 +549,23 @@ exports.getLabelPrintConfig = async (_req, res) => {
   }
 };
 
+// Free-form passthrough (Mixed in AppSettings) — the label builder's field
+// list/order/styles evolve on the frontend without needing a backend
+// migration each time, same as DigitZebra's local-only config store. Basic
+// size/type clamping only, no fixed key whitelist.
 exports.updateLabelPrintConfig = async (req, res) => {
   try {
     const b = req.body || {};
-    const layout = b.layout === '2up' ? '2up' : '1up';
-    const symbology = b.symbology === 'EAN13' ? 'EAN13' : 'CODE128';
     const config = {
-      sizeId: (b.sizeId || DEFAULT_LABEL_PRINT.sizeId).toString(),
-      customWidthMm: Math.max(10, Math.min(300, Number(b.customWidthMm) || DEFAULT_LABEL_PRINT.customWidthMm)),
-      customHeightMm: Math.max(10, Math.min(300, Number(b.customHeightMm) || DEFAULT_LABEL_PRINT.customHeightMm)),
-      layout,
-      symbology,
-      content: {
-        company: !!b.content?.company,
-        name: b.content?.name !== false,
-        price: b.content?.price !== false,
-        variant: b.content?.variant !== false,
-        size: b.content?.size !== false,
-        sku: !!b.content?.sku,
-      },
-      pricePrefix: (b.pricePrefix ?? DEFAULT_LABEL_PRINT.pricePrefix).toString().trim().slice(0, 24),
-      discountPrefix: (b.discountPrefix ?? DEFAULT_LABEL_PRINT.discountPrefix).toString().trim().slice(0, 24),
-      defaultCopies: Math.max(1, Math.min(50, parseInt(b.defaultCopies, 10) || DEFAULT_LABEL_PRINT.defaultCopies)),
+      ...DEFAULT_LABEL_PRINT,
+      ...b,
+      copies: Math.max(1, Math.min(500, Number(b.copies) || DEFAULT_LABEL_PRINT.copies)),
+      columns: Math.max(1, Math.min(8, Number(b.columns) || DEFAULT_LABEL_PRINT.columns)),
+      contentScale: Math.max(0.3, Math.min(3, Number(b.contentScale) || DEFAULT_LABEL_PRINT.contentScale)),
+      codeScale: Math.max(0.3, Math.min(3, Number(b.codeScale) || DEFAULT_LABEL_PRINT.codeScale)),
+      fieldOrder: Array.isArray(b.fieldOrder) ? b.fieldOrder.slice(0, 40) : DEFAULT_LABEL_PRINT.fieldOrder,
+      fieldStyles: (b.fieldStyles && typeof b.fieldStyles === 'object') ? b.fieldStyles : {},
+      fieldLabels: (b.fieldLabels && typeof b.fieldLabels === 'object') ? b.fieldLabels : {},
     };
     await AppSettings.set(LABEL_PRINT_KEY, config);
     res.json({ config });

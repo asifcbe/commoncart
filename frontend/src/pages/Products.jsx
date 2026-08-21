@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, Suspense, lazy } from 'react';
-import { Plus, Search, Edit, Trash2, Eye, Image, ChevronLeft, ChevronRight, Globe, GlobeLock, AlertTriangle, Camera } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Image, ChevronLeft, ChevronRight, Globe, GlobeLock, AlertTriangle, Camera, Barcode, Printer } from 'lucide-react';
 import useProductStore from '../store/useProductStore';
 import useAuthStore from '../store/useAuthStore';
 import { canViewCostPrice, canManage } from '../config/permissions';
@@ -13,6 +13,7 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardContent } from '../components/ui/Card';
 import CategoryFields from '../components/CategoryFields';
 import ManagedSelect from '../components/ManagedSelect';
+import { BarcodeDialog, BulkBarcodeDialog } from '../components/BarcodeLabelPrintDialog';
 import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 import useAutoRefresh from '../hooks/useAutoRefresh';
@@ -310,7 +311,18 @@ export default function Products() {
   const [barcodeSearching, setBarcodeSearching] = useState(false);
   const searchTimeout = useRef(null);
 
+  // Barcode label printing — single-item dialog + bulk "select items, print
+  // labels for all of them" mode (mirrors DigitZebra's Items.jsx UI).
+  const [barcodeItem, setBarcodeItem] = useState(null);
+  const [barcodePrintMode, setBarcodePrintMode] = useState(false);
+  const [checkedIds, setCheckedIds] = useState(new Set());
+  const [bulkBarcodeOpen, setBulkBarcodeOpen] = useState(false);
+  const [businessName, setBusinessName] = useState('');
+
   useEffect(() => { fetchCategories(); fetchCategoryCatalog(); fetchVariantConfig(); }, []);
+  useEffect(() => {
+    api.get('/settings/business-config').then(({ data }) => setBusinessName(data.config?.businessName || '')).catch(() => {});
+  }, []);
 
   const filters = { search, category, subCategory, color: variant, size, page, isActive: showInactive ? undefined : true };
 
@@ -322,7 +334,7 @@ export default function Products() {
   }, [search, category, subCategory, variant, size, showInactive, page]);
 
   // Auto-refresh the list — but never while a form/modal is open or the user is searching
-  const isBusy = showForm || editProduct || historyProduct || deleteTarget;
+  const isBusy = showForm || editProduct || historyProduct || deleteTarget || barcodeItem || bulkBarcodeOpen;
   useAutoRefresh(() => { if (!isBusy) fetchProducts(filters); }, 30000, [search, category, subCategory, variant, size, showInactive, page, isBusy]);
 
   // Sub-categories available for the selected category (from the managed catalog)
@@ -383,10 +395,41 @@ export default function Products() {
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
           <p className="text-gray-500 text-sm mt-1">{total} products total</p>
         </div>
-        <Button onClick={() => { setEditProduct(null); setShowForm(true); }}>
-          <Plus size={16} className="mr-2" /> Add Product
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant={barcodePrintMode ? 'default' : 'outline'}
+            onClick={() => { setBarcodePrintMode((v) => !v); setCheckedIds(new Set()); }}
+          >
+            <Printer size={16} className="mr-2" /> {barcodePrintMode ? 'Cancel' : 'Print Labels'}
+          </Button>
+          <Button onClick={() => { setEditProduct(null); setShowForm(true); }}>
+            <Plus size={16} className="mr-2" /> Add Product
+          </Button>
+        </div>
       </div>
+
+      {/* Barcode print selection bar */}
+      {barcodePrintMode && (
+        <div className="flex items-center gap-3 p-3 rounded-lg border-2" style={{ background: 'rgba(13,148,136,0.07)', borderColor: 'rgba(13,148,136,0.3)' }}>
+          <Printer size={16} style={{ color: '#0d9488' }} />
+          <p className="flex-1 text-sm font-bold" style={{ color: '#0d9488' }}>
+            {checkedIds.size === 0 ? 'Click items to select for printing' : `${checkedIds.size} item${checkedIds.size > 1 ? 's' : ''} selected`}
+          </p>
+          {checkedIds.size > 0 && (
+            <Button size="sm" variant="ghost" onClick={() => setCheckedIds(new Set())}>Clear</Button>
+          )}
+          <Button size="sm" variant="ghost" style={{ color: '#0d9488' }}
+            onClick={() => setCheckedIds(new Set(products.map((p) => p._id)))}>
+            Select All ({products.length})
+          </Button>
+          {checkedIds.size > 0 && (
+            <Button size="sm" onClick={() => setBulkBarcodeOpen(true)}
+              style={{ background: '#0d9488' }}>
+              <Printer size={14} className="mr-1.5" /> Print Labels ({checkedIds.size})
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Filters */}
       <Card>
@@ -463,14 +506,27 @@ export default function Products() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
+                  {barcodePrintMode && <th className="px-4 py-3 w-8" />}
                   {['Product', 'SKU', 'Category', 'Price', 'Stock', 'Web', 'Status', 'Actions'].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {products.map((p) => (
-                  <tr key={p._id} className="hover:bg-gray-50">
+                {products.map((p) => {
+                  const isChecked = checkedIds.has(p._id);
+                  const toggleChecked = () => setCheckedIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(p._id)) next.delete(p._id); else next.add(p._id);
+                    return next;
+                  });
+                  return (
+                  <tr key={p._id} className="hover:bg-gray-50" onClick={barcodePrintMode ? toggleChecked : undefined} style={barcodePrintMode ? { cursor: 'pointer' } : undefined}>
+                    {barcodePrintMode && (
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={isChecked} onChange={toggleChecked} className="rounded" />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {p.images?.[0] ? (
@@ -509,7 +565,12 @@ export default function Products() {
                     </td>
                     <td className="px-4 py-3">{stockBadge(p)}</td>
                     <td className="px-4 py-3">
-                      <div className="flex gap-2">
+                      <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                        {p.barcode && (
+                          <button onClick={() => setBarcodeItem(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-teal-600" title="Print barcode label">
+                            <Barcode size={15} />
+                          </button>
+                        )}
                         <button onClick={() => setHistoryProduct(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="Stock history">
                           <Eye size={15} />
                         </button>
@@ -526,7 +587,8 @@ export default function Products() {
                       </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}
@@ -583,6 +645,18 @@ export default function Products() {
           product={deleteTarget}
           onConfirm={handleDelete}
           onClose={() => setDeleteTarget(null)}
+        />
+      )}
+
+      {/* Barcode label printing */}
+      {barcodeItem && (
+        <BarcodeDialog item={barcodeItem} businessName={businessName} onClose={() => setBarcodeItem(null)} />
+      )}
+      {bulkBarcodeOpen && (
+        <BulkBarcodeDialog
+          items={products.filter((p) => checkedIds.has(p._id))}
+          businessName={businessName}
+          onClose={() => { setBulkBarcodeOpen(false); setBarcodePrintMode(false); setCheckedIds(new Set()); }}
         />
       )}
     </div>

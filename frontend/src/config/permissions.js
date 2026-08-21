@@ -10,7 +10,7 @@ export const SECTIONS = [
   { key: 'aged-products',label: 'Aged Products' },
   { key: 'inventory',    label: 'Inventory' },
   { key: 'sales',        label: 'Sales' },
-  { key: 'reports',      label: 'Reports' },
+  { key: 'reports',      label: 'Settlements' },
   { key: 'web-orders',   label: 'Web Orders' },
   { key: 'customers',    label: 'Customers' },
   { key: 'coupons',      label: 'Coupons' },

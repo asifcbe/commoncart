@@ -19,7 +19,7 @@ const navItems = [
   { to: '/aged-products', icon: Clock, label: 'Aged Products', section: 'aged-products' },
   { to: '/inventory', icon: Warehouse, label: 'Inventory', section: 'inventory' },
   { to: '/sales', icon: Receipt, label: 'Sales', section: 'sales' },
-  { to: '/reports', icon: BookOpen, label: 'Reports', section: 'reports' },
+  { to: '/reports', icon: BookOpen, label: 'Settlements', section: 'reports' },
   { to: '/web-orders', icon: Globe, label: 'Web Orders', section: 'web-orders' },
   { to: '/customers', icon: Users, label: 'Customers', section: 'customers' },
   { to: '/coupons', icon: Tag, label: 'Coupons', section: 'coupons' },

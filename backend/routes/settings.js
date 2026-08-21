@@ -16,7 +16,7 @@ const {
   getInvoiceConfig, updateInvoiceConfig,
   getDocNumberingConfig, updateDocNumberingConfig,
 } = require('../controllers/settingsController');
-const { protect, adminOnly } = require('../middleware/auth');
+const { protect, adminOnly, manageOnly } = require('../middleware/auth');
 
 router.get('/credit-config', protect, getCreditConfig);
 router.put('/credit-config', protect, adminOnly, updateCreditConfig);
@@ -42,9 +42,12 @@ router.get('/auto-delete-config', protect, getAutoDeleteConfig);
 router.put('/auto-delete-config', protect, adminOnly, updateAutoDeleteConfig);
 router.post('/auto-delete-run', protect, adminOnly, runAutoDeleteNow);
 
-// Label printing — readable by any logged-in user (print dialogs need it), writable by admin
+// Label printing — readable by any logged-in user (print dialogs need it).
+// Writable by admin or manage-permitted staff — the barcode dialog auto-saves
+// every layout/style tweak as the new default (same UX as DigitZebra), which
+// would silently fail for ordinary product-managing staff under adminOnly.
 router.get('/label-print-config', protect, getLabelPrintConfig);
-router.put('/label-print-config', protect, adminOnly, updateLabelPrintConfig);
+router.put('/label-print-config', protect, manageOnly, updateLabelPrintConfig);
 
 // Bill / receipt print formatting — readable by any logged-in user, writable by admin
 router.get('/bill-print-config', protect, getBillPrintConfig);

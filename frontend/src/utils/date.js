@@ -32,3 +32,14 @@ export function formatDateTime(date) {
   const time = d.toLocaleTimeString();
   return `${formatDate(d)}, ${time}`;
 }
+
+// Formats a Date as the local (system-clock) `YYYY-MM-DDTHH:mm` string a
+// `<input type="datetime-local">` expects/returns. Using `.toISOString()` for
+// this converts to UTC first, silently shifting the shown/saved time by the
+// browser's timezone offset — this reads the Date's local getters instead, so
+// the field always reflects the actual system time, not a UTC-shifted one.
+export function toLocalDateTimeInput(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}

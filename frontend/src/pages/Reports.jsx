@@ -29,7 +29,7 @@ export default function Reports() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Reports</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Settlements</h1>
         <p className="text-gray-500 text-sm mt-1">Day Book — what happened in the selected date range, by payment mode</p>
       </div>
 

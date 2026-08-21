@@ -5,7 +5,7 @@ const bcrypt = require('bcryptjs');
 // `key` matches the route path; used by both the sidebar and route guard.
 const STAFF_SECTIONS = [
   'dashboard', 'products', 'barcode', 'pos', 'purchases', 'suppliers',
-  'aged-products', 'inventory', 'sales', 'web-orders', 'customers', 'coupons',
+  'aged-products', 'inventory', 'sales', 'reports', 'web-orders', 'customers', 'coupons',
 ];
 
 // A sensible default: staff can use the POS and see sales, nothing sensitive.

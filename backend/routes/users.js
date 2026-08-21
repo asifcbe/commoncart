@@ -26,7 +26,9 @@ router.put('/:id', protect, adminOnly, async (req, res) => {
     // picks up the last-saved grants instead of resetting to defaults.
     if (permissions !== undefined) {
       update.permissions = {
-        sections: Array.isArray(permissions.sections) ? permissions.sections : [],
+        sections: Array.isArray(permissions.sections)
+          ? permissions.sections.filter((s) => User.STAFF_SECTIONS.includes(s))
+          : [],
         viewCostPrice: !!permissions.viewCostPrice,
         canManage: !!permissions.canManage,
       };
