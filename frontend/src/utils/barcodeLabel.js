@@ -276,12 +276,32 @@ export async function qrDataURL(value, size = 80) {
   return url;
 }
 
-// Synchronous cache lookup — null if not yet encoded. Lets QRImage render on
-// first paint when the value was pre-warmed (see renderPrintHTML), instead
-// of always waiting a tick for the async qrDataURL() effect to resolve.
+// Synchronous cache lookup — null if not yet encoded. Lets QRImage render
+// immediately when the value's already cached, instead of always waiting a
+// tick for the async qrDataURL() effect to resolve.
 export function peekQrDataURL(value, size = 80) {
   if (!value) return null;
   return qrCache.get(`${value}|${size}`) || null;
+}
+
+// Coordinates QR draw timing with printing — ported from DigitZebra's
+// qrReady.js. react-to-print clones the print node's DOM as soon as
+// onBeforePrint's promise resolves; QRImage draws its <img src> inside a
+// useEffect (after the initial paint) via the genuinely-async qrDataURL(),
+// so a print triggered before that effect has landed would clone a blank/
+// placeholder <canvas> instead of the finished QR image. registerQrDraw()
+// is called by QRImage whenever it starts drawing a value that isn't
+// already cached; waitForQrReady() (passed as onBeforePrint) awaits every
+// currently in-flight draw before react-to-print snapshots the DOM.
+const inFlightQrDraws = new Set();
+export function registerQrDraw(promise) {
+  inFlightQrDraws.add(promise);
+  const clear = () => inFlightQrDraws.delete(promise);
+  promise.then(clear, clear);
+}
+export async function waitForQrReady() {
+  if (!inFlightQrDraws.size) return;
+  await Promise.allSettled([...inFlightQrDraws]);
 }
 
 // Maps a Common_cart Product record onto DigitZebra's label-item field names

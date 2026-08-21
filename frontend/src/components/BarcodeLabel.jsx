@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import {
-  barcodeDataURL, qrDataURL, peekQrDataURL, ALL_LABEL_FIELDS, FIELD_SIZE_SCALE,
+  barcodeDataURL, qrDataURL, peekQrDataURL, registerQrDraw, ALL_LABEL_FIELDS, FIELD_SIZE_SCALE,
   CODE_KEY, ZONES, resolveZoneLayout,
 } from '../utils/barcodeLabel';
 
@@ -25,7 +25,8 @@ export const QRImage = ({ value, size = 80 }) => {
     if (!value) { setSrc(null); return; }
     const cached = peekQrDataURL(value, size);
     if (cached) { setSrc(cached); return; }
-    qrDataURL(value, size).then((url) => { if (!cancelled) setSrc(url); }).catch(() => {});
+    const draw = qrDataURL(value, size).then((url) => { if (!cancelled) setSrc(url); }).catch(() => {});
+    registerQrDraw(draw);
     return () => { cancelled = true; };
   }, [value, size]);
   if (!src) return <canvas style={{ display: 'block' }} width={size} height={size} />;
@@ -244,12 +245,15 @@ export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
 export const QRLabel = ({ item, sizeConfig, lbl }) => <UnifiedLabel item={item} sizeConfig={sizeConfig} lbl={lbl} mode="qr" />;
 export const BarcodeLabel = ({ item, sizeConfig, lbl }) => <UnifiedLabel item={item} sizeConfig={sizeConfig} lbl={lbl} mode="barcode" />;
 
-// Renders all selected items (each with individual copies) on one printable sheet
-export const BulkLabelSheet = ({ entries, sizeConfig, lbl, columns = 1, mode = 'barcode' }) => {
+// Renders all selected items (each with individual copies) on one printable
+// sheet. forwardRef so react-to-print (used by BarcodeLabelPrintDialog.jsx)
+// can print this exact, already-mounted node directly — same pattern as
+// DigitZebra's BarcodePrintSheet/QRPrintSheet.
+export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, columns = 1, mode = 'barcode' }, ref) => {
   const isA4 = sizeConfig.key === 'a4';
   const LabelComp = mode === 'qr' ? QRLabel : BarcodeLabel;
   return (
-    <div style={{
+    <div ref={ref} style={{
       padding: isA4 ? 16 : 4, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif',
       display: 'grid',
       gridTemplateColumns: `repeat(${isA4 ? Math.max(1, columns) : columns}, ${sizeConfig.width})`,
@@ -263,6 +267,7 @@ export const BulkLabelSheet = ({ entries, sizeConfig, lbl, columns = 1, mode = '
       )}
     </div>
   );
-};
+});
+BulkLabelSheet.displayName = 'BulkLabelSheet';
 
 export { ALL_LABEL_FIELDS };

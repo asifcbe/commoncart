@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { createRoot } from 'react-dom/client';
+import React, { useEffect, useRef, useState } from 'react';
+import { useReactToPrint } from 'react-to-print';
 import { Barcode, Printer, QrCode } from 'lucide-react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
@@ -10,7 +10,7 @@ import api from '../utils/api';
 import { BulkLabelSheet } from './BarcodeLabel';
 import {
   LABEL_SIZES, buildSizeConfig, DEFAULT_BARCODE_LABEL,
-  productToLabelItem, qrDataURL, resolveZoneLayout,
+  productToLabelItem, resolveZoneLayout, waitForQrReady,
 } from '../utils/barcodeLabel';
 
 // Print-only dialogs — the label's actual design (which fields go where,
@@ -21,6 +21,20 @@ import {
 // Products/Purchase print dialog. These dialogs just fetch that saved
 // layout, show a live preview of it, and let the user pick per-print-job
 // mechanics (label size, copies, columns, scale) before printing.
+//
+// Printing itself uses react-to-print against a REAL, already-mounted
+// off-screen node (not a detached React root serialized to an HTML string
+// fed into a fresh window.open() + document.write() document, which is what
+// this file did previously). That approach worked in most quick manual
+// checks but was unreliable in real printing — window.open()+document.write()
+// creates a brand-new document whose image-decode/paint timing relative to a
+// synchronously-called window.print() isn't guaranteed the same way across
+// browsers/printers, and Chromium's print pipeline doesn't always rasterize
+// a still-decoding <img> in a freshly-written document even when `complete`
+// reads true moments later. react-to-print instead clones DOM that has
+// already been laid out and painted in the live page — the same proven
+// mechanism DigitZebra's own barcode dialogs use — which sidesteps that
+// class of bug entirely.
 
 const ACCENT = '#0d9488';
 
@@ -62,29 +76,6 @@ function ToggleButtonGroup({ value, onChange, options }) {
   );
 }
 
-// Renders a hidden off-screen React tree to a static HTML string for the
-// print window (Common_cart prints via window.open + document.write rather
-// than react-to-print, so we render the same label components server-side
-// via a detached root instead of hand-building HTML).
-// `qrValues`: every QR string that might be encoded in `node`, pre-resolved
-// into QRImage's cache *before* the tree renders — otherwise QRImage's async
-// useEffect (data-URL generation) races the innerHTML read below with no
-// reliable signal for "every QR has actually finished drawing".
-async function renderPrintHTML(node, qrValues = []) {
-  await Promise.all([...new Set(qrValues.filter(Boolean))].map((v) => qrDataURL(v).catch(() => null)));
-  const host = document.createElement('div');
-  const root = createRoot(host);
-  await new Promise((resolve) => {
-    root.render(node);
-    // QRImage now finds its value already cached and renders synchronously
-    // within this commit; one rAF is enough to let that paint before we read.
-    requestAnimationFrame(resolve);
-  });
-  const html = host.innerHTML;
-  root.unmount();
-  return html;
-}
-
 function getPageStyle(sizeConfig, columns) {
   const isA4 = sizeConfig.key === 'a4';
   if (isA4) return '@page { size: A4 portrait; margin: 8mm; } body { margin: 0; }';
@@ -92,19 +83,6 @@ function getPageStyle(sizeConfig, columns) {
   const hMm = parseFloat(sizeConfig.height) || 40;
   const totalW = wMm * Math.max(1, Number(columns) || 1);
   return `@page { size: ${totalW}mm ${hMm}mm; margin: 0; } body { margin: 0; padding: 0; }`;
-}
-
-function openPrintWindow(bodyHTML, pageStyle, onError) {
-  const win = window.open('', '_blank', 'width=800,height=600');
-  if (!win) { onError?.('Pop-up blocked. Please allow pop-ups for this site.'); return false; }
-  const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Barcode Labels</title>
-<style>* { box-sizing: border-box; } ${pageStyle}
-@media screen { body { background:#eee; } }
-@media print { body { background:white; } }</style></head>
-<body>${bodyHTML}<script>window.onload=function(){window.print()};<\/script></body></html>`;
-  win.document.write(html);
-  win.document.close();
-  return true;
 }
 
 // Loads the label design saved in Settings (fields, zones, styling) plus its
@@ -154,31 +132,24 @@ export function BarcodeDialog({ item, businessName, onClose }) {
     copies, setCopies,
   } = useSavedLabelConfig();
   const [printMode, setPrintMode] = useState('barcode');
-  const [printing, setPrinting] = useState(false);
-
-  if (!item) return null;
+  const printRef = useRef(null);
 
   const sizeEntry = LABEL_SIZES.find((s) => s.key === labelSizeKey) || LABEL_SIZES[0];
   const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale);
-  const labelItem = productToLabelItem(item, businessName);
-  const hasContent = !!(labelItem.barcode || printMode === 'qr');
+  const labelItem = item ? productToLabelItem(item, businessName) : null;
+  const hasContent = !!(labelItem?.barcode || printMode === 'qr');
+  const finalCopies = Math.max(1, Number(copies) || 1);
+  const finalColumns = Math.max(1, Number(columns) || 1);
+  const printEntries = labelItem ? [{ item: labelItem, copies: finalCopies }] : [];
 
-  const handlePrint = async () => {
-    setPrinting(true);
-    try {
-      const finalCopies = Math.max(1, Number(copies) || 1);
-      const finalColumns = Math.max(1, Number(columns) || 1);
-      const entries = [{ item: labelItem, copies: finalCopies }];
-      const qrValue = labelItem.barcode || labelItem.itemCode || labelItem.name || 'item';
-      const html = await renderPrintHTML(
-        <BulkLabelSheet entries={entries} sizeConfig={sizeConfig} lbl={lbl} columns={finalColumns} mode={printMode} />,
-        printMode === 'qr' ? [qrValue] : []
-      );
-      openPrintWindow(html, getPageStyle(sizeConfig, finalColumns), (msg) => toast({ message: msg, type: 'error' }));
-    } finally {
-      setPrinting(false);
-    }
-  };
+  const handlePrint = useReactToPrint({
+    contentRef: printRef,
+    pageStyle: getPageStyle(sizeConfig, finalColumns),
+    onBeforePrint: waitForQrReady,
+    onPrintError: () => toast({ message: 'Could not open the print dialog. Please allow pop-ups for this site.', type: 'error' }),
+  });
+
+  if (!item) return null;
 
   return (
     <Modal open onClose={onClose} size="lg" title={
@@ -251,13 +222,18 @@ export function BarcodeDialog({ item, businessName, onClose }) {
         {hasContent && (
           <Button
             onClick={handlePrint}
-            disabled={printing}
             style={{ background: `linear-gradient(135deg, #0f766e 0%, ${ACCENT} 100%)` }}
           >
             <Printer size={16} className="mr-2" />
-            Print{(Number(copies) || 1) > 1 || (Number(columns) || 1) > 1 ? ` (${Number(copies) || 1} × ${Number(columns) || 1} col)` : ''}
+            Print{finalCopies > 1 || finalColumns > 1 ? ` (${finalCopies} × ${finalColumns} col)` : ''}
           </Button>
         )}
+      </div>
+
+      {/* Off-screen (not display:none — react-to-print needs the source node
+          actually laid out/painted, same as DigitZebra's barcode dialogs) */}
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <BulkLabelSheet ref={printRef} entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={finalColumns} mode={printMode} />
       </div>
     </Modal>
   );
@@ -272,7 +248,7 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   } = useSavedLabelConfig();
   const [printMode, setPrintMode] = useState('barcode');
   const [copiesMap, setCopiesMap] = useState({});
-  const [printing, setPrinting] = useState(false);
+  const printRef = useRef(null);
 
   // Fill in each item's copy count from the saved default once it loads.
   useEffect(() => {
@@ -284,8 +260,6 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [defaultCopies, items]);
 
-  if (!items?.length) return null;
-
   const sizeEntry = LABEL_SIZES.find((s) => s.key === labelSizeKey) || LABEL_SIZES[0];
   const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale);
   const columnsNum = Math.max(1, Number(columns) || 1);
@@ -294,27 +268,26 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   const setCopies = (id, val) => setCopiesMap((prev) => ({ ...prev, [id]: val === '' ? '' : Math.max(1, Math.min(500, Number(val) || 1)) }));
   const commitCopies = (id) => setCopiesMap((prev) => ({ ...prev, [id]: Math.max(1, Math.min(500, Number(prev[id]) || 1)) }));
 
-  const entries = items.map((it) => {
+  const entries = (items || []).map((it) => {
     const id = it.id ?? it._id;
     return { item: productToLabelItem(it, businessName), copies: Math.max(1, Number(getCopies(id)) || 1), id };
   });
   const totalLabels = entries.reduce((s, e) => s + e.copies, 0);
+  const printEntries = entries.filter((e) => e.copies > 0).map((e) => ({ item: e.item, copies: e.copies }));
 
-  const handlePrint = async () => {
-    setPrinting(true);
-    try {
-      const printEntries = entries.filter((e) => e.copies > 0).map((e) => ({ item: e.item, copies: e.copies }));
-      if (!printEntries.length) { toast({ message: 'Nothing to print', type: 'warning' }); return; }
-      const qrValues = printEntries.map((e) => e.item.barcode || e.item.itemCode || e.item.name || 'item');
-      const html = await renderPrintHTML(
-        <BulkLabelSheet entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={columnsNum} mode={printMode} />,
-        printMode === 'qr' ? qrValues : []
-      );
-      openPrintWindow(html, getPageStyle(sizeConfig, columnsNum), (msg) => toast({ message: msg, type: 'error' }));
-    } finally {
-      setPrinting(false);
-    }
+  const handlePrint = useReactToPrint({
+    contentRef: printRef,
+    pageStyle: getPageStyle(sizeConfig, columnsNum),
+    onBeforePrint: waitForQrReady,
+    onPrintError: () => toast({ message: 'Could not open the print dialog. Please allow pop-ups for this site.', type: 'error' }),
+  });
+
+  const triggerPrint = () => {
+    if (!printEntries.length) { toast({ message: 'Nothing to print', type: 'warning' }); return; }
+    handlePrint();
   };
+
+  if (!items?.length) return null;
 
   return (
     <Modal open onClose={onClose} size="lg" title={`Print Barcodes — ${items.length} item${items.length > 1 ? 's' : ''} · ${totalLabels} labels`}>
@@ -385,13 +358,18 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
       <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t">
         <Button variant="outline" onClick={onClose}>Close</Button>
         <Button
-          onClick={handlePrint}
-          disabled={printing || totalLabels === 0}
+          onClick={triggerPrint}
+          disabled={totalLabels === 0}
           style={{ background: `linear-gradient(135deg, #0f766e 0%, ${ACCENT} 100%)` }}
         >
           <Printer size={16} className="mr-2" />
           Print {totalLabels} Label{totalLabels !== 1 ? 's' : ''}
         </Button>
+      </div>
+
+      {/* Off-screen (not display:none — see BarcodeDialog's comment above) */}
+      <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
+        <BulkLabelSheet ref={printRef} entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={columnsNum} mode={printMode} />
       </div>
     </Modal>
   );
