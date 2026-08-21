@@ -15,7 +15,7 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import PermissionEditor from '../components/PermissionEditor';
 import { SECTIONS } from '../config/permissions';
-import { LABEL_SIZES, DEFAULT_BARCODE_LABEL, buildSizeConfig, resolveZoneLayout } from '../utils/barcodeLabel';
+import { LABEL_SIZES, DEFAULT_BARCODE_LABEL, buildSizeConfig, resolveZoneLayout, PRINTER_DPI_OPTIONS, DEFAULT_PRINTER_DPI } from '../utils/barcodeLabel';
 import ZoneLayoutEditor from '../components/ZoneLayoutEditor';
 import { BarcodeLabel } from '../components/BarcodeLabel';
 import api from '../utils/api';
@@ -1240,7 +1240,7 @@ export default function Settings() {
                     <div className="flex justify-center border border-gray-200 rounded-lg p-4" style={{ background: '#f8f8f8' }}>
                       <BarcodeLabel
                         item={SAMPLE_LABEL_ITEM}
-                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale), width: 'auto', height: 'auto' }}
+                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale, labelPrint.printerDpi), width: 'auto', height: 'auto' }}
                         lbl={labelPrint}
                       />
                     </div>
@@ -1254,6 +1254,18 @@ export default function Settings() {
                     <Select value={labelPrint.defaultLabelSize} onChange={(e) => setLabelPrint((c) => ({ ...c, defaultLabelSize: e.target.value }))} className="w-full">
                       {LABEL_SIZES.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
                     </Select>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block mb-2">Printer Resolution</label>
+                    <Select value={labelPrint.printerDpi ?? DEFAULT_PRINTER_DPI} onChange={(e) => setLabelPrint((c) => ({ ...c, printerDpi: Number(e.target.value) }))} className="w-full">
+                      {PRINTER_DPI_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </Select>
+                    <p className="text-[0.65rem] text-gray-400 mt-1">
+                      Match this to your actual printer (SATO SA408 = 203 dpi). Barcodes/QR codes render at this resolution
+                      so they print crisp instead of blurry — the browser was previously always rendering them at a fixed
+                      96 dpi and letting the printer stretch that low-resolution image up to fill the page.
+                    </p>
                   </div>
 
                   <div className="grid grid-cols-2 gap-3">

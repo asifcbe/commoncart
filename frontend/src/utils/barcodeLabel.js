@@ -138,6 +138,32 @@ export function findZoneOf(zoneLayout, key) {
   return null;
 }
 
+// Thermal/barcode printer resolutions in common use — covers older desktop
+// label printers (152/200/203 dpi, e.g. SATO SA408 at 203 dpi) through
+// mid-range (300 dpi) and high-resolution (600 dpi) models. The browser
+// renders barcode/QR canvases at 96 CSS px/inch by default; printing that at
+// a printer's native (higher) dpi means the browser must upscale a
+// low-resolution bitmap, which is what actually causes blurry/faint bars —
+// not the printer itself. Rendering the canvas at the selected printer's own
+// dpi from the start (see barcodeDataURL/qrDataURL's pixelRatio) fixes that
+// at the source instead of fighting it after the fact.
+export const PRINTER_DPI_OPTIONS = [
+  { value: 152, label: '152 dpi (older thermal printers)' },
+  { value: 200, label: '200 dpi' },
+  { value: 203, label: '203 dpi (most common — SATO SA408, Zebra GK/GX, TSC)' },
+  { value: 300, label: '300 dpi (high-resolution thermal)' },
+  { value: 600, label: '600 dpi' },
+];
+export const DEFAULT_PRINTER_DPI = 203;
+const CSS_DPI = 96; // browsers render 1 CSS px = 1/96 inch, regardless of the physical device
+
+// How many actual bitmap pixels to draw per CSS px so the barcode/QR canvas
+// is genuinely native-resolution at the target printer's dpi, not just
+// upscaled by the browser at print time.
+export function pixelRatioForDpi(dpi) {
+  return Math.max(1, (Number(dpi) || DEFAULT_PRINTER_DPI) / CSS_DPI);
+}
+
 export const LABEL_SIZES = [
   { key: 'standard',  label: '80×40mm (Standard)',        widthMm: 80,  heightMm: 40  },
   { key: '50x40',     label: '50×40mm',                   widthMm: 50,  heightMm: 40  },
@@ -160,7 +186,11 @@ export const PX_PER_MM = 3.7795;
 // Derive all sizing from real mm dimensions.
 // contentScale → text/font size only
 // codeScale    → barcode strip height, QR square size, bar thickness only
-export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0) => {
+// printerDpi   → target physical printer resolution (see PRINTER_DPI_OPTIONS);
+//                doesn't change any on-page layout size, only how many real
+//                bitmap pixels barcodeDataURL/qrDataURL render per CSS px —
+//                see pixelRatioForDpi's comment for why this matters.
+export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, printerDpi = DEFAULT_PRINTER_DPI) => {
   const wPx = entry.widthMm * PX_PER_MM;
   const hPx = entry.heightMm ? entry.heightMm * PX_PER_MM : null;
   const isA4 = entry.key === 'a4';
@@ -187,6 +217,8 @@ export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0) => {
     fontSize: baseFontPx,
     smallFontSize: smallFontPx,
     barWidth: Math.max(1, (innerW / 100) * codeScale),
+    printerDpi: Number(printerDpi) || DEFAULT_PRINTER_DPI,
+    pixelRatio: pixelRatioForDpi(printerDpi),
   };
 };
 
@@ -214,6 +246,10 @@ export const DEFAULT_BARCODE_LABEL = {
   columns: 1,
   contentScale: 1.0,
   codeScale: 1.0,
+  // Target printer resolution — see PRINTER_DPI_OPTIONS. Barcode/QR canvases
+  // are rendered at this dpi (not the browser's 96dpi default) so bars print
+  // crisp instead of blurry/anti-aliased on real thermal printer hardware.
+  printerDpi: DEFAULT_PRINTER_DPI,
   codePosition: 'top',
   contentAlign: 'center',
   borderStyle: 'solid',
@@ -242,17 +278,36 @@ export const DEFAULT_BARCODE_LABEL = {
 
 // Encode a barcode value to a PNG data-URI. Cached — printing N copies of the
 // same value only encodes once.
+//
+// `pixelRatio` (see pixelRatioForDpi) renders the underlying canvas bitmap
+// at a real multiple of the requested CSS-facing height/barWidth instead of
+// 1:1 — the <img> is still displayed at the original CSS size (its width/
+// height style is never set from the intrinsic bitmap size), so this is
+// purely a resolution increase, not a layout change. Without it, the bitmap
+// is native at ~96dpi and the browser has to upscale it to fill a real
+// printer's higher dpi at print time, which is what actually causes blurry/
+// faint bars on physical hardware — not the printer itself.
+//
+// barWidth is also snapped to a whole number of device pixels at the target
+// resolution (Math.round(barWidth * pixelRatio) / pixelRatio, then that
+// product rounded) rather than left as an arbitrary CSS-px fraction — a
+// fractional bar width forces JsBarcode's canvas renderer to anti-alias the
+// bar edges into semi-transparent grey pixels, which a thermal printhead
+// (a fixed physical dot grid, no anti-aliasing) reproduces as a genuinely
+// faint/blurred line rather than a crisp bar.
 const barcodeCache = new Map();
-export function barcodeDataURL(value, { height = 70, fontSize = 13, barWidth = 1.5 } = {}) {
+export function barcodeDataURL(value, { height = 70, fontSize = 13, barWidth = 1.5, pixelRatio = 1 } = {}) {
   if (!value) return null;
-  const key = `${value}|${height}|${fontSize}|${barWidth}`;
+  const key = `${value}|${height}|${fontSize}|${barWidth}|${pixelRatio}`;
   let src = barcodeCache.get(key);
   if (src) return src;
   try {
     const canvas = document.createElement('canvas');
+    const scaledBarWidth = Math.max(1, Math.round(barWidth * pixelRatio));
     JsBarcode(canvas, String(value), {
-      format: 'CODE128', width: barWidth, height, displayValue: true,
-      fontSize, margin: 2, background: '#ffffff', lineColor: '#000000',
+      format: 'CODE128', width: scaledBarWidth, height: Math.round(height * pixelRatio),
+      displayValue: true, fontSize: Math.round(fontSize * pixelRatio), margin: Math.round(2 * pixelRatio),
+      background: '#ffffff', lineColor: '#000000',
     });
     src = canvas.toDataURL('image/png');
     barcodeCache.set(key, src);
@@ -263,14 +318,16 @@ export function barcodeDataURL(value, { height = 70, fontSize = 13, barWidth = 1
 }
 
 // Encode a value to a QR PNG data-URI (async). Cached the same way.
+// `pixelRatio` — see barcodeDataURL's comment; same reasoning applies to QR
+// modules (each square "pixel" of the QR code) as to barcode bars.
 const qrCache = new Map();
-export async function qrDataURL(value, size = 80) {
+export async function qrDataURL(value, size = 80, pixelRatio = 1) {
   if (!value) return null;
-  const key = `${value}|${size}`;
+  const key = `${value}|${size}|${pixelRatio}`;
   const cached = qrCache.get(key);
   if (cached) return cached;
   const url = await QRCode.toDataURL(String(value), {
-    width: size, margin: 1, color: { dark: '#000000', light: '#ffffff' },
+    width: Math.round(size * pixelRatio), margin: 1, color: { dark: '#000000', light: '#ffffff' },
   });
   qrCache.set(key, url);
   return url;
@@ -279,9 +336,9 @@ export async function qrDataURL(value, size = 80) {
 // Synchronous cache lookup — null if not yet encoded. Lets QRImage render
 // immediately when the value's already cached, instead of always waiting a
 // tick for the async qrDataURL() effect to resolve.
-export function peekQrDataURL(value, size = 80) {
+export function peekQrDataURL(value, size = 80, pixelRatio = 1) {
   if (!value) return null;
-  return qrCache.get(`${value}|${size}`) || null;
+  return qrCache.get(`${value}|${size}|${pixelRatio}`) || null;
 }
 
 // Coordinates QR draw timing with printing — ported from DigitZebra's

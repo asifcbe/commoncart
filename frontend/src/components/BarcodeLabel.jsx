@@ -9,26 +9,31 @@ import {
 // `item` fields expected: name, itemCode, barcode, category, size, variant,
 // hsnCode, mrp, salePrice, _businessName, barcodeExtraFields.
 
-export const BarcodeImage = ({ value, height = 70, fontSize = 13, barWidth = 1.5 }) => {
-  const src = barcodeDataURL(value, { height, fontSize, barWidth });
+// `pixelRatio` (see pixelRatioForDpi in utils/barcodeLabel.js) renders the
+// underlying bitmap at the target printer's real resolution instead of the
+// browser's 96dpi default — the <img> itself still displays at height/
+// barWidth's original CSS size (no width/height style set from it), so this
+// only affects sharpness on real hardware, never on-page layout.
+export const BarcodeImage = ({ value, height = 70, fontSize = 13, barWidth = 1.5, pixelRatio = 1 }) => {
+  const src = barcodeDataURL(value, { height, fontSize, barWidth, pixelRatio });
   if (!src) return <svg style={{ maxWidth: '100%', display: 'block' }} />;
   return <img src={src} alt={value} style={{ maxWidth: '100%', display: 'block' }} />;
 };
 
-export const QRImage = ({ value, size = 80 }) => {
+export const QRImage = ({ value, size = 80, pixelRatio = 1 }) => {
   // Synchronous cache hit (e.g. pre-warmed before a print render) renders
   // immediately on first paint — no async gap for a print-window snapshot
   // to race against. A cache miss still falls back to the async effect.
-  const [src, setSrc] = useState(() => peekQrDataURL(value, size));
+  const [src, setSrc] = useState(() => peekQrDataURL(value, size, pixelRatio));
   useEffect(() => {
     let cancelled = false;
     if (!value) { setSrc(null); return; }
-    const cached = peekQrDataURL(value, size);
+    const cached = peekQrDataURL(value, size, pixelRatio);
     if (cached) { setSrc(cached); return; }
-    const draw = qrDataURL(value, size).then((url) => { if (!cancelled) setSrc(url); }).catch(() => {});
+    const draw = qrDataURL(value, size, pixelRatio).then((url) => { if (!cancelled) setSrc(url); }).catch(() => {});
     registerQrDraw(draw);
     return () => { cancelled = true; };
-  }, [value, size]);
+  }, [value, size, pixelRatio]);
   if (!src) return <canvas style={{ display: 'block' }} width={size} height={size} />;
   return <img src={src} alt={value} width={size} height={size} style={{ display: 'block' }} />;
 };
@@ -175,13 +180,13 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
 // One zone's content — every placed field (in order) plus the barcode/QR
 // image wherever CODE_KEY happens to sit in that zone's list.
 function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
-  const { barcodeHeight, qrSize, barWidth, fontSize, smallFontSize } = sizeConfig;
+  const { barcodeHeight, qrSize, barWidth, fontSize, smallFontSize, pixelRatio } = sizeConfig;
   const show = (k) => lbl?.[k] !== false;
   const qrValue = item?.barcode || item?.itemCode || item?.name || 'item';
 
   const codeEl = mode === 'qr' ? (
     <div key={CODE_KEY} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-      <QRImage value={qrValue} size={Math.round(qrSize)} />
+      <QRImage value={qrValue} size={Math.round(qrSize)} pixelRatio={pixelRatio} />
       {show('showBarcodeNumber') && item?.barcode && (
         <p style={{ margin: '2px 0 0', fontSize: smallFontSize, color: lbl?.textColor || '#555', textAlign: 'center' }}>{item.barcode}</p>
       )}
@@ -189,7 +194,7 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
   ) : (
     (show('showBarcode') && item?.barcode) ? (
       <div key={CODE_KEY} style={{ flexShrink: 0, width: '100%' }}>
-        <BarcodeImage value={item.barcode} height={barcodeHeight} fontSize={smallFontSize} barWidth={barWidth} />
+        <BarcodeImage value={item.barcode} height={barcodeHeight} fontSize={smallFontSize} barWidth={barWidth} pixelRatio={pixelRatio} />
         {show('showBarcodeNumber') && (
           <p style={{ margin: 0, fontSize: smallFontSize, color: lbl?.textColor || '#555', textAlign: 'center' }}>{item.barcode}</p>
         )}

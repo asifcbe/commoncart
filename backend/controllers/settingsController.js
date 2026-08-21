@@ -48,6 +48,12 @@ const DEFAULT_LABEL_PRINT = {
   columns: 1,
   contentScale: 1.0,
   codeScale: 1.0,
+  // Target printer resolution in dpi (152/200/203/300/600 — see frontend
+  // PRINTER_DPI_OPTIONS). 203 matches common desktop label printers like the
+  // SATO SA408. Barcode/QR images are rendered at this resolution instead of
+  // the browser's fixed 96dpi default so they print crisp on real hardware
+  // rather than blurry from being stretched up at print time.
+  printerDpi: 203,
   codePosition: 'top',      // 'top' | 'middle' | 'bottom' | 'left' | 'right'
   contentAlign: 'center',   // 'left' | 'center' | 'right'
   borderStyle: 'solid',     // 'solid' | 'dashed' | 'none'
