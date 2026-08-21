@@ -249,7 +249,7 @@ export const BarcodeLabel = ({ item, sizeConfig, lbl }) => <UnifiedLabel item={i
 // sheet. forwardRef so react-to-print (used by BarcodeLabelPrintDialog.jsx)
 // can print this exact, already-mounted node directly — same pattern as
 // DigitZebra's BarcodePrintSheet/QRPrintSheet.
-export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, columns = 1, mode = 'barcode', extraStyle }, ref) => {
+export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, columns = 1, mode = 'barcode' }, ref) => {
   const isA4 = sizeConfig.key === 'a4';
   const LabelComp = mode === 'qr' ? QRLabel : BarcodeLabel;
   return (
@@ -259,7 +259,6 @@ export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, colu
       gridTemplateColumns: `repeat(${isA4 ? Math.max(1, columns) : columns}, ${sizeConfig.width})`,
       gap: isA4 ? 8 : 2,
       width: isA4 ? '210mm' : undefined,
-      ...extraStyle,
     }}>
       {entries.map(({ item, copies }) =>
         Array.from({ length: copies }).map((_, i) => (

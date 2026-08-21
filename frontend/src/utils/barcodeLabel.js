@@ -143,11 +143,7 @@ export const LABEL_SIZES = [
   { key: '50x40',     label: '50×40mm',                   widthMm: 50,  heightMm: 40  },
   { key: '50x30',     label: '50×30mm',                   widthMm: 50,  heightMm: 30  },
   { key: '50x25',     label: '50×25mm',                   widthMm: 50,  heightMm: 25  },
-  // Physically 38mm wide × 25mm tall, but this printer/roll feeds it
-  // narrow-edge-first (portrait) rather than the usual long-edge-first —
-  // portraitPrint tells getPageStyle() to swap the @page dimensions and
-  // rotate the printed content 90° to match, instead of printing landscape.
-  { key: '38x25',     label: '38×25mm (Jewellery)',        widthMm: 38,  heightMm: 25, portraitPrint: true },
+  { key: '38x25',     label: '38×25mm (Jewellery)',        widthMm: 38,  heightMm: 25  },
   { key: '30x20',     label: '30×20mm (Mini)',             widthMm: 30,  heightMm: 20  },
   { key: 'small',     label: '58×30mm (Narrow Thermal)',   widthMm: 58,  heightMm: 30  },
   { key: '60x40',     label: '60×40mm',                   widthMm: 60,  heightMm: 40  },
@@ -191,7 +187,6 @@ export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0) => {
     fontSize: baseFontPx,
     smallFontSize: smallFontPx,
     barWidth: Math.max(1, (innerW / 100) * codeScale),
-    portraitPrint: !!entry.portraitPrint,
   };
 };
 

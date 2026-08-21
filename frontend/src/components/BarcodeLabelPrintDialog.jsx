@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useReactToPrint } from 'react-to-print';
-import { Barcode, Printer, QrCode, RectangleHorizontal, RectangleVertical } from 'lucide-react';
+import { Barcode, Printer, QrCode } from 'lucide-react';
 import Modal from './ui/Modal';
 import Button from './ui/Button';
 import Input from './ui/Input';
@@ -76,59 +76,13 @@ function ToggleButtonGroup({ value, onChange, options }) {
   );
 }
 
-// Orientation is user-controlled from the dialog (see the Portrait/
-// Landscape toggle below), not the browser's native print-dialog control —
-// @page{size:<W><H>} (two explicit lengths) is required to pin an exact
-// custom label size in mm, and per the CSS spec that inherently fixes
-// orientation too; there's no @page syntax that keeps an exact custom size
-// AND leaves a *native* orientation dropdown live. So instead we rotate the
-// content ourselves and swap which mm value @page reports as width vs
-// height — same visual result, just driven by our own control.
-function getPageStyle(sizeConfig, columns, orientation) {
+function getPageStyle(sizeConfig, columns) {
   const isA4 = sizeConfig.key === 'a4';
-  if (isA4) return `@page { size: A4 ${orientation}; margin: 8mm; } body { margin: 0; }`;
+  if (isA4) return '@page { size: A4 portrait; margin: 8mm; } body { margin: 0; }';
   const wMm = parseFloat(sizeConfig.width) || 80;
   const hMm = parseFloat(sizeConfig.height) || 40;
   const totalW = wMm * Math.max(1, Number(columns) || 1);
-  if (orientation === 'portrait') {
-    // Physical page is hMm wide × totalW tall (dimensions swapped from the
-    // label's own natural W×H) — content itself is rotated 90° to fit, see
-    // getOrientationStyles() below.
-    return `@page { size: ${hMm}mm ${totalW}mm; margin: 0; } body { margin: 0; padding: 0; }`;
-  }
   return `@page { size: ${totalW}mm ${hMm}mm; margin: 0; } body { margin: 0; padding: 0; }`;
-}
-
-// A4 conventionally defaults portrait; every other size defaults to its own
-// natural landscape layout unless explicitly flagged portraitPrint (e.g. the
-// 38×25 Jewellery label, fed narrow-edge-first).
-function defaultOrientationFor(sizeConfig) {
-  if (sizeConfig.key === 'a4') return 'portrait';
-  return sizeConfig.portraitPrint ? 'portrait' : 'landscape';
-}
-
-// Wraps the printed content to match the chosen orientation — 'landscape'
-// (a non-A4 label's natural, wide-first layout) is a no-op; 'portrait'
-// rotates the content 90° and centers it in a page-sized (hMm × totalW) box
-// to match the swapped @page dimensions above. Returns { pageStyle,
-// contentStyle }; both {} for A4 (handled entirely by the @page keyword —
-// no content rotation needed since A4's own portrait/landscape are both
-// "normal", non-rotated pages).
-function getOrientationStyles(sizeConfig, columns, orientation) {
-  if (sizeConfig.key === 'a4' || orientation !== 'portrait') return { pageStyle: {}, contentStyle: {} };
-  const wMm = parseFloat(sizeConfig.width) || 80;
-  const hMm = parseFloat(sizeConfig.height) || 40;
-  const totalW = wMm * Math.max(1, Number(columns) || 1);
-  return {
-    pageStyle: {
-      width: `${hMm}mm`, height: `${totalW}mm`,
-      position: 'relative', overflow: 'hidden',
-    },
-    contentStyle: {
-      position: 'absolute', top: '50%', left: '50%',
-      transform: 'translate(-50%, -50%) rotate(90deg)',
-    },
-  };
 }
 
 // Loads the label design saved in Settings (fields, zones, styling) plus its
@@ -178,29 +132,19 @@ export function BarcodeDialog({ item, businessName, onClose }) {
     copies, setCopies,
   } = useSavedLabelConfig();
   const [printMode, setPrintMode] = useState('barcode');
-  const [orientation, setOrientation] = useState(() => defaultOrientationFor(buildSizeConfig(LABEL_SIZES.find((s) => s.key === DEFAULT_BARCODE_LABEL.defaultLabelSize) || LABEL_SIZES[0])));
   const printRef = useRef(null);
 
   const sizeEntry = LABEL_SIZES.find((s) => s.key === labelSizeKey) || LABEL_SIZES[0];
   const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale);
-  // Each label size has its own sensible default (e.g. A4 defaults portrait,
-  // the 38×25 Jewellery label defaults portrait too); resets whenever the
-  // chosen size changes, but the user can still flip it with the toggle
-  // below for this print job.
-  useEffect(() => {
-    setOrientation(defaultOrientationFor(sizeConfig));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labelSizeKey]);
   const labelItem = item ? productToLabelItem(item, businessName) : null;
   const hasContent = !!(labelItem?.barcode || printMode === 'qr');
   const finalCopies = Math.max(1, Number(copies) || 1);
   const finalColumns = Math.max(1, Number(columns) || 1);
   const printEntries = labelItem ? [{ item: labelItem, copies: finalCopies }] : [];
-  const orient = getOrientationStyles(sizeConfig, finalColumns, orientation);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    pageStyle: getPageStyle(sizeConfig, finalColumns, orientation),
+    pageStyle: getPageStyle(sizeConfig, finalColumns),
     onBeforePrint: waitForQrReady,
     onPrintError: () => toast({ message: 'Could not open the print dialog. Please allow pop-ups for this site.', type: 'error' }),
   });
@@ -258,20 +202,6 @@ export function BarcodeDialog({ item, businessName, onClose }) {
 
       {hasContent && (
         <div className="mt-3">
-          <label className="text-xs font-medium text-gray-600 block mb-1">Orientation</label>
-          <ToggleButtonGroup
-            value={orientation}
-            onChange={setOrientation}
-            options={[
-              { value: 'portrait', label: 'Portrait', icon: <RectangleVertical size={15} /> },
-              { value: 'landscape', label: 'Landscape', icon: <RectangleHorizontal size={15} /> },
-            ]}
-          />
-        </div>
-      )}
-
-      {hasContent && (
-        <div className="mt-3">
           <div className="flex items-center justify-between mb-0.5">
             <span className="text-xs font-semibold text-gray-600">Content Size</span>
             <span className="text-xs font-bold" style={{ color: ACCENT }}>{Math.round(contentScale * 100)}%</span>
@@ -303,10 +233,7 @@ export function BarcodeDialog({ item, businessName, onClose }) {
       {/* Off-screen (not display:none — react-to-print needs the source node
           actually laid out/painted, same as DigitZebra's barcode dialogs) */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-        <div ref={printRef} style={orient.pageStyle}>
-          <BulkLabelSheet entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={finalColumns} mode={printMode}
-            extraStyle={orient.contentStyle} />
-        </div>
+        <BulkLabelSheet ref={printRef} entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={finalColumns} mode={printMode} />
       </div>
     </Modal>
   );
@@ -321,7 +248,6 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   } = useSavedLabelConfig();
   const [printMode, setPrintMode] = useState('barcode');
   const [copiesMap, setCopiesMap] = useState({});
-  const [orientation, setOrientation] = useState(() => defaultOrientationFor(buildSizeConfig(LABEL_SIZES.find((s) => s.key === DEFAULT_BARCODE_LABEL.defaultLabelSize) || LABEL_SIZES[0])));
   const printRef = useRef(null);
 
   // Fill in each item's copy count from the saved default once it loads.
@@ -337,14 +263,6 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   const sizeEntry = LABEL_SIZES.find((s) => s.key === labelSizeKey) || LABEL_SIZES[0];
   const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale);
   const columnsNum = Math.max(1, Number(columns) || 1);
-  // Each label size has its own sensible default (e.g. A4 defaults portrait,
-  // the 38×25 Jewellery label defaults portrait too); resets whenever the
-  // chosen size changes, but the user can still flip it with the toggle
-  // below for this print job.
-  useEffect(() => {
-    setOrientation(defaultOrientationFor(sizeConfig));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labelSizeKey]);
 
   const getCopies = (id) => copiesMap[id] ?? 1;
   const setCopies = (id, val) => setCopiesMap((prev) => ({ ...prev, [id]: val === '' ? '' : Math.max(1, Math.min(500, Number(val) || 1)) }));
@@ -356,11 +274,10 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   });
   const totalLabels = entries.reduce((s, e) => s + e.copies, 0);
   const printEntries = entries.filter((e) => e.copies > 0).map((e) => ({ item: e.item, copies: e.copies }));
-  const orient = getOrientationStyles(sizeConfig, columnsNum, orientation);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
-    pageStyle: getPageStyle(sizeConfig, columnsNum, orientation),
+    pageStyle: getPageStyle(sizeConfig, columnsNum),
     onBeforePrint: waitForQrReady,
     onPrintError: () => toast({ message: 'Could not open the print dialog. Please allow pop-ups for this site.', type: 'error' }),
   });
@@ -394,17 +311,6 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
           <label className="text-xs font-medium text-gray-600 block mb-1">Columns</label>
           <Input type="number" min="1" max="8" value={columns}
             onChange={(e) => setColumns(Math.max(1, Math.min(8, Number(e.target.value) || 1)))} />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-600 block mb-1">Orientation</label>
-          <ToggleButtonGroup
-            value={orientation}
-            onChange={setOrientation}
-            options={[
-              { value: 'portrait', label: 'Portrait', icon: <RectangleVertical size={14} /> },
-              { value: 'landscape', label: 'Landscape', icon: <RectangleHorizontal size={14} /> },
-            ]}
-          />
         </div>
         <div className="min-w-32">
           <div className="flex items-center justify-between mb-0.5">
@@ -463,10 +369,7 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
 
       {/* Off-screen (not display:none — see BarcodeDialog's comment above) */}
       <div style={{ position: 'fixed', left: '-9999px', top: 0 }}>
-        <div ref={printRef} style={orient.pageStyle}>
-          <BulkLabelSheet entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={columnsNum} mode={printMode}
-            extraStyle={orient.contentStyle} />
-        </div>
+        <BulkLabelSheet ref={printRef} entries={printEntries} sizeConfig={sizeConfig} lbl={lbl} columns={columnsNum} mode={printMode} />
       </div>
     </Modal>
   );
