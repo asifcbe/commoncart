@@ -281,22 +281,63 @@ export const BarcodeLabel = ({ item, sizeConfig, lbl, mode }) => <UnifiedLabel i
 // Renders all selected items (each with individual copies) on one printable
 // sheet. forwardRef so react-to-print (used by BarcodeLabelPrintDialog.jsx)
 // can print this exact, already-mounted node directly.
+//
+// A4: labels flow down one A4 grid.
+// Roll / label printers: `@page` is sized to a single row of `columns` labels,
+// so every row of labels MUST be its own page — a plain grid taller than one
+// label just gets clipped at the page boundary and the rest never prints
+// (this is why "4 labels → only 2 print"). Each row div is therefore an
+// explicit page break, exactly one label tall, with no sheet padding/gap so
+// it aligns to the page edges.
 export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, columns = 1, mode = 'barcode' }, ref) => {
   const isA4 = sizeConfig.key === 'a4';
   const LabelComp = mode === 'qr' ? QRLabel : BarcodeLabel;
+  const cols = Math.max(1, Number(columns) || 1);
+
+  // Flatten every (item, copies) pair into one entry per physical label.
+  const flat = [];
+  (entries || []).forEach(({ item, copies }) => {
+    const n = Math.max(0, Math.floor(Number(copies) || 0));
+    for (let i = 0; i < n; i++) flat.push({ item, i });
+  });
+
+  if (isA4) {
+    return (
+      <div ref={ref} style={{
+        padding: 16, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif',
+        display: 'grid',
+        gridTemplateColumns: `repeat(${cols}, ${sizeConfig.width})`,
+        gap: 8, width: '210mm',
+      }}>
+        {flat.map(({ item, i }, idx) => (
+          <LabelComp key={`${item.id}-${i}-${idx}`} item={item} sizeConfig={sizeConfig} lbl={lbl} />
+        ))}
+      </div>
+    );
+  }
+
+  const rows = [];
+  for (let r = 0; r < flat.length; r += cols) rows.push(flat.slice(r, r + cols));
+  const rowWidthMm = (parseFloat(sizeConfig.width) || 80) * cols;
+
   return (
-    <div ref={ref} style={{
-      padding: isA4 ? 16 : 4, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif',
-      display: 'grid',
-      gridTemplateColumns: `repeat(${isA4 ? Math.max(1, columns) : columns}, ${sizeConfig.width})`,
-      gap: isA4 ? 8 : 2,
-      width: isA4 ? '210mm' : undefined,
-    }}>
-      {entries.map(({ item, copies }) =>
-        Array.from({ length: copies }).map((_, i) => (
-          <LabelComp key={`${item.id}-${i}`} item={item} sizeConfig={sizeConfig} lbl={lbl} />
-        ))
-      )}
+    <div ref={ref} style={{ backgroundColor: '#fff', fontFamily: 'Arial, sans-serif' }}>
+      {rows.map((row, r) => (
+        <div key={r} style={{
+          display: 'flex',
+          width: `${rowWidthMm}mm`,
+          height: sizeConfig.height || 'auto',
+          overflow: 'hidden',
+          breakInside: 'avoid',
+          pageBreakInside: 'avoid',
+          breakAfter: r < rows.length - 1 ? 'page' : 'auto',
+          pageBreakAfter: r < rows.length - 1 ? 'always' : 'auto',
+        }}>
+          {row.map(({ item, i }, c) => (
+            <LabelComp key={`${item.id}-${i}-${c}`} item={item} sizeConfig={sizeConfig} lbl={lbl} />
+          ))}
+        </div>
+      ))}
     </div>
   );
 });
