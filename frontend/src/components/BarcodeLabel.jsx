@@ -4,26 +4,33 @@ import {
   CODE_KEY, ZONES, resolveZoneLayout,
 } from '../utils/barcodeLabel';
 
-// Ported 1:1 from DigitZebra's Items.jsx label components (BarcodeImage,
-// QRImage, LabelContent, UnifiedLabel) so both apps render identical labels.
-// `item` fields expected: name, itemCode, barcode, category, size, variant,
-// hsnCode, mrp, salePrice, _businessName, barcodeExtraFields.
-
-// `pixelRatio` (see pixelRatioForDpi in utils/barcodeLabel.js) renders the
-// underlying bitmap at the target printer's real resolution instead of the
-// browser's 96dpi default — the <img> itself still displays at height/
-// barWidth's original CSS size (no width/height style set from it), so this
-// only affects sharpness on real hardware, never on-page layout.
+// The label is rendered as a 5-zone CSS grid (top / left+center+right / bottom)
+// that mirrors the ZoneLayoutEditor, so dragging a field (or the barcode/QR)
+// into a zone actually moves it on the printed label. Every placed field lives
+// in exactly one zone's ordered list; `resolveZoneLayout(lbl)` turns the saved
+// config into that map.
+//
+// `pixelRatio` (CommonCart-only, see pixelRatioForDpi in utils/barcodeLabel.js)
+// renders the underlying bitmap at the target printer's real resolution
+// instead of the browser's 96dpi default. The <img> is then pinned to
+// `cssWidth` (the 1× size) with height:auto + maxWidth:100%, so on-page layout
+// is unchanged — only sharper on real hardware.
 export const BarcodeImage = ({ value, height = 70, fontSize = 13, barWidth = 1.5, pixelRatio = 1 }) => {
-  const src = barcodeDataURL(value, { height, fontSize, barWidth, pixelRatio });
-  if (!src) return <svg style={{ maxWidth: '100%', display: 'block' }} />;
-  return <img src={src} alt={value} style={{ maxWidth: '100%', display: 'block' }} />;
+  const bc = barcodeDataURL(value, { height, fontSize, barWidth, pixelRatio });
+  if (!bc) return <svg style={{ maxWidth: '100%', display: 'block' }} />;
+  return (
+    <img
+      src={bc.src}
+      alt={value}
+      style={{ width: bc.cssWidth, height: 'auto', maxWidth: '100%', display: 'block' }}
+    />
+  );
 };
 
 export const QRImage = ({ value, size = 80, pixelRatio = 1 }) => {
   // Synchronous cache hit (e.g. pre-warmed before a print render) renders
-  // immediately on first paint — no async gap for a print-window snapshot
-  // to race against. A cache miss still falls back to the async effect.
+  // immediately on first paint — no async gap for a print-window snapshot to
+  // race against. A cache miss still falls back to the async effect.
   const [src, setSrc] = useState(() => peekQrDataURL(value, size, pixelRatio));
   useEffect(() => {
     let cancelled = false;
@@ -39,9 +46,10 @@ export const QRImage = ({ value, size = 80, pixelRatio = 1 }) => {
 };
 
 // Renders one field's value (or null if that field has nothing to show for
-// this item). Shared by the zone grid (BarcodeLabel.jsx) and the settings
-// panel's live per-field preview.
-function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
+// this item). `zoneKeys` is the ordered key list of the zone this field sits
+// in — used only by the price fields to decide whether MRP + Sale Price draw
+// as one combined row (same zone) or separately (different zones).
+function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = [] }) {
   const show = (k) => lbl?.[k] !== false;
   const globalTextColor = lbl?.textColor || '#000000';
   const fieldStyles = lbl?.fieldStyles || {};
@@ -81,7 +89,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', opacity: 0.7, ...st }}>
+        <p key={key} style={{ margin: '0 0 2px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item.itemCode}
         </p>
       );
@@ -91,7 +99,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', opacity: 0.75, ...st }}>
+        <p key={key} style={{ margin: '0 0 2px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item.category}
         </p>
       );
@@ -101,7 +109,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', opacity: 0.75, ...st }}>
+        <p key={key} style={{ margin: '0 0 2px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : 'Size: '}{item.size}
         </p>
       );
@@ -111,7 +119,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', opacity: 0.75, ...st }}>
+        <p key={key} style={{ margin: '0 0 2px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item.variant}
         </p>
       );
@@ -122,7 +130,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
       const prefix = fLabel(key);
       const label = prefix != null ? prefix : 'HSN';
       return (
-        <p key={key} style={{ margin: '0 0 2px', opacity: 0.6, ...st }}>
+        <p key={key} style={{ margin: '0 0 2px', ...st }}>
           {label ? `${label}: ` : ''}{item.hsnCode}
         </p>
       );
@@ -131,31 +139,46 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
     case 'showSalePrice': {
       const hasMrp = show('showMrp') && item?.mrp && Number(item.mrp) > 0;
       const hasSalePrice = show('showSalePrice') && item?.salePrice != null && Number(item.salePrice) > 0;
-      // Both prices render together as one combined field the first time
-      // either is encountered in a zone; the other's own slot renders nothing
-      // so a zone containing both showMrp and showSalePrice doesn't duplicate.
+      if (!hasMrp && !hasSalePrice) return null;
+
+      // When MRP and Sale Price share a zone they draw as ONE combined row on
+      // whichever key comes first in that zone; the other key draws nothing.
+      // When they're in different zones, each key draws only its own value.
+      const bothHere = zoneKeys.includes('showMrp') && zoneKeys.includes('showSalePrice');
+      if (bothHere) {
+        const firstKey = zoneKeys.indexOf('showMrp') <= zoneKeys.indexOf('showSalePrice') ? 'showMrp' : 'showSalePrice';
+        if (key !== firstKey) return null;
+      }
+      let drawMrp = hasMrp && (bothHere || key === 'showMrp');
+      let drawSp = hasSalePrice && (bothHere || key === 'showSalePrice');
+      // No real discount (MRP === sale price): show just the struck MRP, not a
+      // redundant identical bold price next to it.
+      if (drawMrp && drawSp && Number(item.mrp) === Number(item.salePrice)) drawSp = false;
+      if (!drawMrp && !drawSp) return null;
+
       const mrpSt = fStyle('showMrp', smallFontSize);
       const spSt = fStyle('showSalePrice', fontSize);
       const mrpPrefix = fLabel('showMrp');
       const spPrefix = fLabel('showSalePrice');
-      if (key === 'showMrp' && !hasMrp && hasSalePrice) return null; // let showSalePrice's slot render it
-      if (key === 'showSalePrice' && !hasSalePrice) return null;
-      if (key === 'showMrp' && !hasMrp) return null;
+      // Solid black + solid strike line, no opacity — a faded (opacity 0.5)
+      // grey prints as an invisible dither on direct-thermal printers.
+      const mrpColor = mrpSt.color || '#000000';
       return (
         <div key={key} style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 3, margin: '3px 0 1px' }}>
-          {hasMrp && (
-            <span style={{ textDecoration: 'line-through', opacity: 0.5, ...mrpSt }}>
-              {mrpPrefix != null ? (mrpPrefix ? `${mrpPrefix} ` : '') : 'MRP '}₹{Number(item.mrp).toFixed(2)}
+          {drawMrp && (
+            <span style={{
+              fontSize: mrpSt.fontSize,
+              color: mrpColor,
+              textDecoration: 'line-through',
+              textDecorationColor: mrpColor,
+              textDecorationThickness: 'from-font',
+            }}>
+              {mrpPrefix != null ? (mrpPrefix ? `${mrpPrefix} ` : '') : 'MRP '}₹{Number(item.mrp).toLocaleString('en-IN')}
             </span>
           )}
-          {key === 'showMrp' && hasSalePrice && (
-            <span style={{ fontWeight: 800, letterSpacing: '0.02em', fontSize: hasMrp ? spSt.fontSize * 1.05 : spSt.fontSize, color: spSt.color }}>
-              {spPrefix != null ? (spPrefix ? `${spPrefix} ` : '') : ''}₹{Number(item.salePrice).toFixed(2)}
-            </span>
-          )}
-          {key === 'showSalePrice' && !hasMrp && (
-            <span style={{ fontWeight: 800, letterSpacing: '0.02em', fontSize: spSt.fontSize, color: spSt.color }}>
-              {spPrefix != null ? (spPrefix ? `${spPrefix} ` : '') : ''}₹{Number(item.salePrice).toFixed(2)}
+          {drawSp && (
+            <span style={{ fontWeight: 800, letterSpacing: '0.02em', fontSize: drawMrp ? spSt.fontSize * 1.05 : spSt.fontSize, color: spSt.color }}>
+              {spPrefix != null ? (spPrefix ? `${spPrefix} ` : '') : ''}₹{Number(item.salePrice).toLocaleString('en-IN')}
             </span>
           )}
         </div>
@@ -178,7 +201,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize }) {
 }
 
 // One zone's content — every placed field (in order) plus the barcode/QR
-// image wherever CODE_KEY happens to sit in that zone's list.
+// image wherever CODE_KEY sits in that zone's list.
 function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
   const { barcodeHeight, qrSize, barWidth, fontSize, smallFontSize, pixelRatio } = sizeConfig;
   const show = (k) => lbl?.[k] !== false;
@@ -188,7 +211,7 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
     <div key={CODE_KEY} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
       <QRImage value={qrValue} size={Math.round(qrSize)} pixelRatio={pixelRatio} />
       {show('showBarcodeNumber') && item?.barcode && (
-        <p style={{ margin: '2px 0 0', fontSize: smallFontSize, color: lbl?.textColor || '#555', textAlign: 'center' }}>{item.barcode}</p>
+        <p style={{ margin: '2px 0 0', fontSize: smallFontSize, color: lbl?.textColor || '#000000', textAlign: 'center' }}>{item.barcode}</p>
       )}
     </div>
   ) : (
@@ -196,13 +219,13 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
       <div key={CODE_KEY} style={{ flexShrink: 0, width: '100%' }}>
         <BarcodeImage value={item.barcode} height={barcodeHeight} fontSize={smallFontSize} barWidth={barWidth} pixelRatio={pixelRatio} />
         {show('showBarcodeNumber') && (
-          <p style={{ margin: 0, fontSize: smallFontSize, color: lbl?.textColor || '#555', textAlign: 'center' }}>{item.barcode}</p>
+          <p style={{ margin: 0, fontSize: smallFontSize, color: lbl?.textColor || '#000000', textAlign: 'center' }}>{item.barcode}</p>
         )}
       </div>
     ) : null
   );
 
-  const nodes = keys.map((k) => (k === CODE_KEY ? codeEl : renderLabelField(k, { item, lbl, fontSize, smallFontSize })));
+  const nodes = keys.map((k) => (k === CODE_KEY ? codeEl : renderLabelField(k, { item, lbl, fontSize, smallFontSize, zoneKeys: keys })));
   if (!nodes.some(Boolean)) return null;
 
   return (
@@ -223,14 +246,19 @@ export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
 
   const outerStyle = {
     width, height: height || 'auto',
-    padding: isA4 ? '20px 24px' : '3px 4px',
+    padding: isA4 ? '20px 24px' : '1px',
     fontFamily: 'Arial, sans-serif',
     overflow: 'hidden',
     display: 'grid',
     gridTemplateAreas: '"top top top" "left center right" "bottom bottom bottom"',
-    gridTemplateRows: 'auto 1fr auto',
+    // Rows sized to content (not '1fr') so the middle row doesn't balloon and
+    // push the barcode/QR away from the top/bottom text; the whole block is
+    // then centred vertically as one unit. No gaps between zones — every mm of
+    // a small label counts (esp. QR).
+    gridTemplateRows: 'auto auto auto',
     gridTemplateColumns: 'auto 1fr auto',
-    rowGap: 2, columnGap: 4,
+    rowGap: 0, columnGap: 0,
+    alignContent: 'center',
     boxSizing: 'border-box',
     backgroundColor: bgColor,
     border: isA4 ? 'none' : (borderStyle === 'none' ? 'none' : `0.5px ${borderStyle} #ccc`),
@@ -248,12 +276,11 @@ export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
 };
 
 export const QRLabel = ({ item, sizeConfig, lbl }) => <UnifiedLabel item={item} sizeConfig={sizeConfig} lbl={lbl} mode="qr" />;
-export const BarcodeLabel = ({ item, sizeConfig, lbl }) => <UnifiedLabel item={item} sizeConfig={sizeConfig} lbl={lbl} mode="barcode" />;
+export const BarcodeLabel = ({ item, sizeConfig, lbl, mode }) => <UnifiedLabel item={item} sizeConfig={sizeConfig} lbl={lbl} mode={mode || 'barcode'} />;
 
 // Renders all selected items (each with individual copies) on one printable
 // sheet. forwardRef so react-to-print (used by BarcodeLabelPrintDialog.jsx)
-// can print this exact, already-mounted node directly — same pattern as
-// DigitZebra's BarcodePrintSheet/QRPrintSheet.
+// can print this exact, already-mounted node directly.
 export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, columns = 1, mode = 'barcode' }, ref) => {
   const isA4 = sizeConfig.key === 'a4';
   const LabelComp = mode === 'qr' ? QRLabel : BarcodeLabel;

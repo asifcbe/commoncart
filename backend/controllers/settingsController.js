@@ -42,44 +42,48 @@ const DEFAULT_VARIANTS = { variants: [], sizes: [] };
 // keys over time and both sides must be able to add fields without a backend
 // migration.
 const LABEL_PRINT_KEY = 'LABEL_PRINT_CONFIG';
+// Label design + per-print-job defaults. Rendering is DigitZebra's
+// `codePosition` + `fieldOrder` model; CommonCart keeps a 5-zone editor UI on
+// the Settings page whose `zones` map the frontend bridges to
+// codePosition/fieldOrder (zonesToLayout). `printerDpi` and `codeType` are
+// CommonCart extras. Free-form JSON (AppSettings.value is Mixed) — the label
+// builder adds keys over time without a backend migration.
 const DEFAULT_LABEL_PRINT = {
+  codeType: 'barcode',      // 'barcode' | 'qr' — per-dialog default (dialogs also have a toggle)
   defaultLabelSize: 'standard', // LABEL_SIZES key (see frontend LABEL_SIZES)
   copies: 1,
   columns: 1,
   contentScale: 1.0,
   codeScale: 1.0,
-  // Target printer resolution in dpi (152/200/203/300/600 — see frontend
-  // PRINTER_DPI_OPTIONS). 203 matches common desktop label printers like the
-  // SATO SA408. Barcode/QR images are rendered at this resolution instead of
-  // the browser's fixed 96dpi default so they print crisp on real hardware
-  // rather than blurry from being stretched up at print time.
+  // CommonCart-only. Target printer resolution in dpi (152/200/203/300/600 —
+  // see frontend PRINTER_DPI_OPTIONS). Barcode/QR images render at this
+  // resolution instead of the browser's fixed 96dpi default so they print
+  // crisp on real hardware. Does not affect layout.
   printerDpi: 203,
   codePosition: 'top',      // 'top' | 'middle' | 'bottom' | 'left' | 'right'
   contentAlign: 'center',   // 'left' | 'center' | 'right'
   borderStyle: 'solid',     // 'solid' | 'dashed' | 'none'
   backgroundColor: '#ffffff',
   textColor: '#000000',
-  // Field visibility — matches ALL_LABEL_FIELDS keys in the frontend.
-  showBusinessName: false,
+  // Field visibility — matches ALL_LABEL_FIELDS keys in the frontend and
+  // DigitZebra's ConfigContext defaults.
   showItemName: true,
   showItemCode: true,
-  showCategory: false,
-  showSize: true,
-  showVariant: true,
-  showHsn: false,
   showMrp: true,
   showSalePrice: true,
   showBarcode: true,
   showBarcodeNumber: true,
-  showExtraFields: false,
-  fieldOrder: [],           // ordered list of ALL_LABEL_FIELDS keys (legacy, pre-zone-editor)
+  showBusinessName: false,
+  showHsn: false,
+  showCategory: false,
+  showSize: false,
+  showVariant: false,
+  showExtraFields: true,
+  fieldOrder: [],           // ordered list of ALL_LABEL_FIELDS keys (derived from `zones` on the frontend)
   fieldStyles: {},          // { [fieldKey]: { size, color } }
   fieldLabels: {},          // { [fieldKey]: customPrefixText }
-  // 5-zone drag-and-drop placement (top/left/center/right/bottom), each an
-  // ordered list of field keys + the special '__code__' barcode/QR marker —
-  // see resolveZoneLayout() on the frontend. null until the user first opens
-  // the print dialog's Layout & Settings panel; that panel's own default
-  // (DEFAULT_ZONE_LAYOUT) fills in until then.
+  // 5-zone drag-and-drop placement (top/left/center/right/bottom + '__code__').
+  // null until first saved; the frontend derives codePosition/fieldOrder from it.
   zones: null,
 };
 
@@ -565,10 +569,12 @@ exports.updateLabelPrintConfig = async (req, res) => {
     const config = {
       ...DEFAULT_LABEL_PRINT,
       ...b,
+      codeType: b.codeType === 'qr' ? 'qr' : 'barcode',
       copies: Math.max(1, Math.min(500, Number(b.copies) || DEFAULT_LABEL_PRINT.copies)),
       columns: Math.max(1, Math.min(8, Number(b.columns) || DEFAULT_LABEL_PRINT.columns)),
       contentScale: Math.max(0.3, Math.min(3, Number(b.contentScale) || DEFAULT_LABEL_PRINT.contentScale)),
       codeScale: Math.max(0.3, Math.min(3, Number(b.codeScale) || DEFAULT_LABEL_PRINT.codeScale)),
+      printerDpi: Number(b.printerDpi) || DEFAULT_LABEL_PRINT.printerDpi,
       fieldOrder: Array.isArray(b.fieldOrder) ? b.fieldOrder.slice(0, 40) : DEFAULT_LABEL_PRINT.fieldOrder,
       fieldStyles: (b.fieldStyles && typeof b.fieldStyles === 'object') ? b.fieldStyles : {},
       fieldLabels: (b.fieldLabels && typeof b.fieldLabels === 'object') ? b.fieldLabels : {},

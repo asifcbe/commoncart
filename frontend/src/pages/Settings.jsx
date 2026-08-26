@@ -15,7 +15,10 @@ import Spinner from '../components/ui/Spinner';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import PermissionEditor from '../components/PermissionEditor';
 import { SECTIONS } from '../config/permissions';
-import { LABEL_SIZES, DEFAULT_BARCODE_LABEL, buildSizeConfig, resolveZoneLayout, PRINTER_DPI_OPTIONS, DEFAULT_PRINTER_DPI } from '../utils/barcodeLabel';
+import {
+  LABEL_SIZES, DEFAULT_BARCODE_LABEL, buildSizeConfig, resolveZoneLayout, zonesToLayout,
+  PRINTER_DPI_OPTIONS, DEFAULT_PRINTER_DPI,
+} from '../utils/barcodeLabel';
 import ZoneLayoutEditor from '../components/ZoneLayoutEditor';
 import { BarcodeLabel } from '../components/BarcodeLabel';
 import api from '../utils/api';
@@ -320,16 +323,23 @@ export default function Settings() {
   const [savingAutoDelete, setSavingAutoDelete] = useState(false);
   const [runningAutoDelete, setRunningAutoDelete] = useState(false);
 
-  const [labelPrint, setLabelPrint] = useState({ ...DEFAULT_BARCODE_LABEL, zones: resolveZoneLayout(DEFAULT_BARCODE_LABEL) });
+  const [labelPrint, setLabelPrint] = useState(() => {
+    const z = resolveZoneLayout(DEFAULT_BARCODE_LABEL);
+    const seed = { ...DEFAULT_BARCODE_LABEL, zones: z };
+    return { ...seed, ...zonesToLayout(seed) };
+  });
   const [savingLabelPrint, setSavingLabelPrint] = useState(false);
-  // ZoneLayoutEditor expects a standalone `zones` value/setter — both are
-  // thin wrappers over the one `labelPrint` state so the whole card (fields,
-  // zones, styling, size/copies) saves together via one Save Defaults click.
+  // ZoneLayoutEditor owns a standalone `zones` value/setter. Both are thin
+  // wrappers over the one `labelPrint` state; every zone edit also re-derives
+  // DigitZebra's codePosition + fieldOrder (via zonesToLayout) so the live
+  // preview and the printed label — which render off codePosition/fieldOrder,
+  // not zones — stay in sync with what's dragged.
   const labelPrintZones = labelPrint.zones || resolveZoneLayout(labelPrint);
-  const setLabelPrintZones = (updater) => setLabelPrint((prev) => ({
-    ...prev,
-    zones: typeof updater === 'function' ? updater(prev.zones || resolveZoneLayout(prev)) : updater,
-  }));
+  const setLabelPrintZones = (updater) => setLabelPrint((prev) => {
+    const nextZones = typeof updater === 'function' ? updater(prev.zones || resolveZoneLayout(prev)) : updater;
+    const next = { ...prev, zones: nextZones };
+    return { ...next, ...zonesToLayout(next) };
+  });
 
   const [billPrint, setBillPrint] = useState({ paperSize: '80mm', customWidthMm: 80 });
   const [savingBillPrint, setSavingBillPrint] = useState(false);
@@ -384,7 +394,8 @@ export default function Settings() {
     api.get('/settings/auto-delete-config').then(({ data }) => setAutoDelete(data.config)).catch(() => {});
     api.get('/settings/label-print-config').then(({ data }) => {
       const c = { ...DEFAULT_BARCODE_LABEL, ...data.config };
-      setLabelPrint({ ...c, zones: resolveZoneLayout(c) });
+      const merged = { ...c, zones: resolveZoneLayout(c) };
+      setLabelPrint({ ...merged, ...zonesToLayout(merged) });
     }).catch(() => {});
     api.get('/settings/bill-print-config').then(({ data }) => setBillPrint(data.config)).catch(() => {});
     api.get('/settings/display-config').then(({ data }) => setDisplayConfig(data.config)).catch(() => {});
@@ -443,7 +454,8 @@ export default function Settings() {
     try {
       const { data } = await api.put('/settings/label-print-config', labelPrint);
       const c = { ...DEFAULT_BARCODE_LABEL, ...data.config };
-      setLabelPrint({ ...c, zones: resolveZoneLayout(c) });
+      const merged = { ...c, zones: resolveZoneLayout(c) };
+      setLabelPrint({ ...merged, ...zonesToLayout(merged) });
       toast({ message: 'Label printing defaults saved', type: 'success' });
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to save', type: 'error' });

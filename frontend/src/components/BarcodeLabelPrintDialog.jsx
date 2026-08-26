@@ -10,31 +10,19 @@ import api from '../utils/api';
 import { BulkLabelSheet } from './BarcodeLabel';
 import {
   LABEL_SIZES, buildSizeConfig, DEFAULT_BARCODE_LABEL,
-  productToLabelItem, resolveZoneLayout, waitForQrReady,
+  productToLabelItem, resolveZoneLayout, zonesToLayout, waitForQrReady,
 } from '../utils/barcodeLabel';
 
-// Print-only dialogs — the label's actual design (which fields go where,
-// their styling, colors, borders) is configured exclusively on the Settings
-// page (see Settings.jsx's "Barcode Label Printing Defaults" card +
-// ZoneLayoutEditor) so there's one place a business owner sets it up, rather
-// than it also being editable — and easy to accidentally change — from every
-// Products/Purchase print dialog. These dialogs just fetch that saved
-// layout, show a live preview of it, and let the user pick per-print-job
-// mechanics (label size, copies, columns, scale) before printing.
+// Print dialogs — the label's actual design (which fields go where, styling,
+// colors, borders) is configured on the Settings page (Settings.jsx's
+// "Barcode Label Printing Defaults" card + ZoneLayoutEditor). These dialogs
+// load that saved layout, show a live preview, and let the user pick
+// per-print-job mechanics (label size, copies, columns, scale) before
+// printing.
 //
-// Printing itself uses react-to-print against a REAL, already-mounted
-// off-screen node (not a detached React root serialized to an HTML string
-// fed into a fresh window.open() + document.write() document, which is what
-// this file did previously). That approach worked in most quick manual
-// checks but was unreliable in real printing — window.open()+document.write()
-// creates a brand-new document whose image-decode/paint timing relative to a
-// synchronously-called window.print() isn't guaranteed the same way across
-// browsers/printers, and Chromium's print pipeline doesn't always rasterize
-// a still-decoding <img> in a freshly-written document even when `complete`
-// reads true moments later. react-to-print instead clones DOM that has
-// already been laid out and painted in the live page — the same proven
-// mechanism DigitZebra's own barcode dialogs use — which sidesteps that
-// class of bug entirely.
+// Printing uses react-to-print against a REAL, already-mounted off-screen node
+// — the same proven mechanism DigitZebra's barcode dialogs use — so a
+// still-decoding barcode/QR <img> can't be snapshotted blank.
 
 const ACCENT = '#0d9488';
 
@@ -82,13 +70,19 @@ function getPageStyle(sizeConfig, columns) {
   const wMm = parseFloat(sizeConfig.width) || 80;
   const hMm = parseFloat(sizeConfig.height) || 40;
   const totalW = wMm * Math.max(1, Number(columns) || 1);
-  return `@page { size: ${totalW}mm ${hMm}mm; margin: 0; } body { margin: 0; padding: 0; }`;
+  // `portrait` keyword (mirrors the A4 rule) — without it Chrome auto-selects
+  // Landscape for any wider-than-tall custom size (e.g. 38×25mm), which makes
+  // label printers feed/rotate the page. The mm dimensions still pin the exact
+  // physical label size; this only stops the orientation flip.
+  return `@page { size: ${totalW}mm ${hMm}mm portrait; margin: 0; } body { margin: 0; padding: 0; }`;
 }
 
 // Loads the label design saved in Settings (fields, zones, styling) plus its
-// per-print-job defaults (size/copies/columns/scale) once when a dialog
-// opens. Read-only from here on — nothing in these dialogs writes back to
-// `/settings/label-print-config`.
+// per-print-job defaults (size/copies/columns/scale) once when a dialog opens.
+// Read-only from here — nothing in these dialogs writes back to
+// `/settings/label-print-config`. The 5-zone `zones` map is bridged to
+// DigitZebra's codePosition + fieldOrder (which is what actually renders) via
+// zonesToLayout().
 function useSavedLabelConfig() {
   const [lbl, setLbl] = useState(DEFAULT_BARCODE_LABEL);
   const [zones, setZones] = useState(() => resolveZoneLayout(DEFAULT_BARCODE_LABEL));
@@ -102,13 +96,14 @@ function useSavedLabelConfig() {
   useEffect(() => {
     api.get('/settings/label-print-config').then(({ data }) => {
       const c = { ...DEFAULT_BARCODE_LABEL, ...data.config };
-      setLbl(c);
-      setZones(resolveZoneLayout(c));
-      setLabelSizeKey(c.defaultLabelSize);
-      setColumns(c.columns);
-      setContentScale(c.contentScale);
-      setCodeScale(c.codeScale);
-      setCopies(c.copies);
+      const merged = { ...c, ...zonesToLayout(c) };
+      setLbl(merged);
+      setZones(resolveZoneLayout(merged));
+      setLabelSizeKey(merged.defaultLabelSize);
+      setColumns(merged.columns);
+      setContentScale(merged.contentScale);
+      setCodeScale(merged.codeScale);
+      setCopies(merged.copies);
     }).catch(() => {}).finally(() => setLoaded(true));
   }, []);
 

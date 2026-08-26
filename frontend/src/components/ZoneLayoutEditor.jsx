@@ -5,10 +5,9 @@ import Select from './ui/Select';
 import { ALL_LABEL_FIELDS, CONTENT_ALIGNS, BORDER_STYLES, ZONES, CODE_KEY } from '../utils/barcodeLabel';
 
 // The 5-zone drag-and-drop label layout editor — lives on the Settings page
-// only (Products/Purchase print dialogs are preview-only, see
-// BarcodeLabelPrintDialog.jsx) so there is exactly one place a business
-// owner configures where each field/the barcode sits on the label, instead
-// of two independently-editable copies that could disagree.
+// only (Products/Purchase print dialogs preview the saved design). It writes a
+// `zones` map; Settings.jsx bridges that to DigitZebra's codePosition +
+// fieldOrder (via zonesToLayout) which is what actually renders the label.
 
 export const ACCENT = '#0d9488';
 
@@ -17,7 +16,7 @@ const fieldMeta = (key) => (key === CODE_KEY ? CODE_CHIP_META : ALL_LABEL_FIELDS
 
 // One draggable chip — a field, or the special barcode/QR placeholder —
 // shown inside whichever zone box currently holds it.
-function ZoneChip({ zoneKey, itemKey, lbl, onDragStart, onDragOver, onDrop, isDropTarget, onToggleExpand, isCode }) {
+function ZoneChip({ zoneKey, itemKey, lbl, onDragStart, onDragOver, onDrop, onDragEnd, isDropTarget, onToggleExpand, isCode }) {
   const meta = fieldMeta(itemKey);
   if (!meta) return null;
   const on = isCode ? true : lbl[itemKey] !== false;
@@ -27,9 +26,10 @@ function ZoneChip({ zoneKey, itemKey, lbl, onDragStart, onDragOver, onDrop, isDr
   return (
     <div
       draggable
-      onDragStart={(e) => { e.stopPropagation(); onDragStart(zoneKey, itemKey); }}
-      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); onDragOver(zoneKey, itemKey); }}
+      onDragStart={(e) => { e.stopPropagation(); onDragStart(e, zoneKey, itemKey); }}
+      onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; onDragOver(zoneKey, itemKey); }}
       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); onDrop(); }}
+      onDragEnd={onDragEnd}
       onClick={(e) => { e.stopPropagation(); if (!isCode) onToggleExpand(itemKey); }}
       className="flex items-center gap-1 px-1.5 py-1 rounded select-none transition-colors"
       style={{
@@ -53,12 +53,12 @@ function ZoneChip({ zoneKey, itemKey, lbl, onDragStart, onDragOver, onDrop, isDr
 // top/left/center/right/bottom layout so placement is WYSIWYG. Dropping a
 // chip on another chip within a zone reorders; dropping on an empty zone
 // (or the zone's own background) moves it there, appended at the end.
-function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDragOverItem, onDragOverZone, onDrop, onToggleExpand, gridArea }) {
+function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDragOverItem, onDragOverZone, onDrop, onDragEnd, onToggleExpand, gridArea }) {
   const isZoneTarget = dragState.overZone === zoneKey && !dragState.overKey;
   return (
     <div
       style={{ gridArea }}
-      onDragOver={(e) => { e.preventDefault(); onDragOverZone(zoneKey); }}
+      onDragOver={(e) => { e.preventDefault(); if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'; onDragOverZone(zoneKey); }}
       onDrop={(e) => { e.preventDefault(); onDrop(); }}
       className="rounded-md p-1.5 flex flex-col gap-1 min-h-[38px]"
     >
@@ -83,6 +83,7 @@ function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDra
             onDragStart={onDragStart}
             onDragOver={onDragOverItem}
             onDrop={onDrop}
+            onDragEnd={onDragEnd}
             onToggleExpand={onToggleExpand}
           />
         ))}
@@ -100,8 +101,9 @@ function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDra
 // when/how it's persisted (Settings.jsx saves it via an explicit button).
 export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
   const [expandedField, setExpandedField] = useState(null);
-  const dragRef = useRef(null); // { fromZone, key }
-  const [dragState, setDragState] = useState({ overZone: null, overKey: null });
+  const dragRef = useRef(null);                                    // { fromZone, key } — drag source
+  const overRef = useRef({ overZone: null, overKey: null });       // current hover target, updated synchronously
+  const [dragState, setDragState] = useState({ overZone: null, overKey: null }); // same data, for highlight only
 
   const setLblKey = (key, val) => setLbl((prev) => ({ ...prev, [key]: val }));
   const setFieldStyle = (fieldKey, prop, val) => setLbl((prev) => ({
@@ -113,15 +115,36 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
     fieldLabels: { ...(prev.fieldLabels || {}), [fieldKey]: val },
   }));
 
-  const handleDragStart = (fromZone, key) => { dragRef.current = { fromZone, key }; };
-  const handleDragOverItem = (zoneKey, key) => setDragState({ overZone: zoneKey, overKey: key });
-  const handleDragOverZone = (zoneKey) => setDragState({ overZone: zoneKey, overKey: null });
+  // `drop` (a discrete event) can fire before React flushes the state update
+  // from the final `dragover` (a lower-priority continuous event), so the drop
+  // target is tracked in a ref (read synchronously in handleDrop) and mirrored
+  // into state only to drive the highlight.
+  const handleDragStart = (e, fromZone, key) => {
+    dragRef.current = { fromZone, key };
+    overRef.current = { overZone: fromZone, overKey: key };
+    if (e && e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', key); } catch { /* older browsers */ }
+    }
+  };
+  const handleDragOverItem = (zoneKey, key) => {
+    overRef.current = { overZone: zoneKey, overKey: key };
+    setDragState((s) => (s.overZone === zoneKey && s.overKey === key ? s : { overZone: zoneKey, overKey: key }));
+  };
+  const handleDragOverZone = (zoneKey) => {
+    overRef.current = { overZone: zoneKey, overKey: null };
+    setDragState((s) => (s.overZone === zoneKey && s.overKey === null ? s : { overZone: zoneKey, overKey: null }));
+  };
+  const resetDrag = () => {
+    dragRef.current = null;
+    overRef.current = { overZone: null, overKey: null };
+    setDragState({ overZone: null, overKey: null });
+  };
 
   const handleDrop = () => {
     const drag = dragRef.current;
-    dragRef.current = null;
-    const target = dragState;
-    setDragState({ overZone: null, overKey: null });
+    const target = overRef.current;
+    resetDrag();
     if (!drag || !target.overZone) return;
     const { fromZone, key } = drag;
     if (fromZone === target.overZone && target.overKey === key) return; // dropped on itself
@@ -129,12 +152,12 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
     setZones((prev) => {
       const next = {};
       ZONES.forEach((z) => { next[z.key] = [...(prev[z.key] || [])]; });
-      // Remove from source zone.
+      // Remove from source zone first (so within-zone reorder indexes line up).
       next[fromZone] = next[fromZone].filter((k) => k !== key);
       // Insert into target zone — before overKey if dropped on a chip, else appended.
-      const destList = next[target.overZone];
-      const insertAt = target.overKey ? destList.indexOf(target.overKey) : destList.length;
-      const at = insertAt === -1 ? destList.length : insertAt;
+      const destList = next[target.overZone] || (next[target.overZone] = []);
+      let at = target.overKey ? destList.indexOf(target.overKey) : destList.length;
+      if (at === -1) at = destList.length;
       destList.splice(at, 0, key);
       return next;
     });
@@ -175,6 +198,7 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
             onDragOverItem={handleDragOverItem}
             onDragOverZone={handleDragOverZone}
             onDrop={handleDrop}
+            onDragEnd={resetDrag}
             onToggleExpand={(k) => setExpandedField((cur) => (cur === k ? null : k))}
             gridArea={z.key}
           />
