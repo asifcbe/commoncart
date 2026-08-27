@@ -326,11 +326,16 @@ function CustomerPicker({ selected, onSelect, onClear, onEnterAdvance }) {
     if (showDropdown && results.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setHighlightIdx((i) => Math.min(results.length - 1, i + 1)); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setHighlightIdx((i) => Math.max(0, i - 1)); return; }
-      if (e.key === 'Enter' && highlightIdx >= 0) { e.preventDefault(); pick(results[highlightIdx]); return; }
       if (e.key === 'Escape') { setShowDropdown(false); return; }
     }
-    // No dropdown selection in progress — Enter means "move on" (walk-in is fine too).
-    if (e.key === 'Enter') { e.preventDefault(); onEnterAdvance?.(); }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    // Nothing typed — continue with no customer.
+    if (!query.trim()) { onEnterAdvance?.(); return; }
+    // A match exists — take the highlighted row, otherwise the first match.
+    if (results.length > 0) { pick(results[highlightIdx >= 0 ? highlightIdx : 0]); return; }
+    // Something typed but no match — fall through to customer creation.
+    if (searched && !searching) setShowCreate(true);
   };
 
   if (selected) {
