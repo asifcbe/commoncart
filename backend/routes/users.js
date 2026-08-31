@@ -43,7 +43,22 @@ router.put('/:id', protect, adminOnly, async (req, res) => {
 
 router.delete('/:id', protect, adminOnly, async (req, res) => {
   try {
-    await User.findByIdAndDelete(req.params.id);
+    if (req.params.id === String(req.user._id)) {
+      return res.status(400).json({ message: "You can't delete your own account" });
+    }
+    const target = await User.findById(req.params.id);
+    if (!target) return res.status(404).json({ message: 'User not found' });
+
+    // An admin may delete another admin — but never the last remaining admin,
+    // which would lock everyone out of admin-only management.
+    if (target.role === 'ADMIN') {
+      const adminCount = await User.countDocuments({ role: 'ADMIN' });
+      if (adminCount <= 1) {
+        return res.status(400).json({ message: 'Cannot delete the last admin account' });
+      }
+    }
+
+    await target.deleteOne();
     res.json({ message: 'User deleted' });
   } catch (err) {
     res.status(500).json({ message: err.message });

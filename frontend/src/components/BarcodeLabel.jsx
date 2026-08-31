@@ -79,7 +79,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const st = fStyle(key, fontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', fontWeight: 700, lineHeight: 1.2, ...st }}>
+        <p key={key} style={{ margin: '0 0 1px', fontWeight: 700, lineHeight: 1.15, ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item?.name}
         </p>
       );
@@ -89,7 +89,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', ...st }}>
+        <p key={key} style={{ margin: '0 0 1px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item.itemCode}
         </p>
       );
@@ -99,7 +99,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', ...st }}>
+        <p key={key} style={{ margin: '0 0 1px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item.category}
         </p>
       );
@@ -109,7 +109,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', ...st }}>
+        <p key={key} style={{ margin: '0 0 1px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : 'Size: '}{item.size}
         </p>
       );
@@ -119,7 +119,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const st = fStyle(key, smallFontSize);
       const prefix = fLabel(key);
       return (
-        <p key={key} style={{ margin: '0 0 2px', ...st }}>
+        <p key={key} style={{ margin: '0 0 1px', ...st }}>
           {prefix != null ? (prefix ? `${prefix}: ` : '') : ''}{item.variant}
         </p>
       );
@@ -130,7 +130,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const prefix = fLabel(key);
       const label = prefix != null ? prefix : 'HSN';
       return (
-        <p key={key} style={{ margin: '0 0 2px', ...st }}>
+        <p key={key} style={{ margin: '0 0 1px', ...st }}>
           {label ? `${label}: ` : ''}{item.hsnCode}
         </p>
       );
@@ -164,7 +164,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       // grey prints as an invisible dither on direct-thermal printers.
       const mrpColor = mrpSt.color || '#000000';
       return (
-        <div key={key} style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 3, margin: '3px 0 1px' }}>
+        <div key={key} style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 2, margin: '1px 0 0' }}>
           {drawMrp && (
             <span style={{
               fontSize: mrpSt.fontSize,
@@ -189,7 +189,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
         (item?.barcodeExtraFields || []).filter((f) => f.label || f.value).map((f, i) => {
           const st = fStyle(key, smallFontSize);
           return (
-            <p key={`extra-${i}`} style={{ margin: '1px 0', ...st }}>
+            <p key={`extra-${i}`} style={{ margin: '0 0 1px', ...st }}>
               {f.label ? <strong>{f.label}: </strong> : ''}{f.value}
             </p>
           );
@@ -202,7 +202,13 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
 
 // One zone's content — every placed field (in order) plus the barcode/QR
 // image wherever CODE_KEY sits in that zone's list.
-function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
+//
+// `top` / `bottom` span the full label width, so their fields lay out as a
+// wrapping horizontal row (drop 2–3 fields → they share one line). The
+// `left` / `center` / `right` columns stay vertical stacks. A zone that holds
+// the barcode/QR always stacks vertically regardless (the code needs its own
+// full-width line).
+function ZoneContent({ keys, item, lbl, sizeConfig, mode, align, zoneKey }) {
   const { barcodeHeight, qrSize, barWidth, fontSize, smallFontSize, pixelRatio } = sizeConfig;
   const show = (k) => lbl?.[k] !== false;
   const qrValue = item?.barcode || item?.itemCode || item?.name || 'item';
@@ -211,7 +217,7 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
     <div key={CODE_KEY} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
       <QRImage value={qrValue} size={Math.round(qrSize)} pixelRatio={pixelRatio} />
       {show('showBarcodeNumber') && item?.barcode && (
-        <p style={{ margin: '2px 0 0', fontSize: smallFontSize, color: lbl?.textColor || '#000000', textAlign: 'center' }}>{item.barcode}</p>
+        <p style={{ margin: '1px 0 0', fontSize: smallFontSize, color: lbl?.textColor || '#000000', textAlign: 'center' }}>{item.barcode}</p>
       )}
     </div>
   ) : (
@@ -228,8 +234,35 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align }) {
   const nodes = keys.map((k) => (k === CODE_KEY ? codeEl : renderLabelField(k, { item, lbl, fontSize, smallFontSize, zoneKeys: keys })));
   if (!nodes.some(Boolean)) return null;
 
+  const hasCode = keys.includes(CODE_KEY);
+  const horizontal = (zoneKey === 'top' || zoneKey === 'bottom') && !hasCode;
+  const justify = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
+
+  if (horizontal) {
+    const visible = nodes.filter(Boolean);
+    return (
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', alignItems: 'baseline',
+        justifyContent: justify, columnGap: 6, rowGap: 1,
+        width: '100%', textAlign: align, fontFamily: 'Arial, sans-serif', minWidth: 0,
+      }}>
+        {visible.map((n, i) => (
+          // Each field shares the row (flex: 0 1 auto) and wraps inside its own
+          // box rather than forcing a full-width line — so 2–3 fields sit on
+          // one line even when one of them (e.g. Item Name) is long.
+          <div key={i} style={{
+            flex: visible.length > 1 ? '1 1 auto' : '0 1 auto',
+            minWidth: 0, maxWidth: '100%', wordBreak: 'break-word',
+          }}>
+            {n}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center', textAlign: align, fontFamily: 'Arial, sans-serif', minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: justify, textAlign: align, fontFamily: 'Arial, sans-serif', minWidth: 0 }}>
       {nodes}
     </div>
   );
@@ -246,7 +279,7 @@ export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
 
   const outerStyle = {
     width, height: height || 'auto',
-    padding: isA4 ? '20px 24px' : '1px',
+    padding: isA4 ? '12px 14px' : '1px 2px',
     fontFamily: 'Arial, sans-serif',
     overflow: 'hidden',
     display: 'grid',
@@ -268,7 +301,7 @@ export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
     <div style={outerStyle}>
       {ZONES.map((z) => (
         <div key={z.key} style={{ gridArea: z.key, display: 'flex', justifyContent: z.key === 'left' ? 'flex-start' : z.key === 'right' ? 'flex-end' : 'center', alignItems: 'center' }}>
-          <ZoneContent keys={zoneLayout[z.key]} item={item} lbl={lbl} sizeConfig={sizeConfig} mode={mode} align={align} />
+          <ZoneContent keys={zoneLayout[z.key]} item={item} lbl={lbl} sizeConfig={sizeConfig} mode={mode} align={align} zoneKey={z.key} />
         </div>
       ))}
     </div>
@@ -304,10 +337,10 @@ export const BulkLabelSheet = React.forwardRef(({ entries, sizeConfig, lbl, colu
   if (isA4) {
     return (
       <div ref={ref} style={{
-        padding: 16, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif',
+        padding: 6, backgroundColor: '#fff', fontFamily: 'Arial, sans-serif',
         display: 'grid',
         gridTemplateColumns: `repeat(${cols}, ${sizeConfig.width})`,
-        gap: 8, width: '210mm',
+        gap: 2, width: '210mm',
       }}>
         {flat.map(({ item, i }, idx) => (
           <LabelComp key={`${item.id}-${i}-${idx}`} item={item} sizeConfig={sizeConfig} lbl={lbl} />

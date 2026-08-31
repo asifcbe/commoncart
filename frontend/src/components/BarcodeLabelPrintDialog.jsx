@@ -66,7 +66,7 @@ function ToggleButtonGroup({ value, onChange, options }) {
 
 function getPageStyle(sizeConfig, columns) {
   const isA4 = sizeConfig.key === 'a4';
-  if (isA4) return '@page { size: A4 portrait; margin: 8mm; } body { margin: 0; }';
+  if (isA4) return '@page { size: A4 portrait; margin: 5mm; } body { margin: 0; }';
   const wMm = parseFloat(sizeConfig.width) || 80;
   const hMm = parseFloat(sizeConfig.height) || 40;
   const totalW = wMm * Math.max(1, Number(columns) || 1);

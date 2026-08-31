@@ -6,11 +6,14 @@ const {
   listCreditNotes, getCreditNote,
   listReplacementNotes, getReplacementNote,
 } = require('../controllers/returnSessionController');
-const { protect, manageOnly } = require('../middleware/auth');
+const { protect } = require('../middleware/auth');
 
 // Unified return/exchange/replace flow — creates Credit Notes, linked new Tax
 // Invoices, and Replacement Notes without ever modifying the original invoice.
-router.post('/sessions', protect, manageOnly, processReturnSession);
+// Any logged-in user who can reach the Sales screen may run this (same access
+// level as POS checkout, `POST /sales/store`); it never edits the original
+// invoice, so it isn't a `manage`-level destructive action.
+router.post('/sessions', protect, processReturnSession);
 router.get('/credit-notes', protect, listCreditNotes);
 router.get('/credit-notes/:id', protect, getCreditNote);
 router.get('/replacement-notes', protect, listReplacementNotes);

@@ -55,6 +55,9 @@ function ZoneChip({ zoneKey, itemKey, lbl, onDragStart, onDragOver, onDrop, onDr
 // (or the zone's own background) moves it there, appended at the end.
 function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDragOverItem, onDragOverZone, onDrop, onDragEnd, onToggleExpand, gridArea }) {
   const isZoneTarget = dragState.overZone === zoneKey && !dragState.overKey;
+  // top/bottom span the label width — lay chips out in a wrapping row so the
+  // editor previews the same "2–3 fields on one line" the printed label does.
+  const rowLayout = (zoneKey === 'top' || zoneKey === 'bottom') && !keys.includes(CODE_KEY);
   return (
     <div
       style={{ gridArea }}
@@ -64,7 +67,7 @@ function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDra
     >
       <p className="text-[0.58rem] font-bold uppercase tracking-wider text-gray-400 text-center">{label}</p>
       <div
-        className="flex-1 rounded flex flex-col gap-1 p-1 transition-colors"
+        className={`flex-1 rounded gap-1 p-1 transition-colors flex ${rowLayout ? 'flex-row flex-wrap items-start' : 'flex-col'}`}
         style={{
           border: `1.5px dashed ${isZoneTarget ? ACCENT : '#e5e7eb'}`,
           background: isZoneTarget ? 'rgba(13,148,136,0.06)' : 'transparent',

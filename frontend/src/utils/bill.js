@@ -11,8 +11,9 @@ export function billBarcodeDataURL(billNumber) {
   try {
     const canvas = document.createElement('canvas');
     JsBarcode(canvas, String(billNumber), {
-      format: 'CODE128', width: 2, height: 45, displayValue: true,
-      fontSize: 13, margin: 4, background: '#ffffff',
+      format: 'CODE128', width: 3, height: 80, displayValue: true,
+      fontSize: 18, fontOptions: 'bold', textMargin: 4,
+      margin: 6, background: '#ffffff', lineColor: '#000000',
     });
     return canvas.toDataURL('image/png');
   } catch {
@@ -167,56 +168,60 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   });
 
   // ── Thermal receipt (roll) ──
+  // Everything is pure black on white for maximum thermal-print contrast and
+  // on-screen readability — no light greys.
   const itemsHTML = sale.items.map((item, i) =>
-    `<div style="display:flex;justify-content:space-between;font-size:12px;margin:2px 0;">
-      <span>${i + 1}. ${item.name}${item.isDiscounted ? ' <em style="color:#c00;font-size:10px;">(Discounted)</em>' : ''} x${item.qty}</span>
+    `<div style="display:flex;justify-content:space-between;font-size:13px;margin:3px 0;color:#000;font-weight:600;">
+      <span>${i + 1}. ${item.name}${item.isDiscounted ? ' <em style="color:#000;font-size:11px;">(Discounted)</em>' : ''} x${item.qty}</span>
       <span>₹${(item.price * item.qty).toFixed(2)}</span>
     </div>`
   ).join('');
   const headerLines = [
-    `<strong style="font-size:16px;">${b.businessName}</strong>`,
-    b.addressLine ? `<span style="font-size:10px;">${b.addressLine}</span>` : '',
-    b.phone ? `<span style="font-size:10px;">Ph: ${b.phone}</span>` : '',
-    b.gstin ? `<span style="font-size:10px;">GSTIN: ${b.gstin}</span>` : '',
+    `<strong style="font-size:18px;color:#000;">${b.businessName}</strong>`,
+    b.addressLine ? `<span style="font-size:11px;color:#000;">${b.addressLine}</span>` : '',
+    b.phone ? `<span style="font-size:11px;color:#000;">Ph: ${b.phone}</span>` : '',
+    b.gstin ? `<span style="font-size:11px;color:#000;">GSTIN: ${b.gstin}</span>` : '',
   ].filter(Boolean).join('<br/>');
   const gstHTML = gst
-    ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#555;"><span>Taxable Value</span><span>₹${gst.net.toFixed(2)}</span></div>
-       <div style="display:flex;justify-content:space-between;font-size:11px;color:#555;"><span>CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}</span><span>₹${gst.cgst.toFixed(2)}</span></div>
-       <div style="display:flex;justify-content:space-between;font-size:11px;color:#555;"><span>SGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}</span><span>₹${gst.sgst.toFixed(2)}</span></div>`
+    ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Taxable Value</span><span>₹${gst.net.toFixed(2)}</span></div>
+       <div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}</span><span>₹${gst.cgst.toFixed(2)}</span></div>
+       <div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>SGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}</span><span>₹${gst.sgst.toFixed(2)}</span></div>`
     : '';
   const carriedHTML = carried
-    ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:${carried.amount > 0 ? '#c00' : 'green'};"><span>${carried.sourceLabel}</span><span>${carried.amount > 0 ? '+' : '-'}₹${Math.abs(carried.amount).toFixed(2)}</span></div>`
+    ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>${carried.sourceLabel}</span><span>${carried.amount > 0 ? '+' : '-'}₹${Math.abs(carried.amount).toFixed(2)}</span></div>`
     : '';
   const pointsHTML = (pointsRedeemed > 0 || pointsEarned > 0 || balancePoints !== null)
-    ? `<div style="border-top:1px dashed #ccc;margin-top:6px;padding-top:6px;">
-        ${pointsRedeemed > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#b45309;"><span>Points Redeemed (${pointsRedeemed} pts)</span><span>-₹${pointsRedeemedValue.toFixed(2)}</span></div>` : ''}
+    ? `<div style="border-top:1px dashed #000;margin-top:6px;padding-top:6px;">
+        ${pointsRedeemed > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Points Redeemed (${pointsRedeemed} pts)</span><span>-₹${pointsRedeemedValue.toFixed(2)}</span></div>` : ''}
         ${pointsEarnedRedeemedNow > 0
-          ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#b45309;"><span>Points Earned &amp; Redeemed This Bill</span><span>+${pointsEarnedRedeemedNow} pts (-₹${pointsEarnedRedeemedNow.toFixed(2)})</span></div>`
-          : (pointsEarned > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#1d4ed8;"><span>Points Earned</span><span>+${pointsEarned} pts</span></div>` : '')}
-        ${balancePoints !== null ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#1d4ed8;"><span>Balance Points</span><span>${balancePoints} pts</span></div>` : ''}
+          ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Points Earned &amp; Redeemed This Bill</span><span>+${pointsEarnedRedeemedNow} pts (-₹${pointsEarnedRedeemedNow.toFixed(2)})</span></div>`
+          : (pointsEarned > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Points Earned</span><span>+${pointsEarned} pts</span></div>` : '')}
+        ${balancePoints !== null ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Balance Points</span><span>${balancePoints} pts</span></div>` : ''}
       </div>`
     : '';
 
   return `
-<div style="text-align:center;border-bottom:1px dashed #ccc;padding-bottom:8px;margin-bottom:8px;">
+<div style="color:#000;font-weight:500;">
+<div style="text-align:center;border-bottom:2px solid #000;padding-bottom:8px;margin-bottom:8px;">
   ${headerLines}<br/>
-  <span style="font-size:11px;">${formatDateTime(sale.createdAt)}</span><br/>
-  <span style="font-size:12px;font-weight:bold;">Bill No: ${sale.transactionId}</span>
-  ${customerName ? `<br/><span style="font-size:11px;">Customer: ${customerName}${customerPhone ? ` (${customerPhone})` : ''}</span>` : ''}
+  <span style="font-size:12px;color:#000;">${formatDateTime(sale.createdAt)}</span><br/>
+  <span style="font-size:13px;font-weight:bold;color:#000;">Bill No: ${sale.transactionId}</span>
+  ${customerName ? `<br/><span style="font-size:12px;color:#000;">Customer: ${customerName}${customerPhone ? ` (${customerPhone})` : ''}</span>` : ''}
 </div>
 ${itemsHTML}
-<div style="border-top:1px dashed #ccc;margin-top:6px;padding-top:6px;">
-  ${discount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;font-weight:bold;"><span>Bill Value</span><span>₹${billValue.toFixed(2)}</span></div>` : ''}
-  ${nonPointsDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:green;"><span>Discount</span><span>-₹${nonPointsDiscount.toFixed(2)}</span></div>` : ''}
+<div style="border-top:2px solid #000;margin-top:6px;padding-top:6px;">
+  ${discount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:bold;color:#000;"><span>Bill Value</span><span>₹${billValue.toFixed(2)}</span></div>` : ''}
+  ${nonPointsDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>Discount</span><span>-₹${nonPointsDiscount.toFixed(2)}</span></div>` : ''}
   ${gstHTML}
   ${carriedHTML}
-  <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;margin-top:4px;"><span>${carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL'}</span><span>₹${Math.abs(netPayable).toFixed(2)}</span></div>
-  <div style="font-size:11px;color:#555;margin-top:2px;">Payment: ${paymentLabel}</div>
+  <div style="display:flex;justify-content:space-between;font-weight:800;font-size:16px;margin-top:4px;color:#000;"><span>${carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL'}</span><span>₹${Math.abs(netPayable).toFixed(2)}</span></div>
+  <div style="font-size:12px;color:#000;margin-top:2px;font-weight:600;">Payment: ${paymentLabel}</div>
 </div>
 ${pointsHTML}
-${hasDiscounted ? '<p style="font-size:10px;color:#c00;margin-top:8px;border-top:1px dashed #ccc;padding-top:6px;">* Discounted items cannot be replaced or exchanged.</p>' : ''}
-${barcodeImg ? `<div style="text-align:center;margin-top:10px;border-top:1px dashed #ccc;padding-top:8px;"><img src="${barcodeImg}" style="max-width:100%;" alt="${sale.transactionId}" /></div>` : ''}
-<div style="text-align:center;font-size:10px;color:#888;margin-top:8px;">${b.footerNote || 'Thank you for shopping!'}</div>`;
+${hasDiscounted ? '<p style="font-size:11px;color:#000;font-weight:700;margin-top:8px;border-top:1px dashed #000;padding-top:6px;">* Discounted items cannot be replaced or exchanged.</p>' : ''}
+${barcodeImg ? `<div style="text-align:center;margin-top:10px;border-top:2px solid #000;padding-top:10px;"><img src="${barcodeImg}" style="width:100%;max-width:340px;" alt="${sale.transactionId}" /></div>` : ''}
+<div style="text-align:center;font-size:11px;color:#000;margin-top:8px;font-weight:600;">${b.footerNote || 'Thank you for shopping!'}</div>
+</div>`;
 }
 
 // Shared full-page invoice layout for A4/A5 (sale + purchase).
@@ -232,34 +237,34 @@ export function invoiceLayout(opts) {
   ].filter(Boolean).join('<br/>');
 
   const metaHTML = (opts.meta || [])
-    .map(([k, v]) => `<div><span style="color:#666;">${k}:</span> <strong>${esc(v)}</strong></div>`)
+    .map(([k, v]) => `<div style="color:#000;"><span style="color:#000;">${k}:</span> <strong>${esc(v)}</strong></div>`)
     .join('');
 
   const thead = `<tr>${opts.columns.map((c, i) =>
-    `<th style="text-align:${opts.align[i] || 'left'};padding:7px 10px;border-bottom:2px solid #333;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#444;">${c}</th>`).join('')}</tr>`;
+    `<th style="text-align:${opts.align[i] || 'left'};padding:7px 10px;border-bottom:2px solid #000;font-size:12px;text-transform:uppercase;letter-spacing:.03em;color:#000;font-weight:800;">${c}</th>`).join('')}</tr>`;
   const tbody = opts.rows.map((r, ri) =>
-    `<tr style="background:${ri % 2 ? '#fafafa' : '#fff'};">${r.map((cell, i) =>
-      `<td style="text-align:${opts.align[i] || 'left'};padding:6px 10px;border-bottom:1px solid #eee;font-size:12px;">${esc(cell)}</td>`).join('')}</tr>`).join('');
+    `<tr style="background:${ri % 2 ? '#f0f0f0' : '#fff'};">${r.map((cell, i) =>
+      `<td style="text-align:${opts.align[i] || 'left'};padding:6px 10px;border-bottom:1px solid #999;font-size:13px;color:#000;">${esc(cell)}</td>`).join('')}</tr>`).join('');
 
   const totalsHTML = (opts.totals || []).map(([label, val, bold]) =>
     `<tr>
-       <td style="padding:4px 10px;text-align:right;${bold ? 'font-weight:700;font-size:15px;border-top:2px solid #333;' : 'color:#555;font-size:12px;'}">${label}</td>
-       <td style="padding:4px 10px;text-align:right;width:130px;${bold ? 'font-weight:700;font-size:15px;border-top:2px solid #333;' : 'font-size:12px;'}">${esc(val)}</td>
+       <td style="padding:4px 10px;text-align:right;color:#000;${bold ? 'font-weight:800;font-size:16px;border-top:2px solid #000;' : 'font-size:13px;'}">${label}</td>
+       <td style="padding:4px 10px;text-align:right;width:130px;color:#000;${bold ? 'font-weight:800;font-size:16px;border-top:2px solid #000;' : 'font-size:13px;'}">${esc(val)}</td>
      </tr>`).join('');
 
   return `
-<div style="font-family:Arial,Helvetica,sans-serif;color:#222;">
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #333;padding-bottom:12px;">
+<div style="font-family:Arial,Helvetica,sans-serif;color:#000;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #000;padding-bottom:12px;">
     <div>
-      <div style="font-size:22px;font-weight:800;letter-spacing:.02em;">${esc(b.businessName)}</div>
-      ${b.addressLine ? `<div style="font-size:12px;color:#555;margin-top:3px;max-width:300px;">${esc(b.addressLine)}</div>` : ''}
+      <div style="font-size:22px;font-weight:800;letter-spacing:.02em;color:#000;">${esc(b.businessName)}</div>
+      ${b.addressLine ? `<div style="font-size:12px;color:#000;margin-top:3px;max-width:300px;">${esc(b.addressLine)}</div>` : ''}
     </div>
-    <div style="text-align:right;font-size:11px;color:#555;line-height:1.5;">${headRight}</div>
+    <div style="text-align:right;font-size:12px;color:#000;line-height:1.5;">${headRight}</div>
   </div>
 
   <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 10px;">
-    <div style="font-size:16px;font-weight:700;letter-spacing:.08em;color:#333;">${opts.title}</div>
-    <div style="font-size:12px;text-align:right;line-height:1.6;">${metaHTML}</div>
+    <div style="font-size:16px;font-weight:800;letter-spacing:.08em;color:#000;">${opts.title}</div>
+    <div style="font-size:12px;text-align:right;line-height:1.6;color:#000;">${metaHTML}</div>
   </div>
 
   <table style="width:100%;border-collapse:collapse;margin-top:4px;">
@@ -271,9 +276,9 @@ export function invoiceLayout(opts) {
     <table style="border-collapse:collapse;min-width:280px;"><tbody>${totalsHTML}</tbody></table>
   </div>
 
-  ${opts.note ? `<p style="font-size:11px;color:#c00;margin-top:16px;border-top:1px solid #eee;padding-top:8px;">${opts.note}</p>` : ''}
-  ${opts.barcodeImg ? `<div style="text-align:center;margin-top:16px;"><img src="${opts.barcodeImg}" style="max-width:220px;" alt="barcode" /></div>` : ''}
-  <div style="text-align:center;font-size:11px;color:#888;margin-top:18px;border-top:1px solid #eee;padding-top:10px;">${esc(opts.footer || '')}</div>
+  ${opts.note ? `<p style="font-size:11px;color:#000;font-weight:700;margin-top:16px;border-top:1px solid #999;padding-top:8px;">${opts.note}</p>` : ''}
+  ${opts.barcodeImg ? `<div style="text-align:center;margin-top:16px;"><img src="${opts.barcodeImg}" style="max-width:360px;width:100%;" alt="barcode" /></div>` : ''}
+  <div style="text-align:center;font-size:11px;color:#000;margin-top:18px;border-top:1px solid #999;padding-top:10px;">${esc(opts.footer || '')}</div>
 </div>`;
 }
 
@@ -385,7 +390,8 @@ export function printDocumentHTML(bodyHTML, title = 'Document') {
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>
 <style>
   @page { size: A4; margin: 12mm; }
-  body { font-family: Arial, Helvetica, sans-serif; margin: 0 auto; width: 180mm; max-width: 100%; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #000; margin: 0 auto; width: 180mm; max-width: 100%; }
 </style></head><body>
 ${bodyHTML}
 </body></html>`;
@@ -410,7 +416,8 @@ export function printBillHTML(sale, business, billConfig, extra = {}) {
   const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt</title>
 <style>
   @page { ${paper.page} }
-  body { font-family: ${paper.kind === 'sheet' ? 'Arial, Helvetica, sans-serif' : 'monospace'}; margin: 0 auto; padding: ${paper.kind === 'roll' ? '4px' : '0'}; width: ${paper.contentMm}mm; max-width: 100%; }
+  * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { font-family: ${paper.kind === 'sheet' ? 'Arial, Helvetica, sans-serif' : 'monospace'}; color: #000; margin: 0 auto; padding: ${paper.kind === 'roll' ? '4px' : '0'}; width: ${paper.contentMm}mm; max-width: 100%; }
 </style></head><body>
 ${body}
 </body></html>`;

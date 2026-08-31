@@ -55,92 +55,92 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
 
   return (
     <Modal open onClose={onClose} title="Receipt" size="sm">
-      <div className="font-mono text-sm space-y-2">
-        <div className="text-center border-b pb-3">
-          <div className="font-bold text-base">{business?.businessName || 'CommonCart Store'}</div>
-          {business?.addressLine && <div className="text-[11px] text-gray-500">{business.addressLine}</div>}
-          {business?.phone && <div className="text-[11px] text-gray-500">Ph: {business.phone}</div>}
-          {business?.gstin && <div className="text-[11px] text-gray-600">GSTIN: {business.gstin}</div>}
-          <div className="text-xs text-gray-500 mt-1">{formatDateTime(transaction.createdAt)}</div>
-          <div className="text-sm font-bold mt-1">Bill No: {transaction.transactionId}</div>
-          {customerName && <div className="text-xs text-gray-600 mt-0.5">Customer: {customerName}</div>}
+      <div className="font-mono text-sm space-y-2 text-black">
+        <div className="text-center border-b-2 border-black pb-3">
+          <div className="font-bold text-lg text-black">{business?.businessName || 'CommonCart Store'}</div>
+          {business?.addressLine && <div className="text-xs text-black">{business.addressLine}</div>}
+          {business?.phone && <div className="text-xs text-black">Ph: {business.phone}</div>}
+          {business?.gstin && <div className="text-xs text-black">GSTIN: {business.gstin}</div>}
+          <div className="text-xs text-black mt-1">{formatDateTime(transaction.createdAt)}</div>
+          <div className="text-sm font-bold mt-1 text-black">Bill No: {transaction.transactionId}</div>
+          {customerName && <div className="text-xs text-black mt-0.5">Customer: {customerName}</div>}
         </div>
         <div className="space-y-1 py-2">
           {transaction.items.map((item, i) => (
-            <div key={i} className="flex justify-between text-xs">
+            <div key={i} className="flex justify-between text-xs text-black font-semibold">
               <span>
-                {i + 1}. {item.name}{item.isDiscounted && <span className="text-red-500 ml-1">(Discounted)</span>} x{item.qty}
+                {i + 1}. {item.name}{item.isDiscounted && <span className="text-black ml-1">(Discounted)</span>} x{item.qty}
               </span>
               <span>₹{(item.price * item.qty).toFixed(2)}</span>
             </div>
           ))}
         </div>
-        <div className="border-t pt-2 space-y-1">
+        <div className="border-t-2 border-black pt-2 space-y-1 text-black">
           {saleData?.discountAmount > 0 && (
             <div className="flex justify-between text-xs font-bold">
               <span>Bill Value</span><span>₹{(transaction.totalAmount + saleData.discountAmount).toFixed(2)}</span>
             </div>
           )}
           {saleData?.discountAmount > 0 && (
-            <div className="flex justify-between text-xs text-green-600">
+            <div className="flex justify-between text-xs font-bold text-black">
               <span>Discount</span><span>-₹{saleData.discountAmount.toFixed(2)}</span>
             </div>
           )}
           {pointsRedeemed > 0 && (
-            <div className="flex justify-between text-xs text-amber-600">
+            <div className="flex justify-between text-xs text-black">
               <span>Points Redeemed ({pointsRedeemed} pts)</span>
               <span>-₹{Number(pointsRedeemed).toFixed(2)}</span>
             </div>
           )}
           {gst && (
             <>
-              <div className="flex justify-between text-xs text-gray-500">
+              <div className="flex justify-between text-xs text-black">
                 <span>Taxable Value</span><span>₹{gst.net.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-xs text-gray-500">
+              <div className="flex justify-between text-xs text-black">
                 <span>CGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.cgst.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between text-xs text-gray-500">
+              <div className="flex justify-between text-xs text-black">
                 <span>SGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.sgst.toFixed(2)}</span>
               </div>
             </>
           )}
           {carried && (
-            <div className={`flex justify-between text-xs ${carried.amount > 0 ? 'text-red-500' : 'text-green-600'}`}>
+            <div className="flex justify-between text-xs text-black font-bold">
               <span>{carried.sourceLabel}</span>
               <span>{carried.amount > 0 ? '+' : '-'}₹{Math.abs(carried.amount).toFixed(2)}</span>
             </div>
           )}
-          <div className="flex justify-between font-bold">
+          <div className="flex justify-between font-extrabold text-base text-black">
             <span>{carried ? (netPayable < 0 ? 'Refund Due' : 'Net Payable') : 'TOTAL'}</span>
             <span>₹{Math.abs(netPayable).toFixed(2)}</span>
           </div>
           {splitPayments.length > 0 ? (
             <div className="space-y-0.5">
               {splitPayments.map((p, i) => (
-                <div key={i} className="flex justify-between text-xs text-gray-500">
+                <div key={i} className="flex justify-between text-xs text-black font-semibold">
                   <span>Payment ({p.method})</span><span>₹{p.amount.toFixed(2)}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="flex justify-between text-xs text-gray-500">
+            <div className="flex justify-between text-xs text-black font-semibold">
               <span>Payment</span><span>{transaction.paymentMethod}</span>
             </div>
           )}
           {(pointsEarned > 0 || balancePoints !== null) && (
-            <div className="border-t pt-1 space-y-0.5">
+            <div className="border-t border-black pt-1 space-y-0.5">
               {pointsEarnedRedeemedNow > 0 ? (
-                <div className="flex justify-between text-xs text-amber-600">
+                <div className="flex justify-between text-xs text-black">
                   <span>Points Earned &amp; Redeemed This Bill</span><span>+{pointsEarnedRedeemedNow} pts (-₹{pointsEarnedRedeemedNow.toFixed(2)})</span>
                 </div>
               ) : pointsEarned > 0 && (
-                <div className="flex justify-between text-xs text-blue-600">
+                <div className="flex justify-between text-xs text-black">
                   <span>Points Earned</span><span>+{pointsEarned} pts</span>
                 </div>
               )}
               {balancePoints !== null && (
-                <div className="flex justify-between text-xs text-blue-600">
+                <div className="flex justify-between text-xs text-black">
                   <span>Balance Points</span><span>{balancePoints} pts</span>
                 </div>
               )}
@@ -148,11 +148,11 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
           )}
         </div>
         {hasDiscountedItems && (
-          <div className="text-xs text-red-600 border border-red-200 bg-red-50 rounded px-2 py-1.5 mt-1">
+          <div className="text-xs text-black font-semibold border border-black rounded px-2 py-1.5 mt-1">
             * Discounted items cannot be replaced or exchanged.
           </div>
         )}
-        <div className="text-center text-xs text-gray-400 pt-2 border-t">{business?.footerNote || 'Thank you for shopping!'}</div>
+        <div className="text-center text-xs text-black pt-2 border-t border-black">{business?.footerNote || 'Thank you for shopping!'}</div>
       </div>
       <div className="flex gap-3 mt-4 justify-end flex-wrap">
         {customerPhone && (
@@ -768,19 +768,24 @@ export default function POS() {
   // *same* direction widens the scale ×10 (rupee → ten → hundred → …), so
   // repeated clicks walk e.g. 1234.4 → 1234 → 1230 → 1200. Switching
   // direction restarts at the ₹1 scale.
+  //
+  // The stepper works off `finalTotal` — the amount actually shown as payable,
+  // which includes any carry-forward from an exchange/replace session. Rounding
+  // off a base that excluded the carry-forward made a ₹13.33 payable step to
+  // ₹12.33 (a flat -₹1) instead of snapping to ₹13.00.
   const stepRoundOff = (dir) => {
-    const current = Math.round((preRound + roundOffAmount) * 100) / 100;
+    const current = Math.round(finalTotal * 100) / 100;
     const streak = roundStepRef.current;
     const scale = streak.dir === dir ? streak.scale * 10 : 1;
     roundStepRef.current = { dir, scale };
     const snapped = dir === 'down' ? Math.floor(current / scale) * scale : Math.ceil(current / scale) * scale;
     const target = snapped !== current ? snapped : (dir === 'down' ? current - scale : current + scale);
-    patchBill({ roundOff: Math.round((target - preRound) * 100) / 100 });
+    patchBill({ roundOff: Math.round((target - preRound - carryForwardAmount) * 100) / 100 });
   };
 
   // Any change to what's owed invalidates the click streak — otherwise the
   // next +/- press would jump by a stale denomination against a new total.
-  useEffect(() => { roundStepRef.current = { dir: null, scale: 1 }; }, [preRound]);
+  useEffect(() => { roundStepRef.current = { dir: null, scale: 1 }; }, [preRound, carryForwardAmount]);
 
   // "Redeem now" only has an effect (and is only shown) while this bill
   // actually earns points — if editing the balance-redeem field, cart, or
@@ -1258,6 +1263,12 @@ export default function POS() {
                             type="number" min="0" step="0.01"
                             value={row.amount}
                             onChange={(e) => patchBill({ splitRows: splitRows.map((r, idx) => idx === i ? { ...r, amount: e.target.value } : r) })}
+                            onFocus={() => {
+                              if (Number(row.amount) > 0) return;
+                              const others = splitRows.reduce((s, r, idx) => idx === i ? s : s + (Number(r.amount) || 0), 0);
+                              const bal = finalTotal - others;
+                              if (bal > 0.01) patchBill({ splitRows: splitRows.map((r, idx) => idx === i ? { ...r, amount: bal.toFixed(2) } : r) });
+                            }}
                             placeholder="0.00"
                             className="text-sm w-24"
                           />
@@ -1271,14 +1282,31 @@ export default function POS() {
                       <div className="flex items-center justify-between">
                         <button
                           type="button"
-                          onClick={() => patchBill({ splitRows: [...splitRows, { method: paymentModes[0]?.key || 'CASH', amount: '' }] })}
+                          onClick={() => patchBill({ splitRows: [...splitRows, { method: paymentModes[0]?.key || 'CASH', amount: splitRemaining > 0.01 ? splitRemaining.toFixed(2) : '' }] })}
                           className="text-xs text-blue-600 hover:underline"
                         >
                           + Add split
                         </button>
-                        <span className={`text-xs font-medium ${Math.abs(splitRemaining) < 0.01 ? 'text-green-600' : 'text-red-500'}`}>
-                          {Math.abs(splitRemaining) < 0.01 ? 'Balanced' : `₹${Math.abs(splitRemaining).toFixed(2)} ${splitRemaining > 0 ? 'remaining' : 'over'}`}
-                        </span>
+                        {Math.abs(splitRemaining) < 0.01 ? (
+                          <span className="text-xs font-medium text-green-600">Balanced</span>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (splitRemaining <= 0.01) return;
+                              const rows = [...splitRows];
+                              let target = rows.findIndex((r) => !(Number(r.amount) > 0));
+                              if (target === -1) target = rows.length - 1;
+                              const others = rows.reduce((s, r, idx) => idx === target ? s : s + (Number(r.amount) || 0), 0);
+                              rows[target] = { ...rows[target], amount: (finalTotal - others).toFixed(2) };
+                              patchBill({ splitRows: rows });
+                            }}
+                            className="text-xs font-medium text-red-500 hover:underline"
+                            title="Fill balance into a split row"
+                          >
+                            ₹{Math.abs(splitRemaining).toFixed(2)} {splitRemaining > 0 ? 'remaining' : 'over'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (

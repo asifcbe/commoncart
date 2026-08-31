@@ -602,8 +602,8 @@ export default function Settings() {
       await api.delete(`/users/${u._id}`);
       setUsers((prev) => prev.filter((x) => x._id !== u._id));
       toast({ message: 'User deleted', type: 'success' });
-    } catch {
-      toast({ message: 'Failed to delete user', type: 'error' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Failed to delete user', type: 'error' });
     }
   };
 
@@ -688,7 +688,7 @@ export default function Settings() {
       label: 'Catalog',
       items: [
         { id: 'categories', label: 'Categories', icon: FolderTree },
-        { id: 'variants', label: 'Variants & Sizes', icon: Palette },
+        { id: 'variants', label: 'Sizes', icon: Palette },
         { id: 'barcodes', label: 'Barcode Numbering', icon: Hash },
         { id: 'labels', label: 'Label Printing', icon: Printer },
       ],
@@ -1081,39 +1081,16 @@ export default function Settings() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
-                <Palette size={16} className="text-pink-500" /> Variants &amp; Sizes
+                <Palette size={16} className="text-pink-500" /> Sizes
               </CardTitle>
             </CardHeader>
             <CardContent>
               <p className="text-sm text-gray-500 mb-4">
-                Define the variants (e.g. colors/designs) and sizes available when creating products and recording purchases.
+                Define the sizes available when creating products and recording purchases.
                 These appear as dropdowns on those forms.
               </p>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Variants */}
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-700 mb-2">Variants</h3>
-                  <div className="flex gap-2 mb-3">
-                    <Input
-                      value={newVariant}
-                      onChange={(e) => setNewVariant(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addToList(variants, setVariants, newVariant, setNewVariant); } }}
-                      placeholder="e.g. Red, Floral"
-                    />
-                    <Button type="button" onClick={() => addToList(variants, setVariants, newVariant, setNewVariant)}><Plus size={16} /></Button>
-                  </div>
-                  <div className="flex flex-wrap gap-2 min-h-[2rem]">
-                    {variants.length === 0 && <span className="text-xs text-gray-400">No variants yet</span>}
-                    {variants.map((v) => (
-                      <span key={v} className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs rounded-full pl-2.5 pr-1 py-1">
-                        {v}
-                        <button onClick={() => removeFromList(variants, setVariants, v)} className="rounded-full hover:bg-gray-300 p-0.5"><X size={11} /></button>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
+              <div className="grid grid-cols-1 gap-6">
                 {/* Sizes */}
                 <div>
                   <h3 className="text-sm font-semibold text-gray-700 mb-2">Sizes</h3>
@@ -1141,7 +1118,7 @@ export default function Settings() {
               <div className="flex justify-end mt-5 pt-3 border-t">
                 <Button onClick={handleSaveVariants} disabled={savingVariants}>
                   {savingVariants ? <Spinner size="sm" className="mr-2" /> : null}
-                  Save Variants &amp; Sizes
+                  Save Sizes
                 </Button>
               </div>
             </CardContent>

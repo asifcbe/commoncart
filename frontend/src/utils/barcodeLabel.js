@@ -210,7 +210,9 @@ export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, prin
   const wPx  = entry.widthMm  * PX_PER_MM;
   const hPx  = entry.heightMm ? entry.heightMm * PX_PER_MM : null;
   const isA4 = entry.key === 'a4';
-  const pad  = isA4 ? 40 : 6;
+  // Physical labels get a slim content inset (was 6px per side, ~3mm wasted on
+  // a 50mm label) — just enough that content isn't flush to the die-cut edge.
+  const pad  = isA4 ? 40 : 3;
   const innerW = wPx - pad * 2;
   const innerH = hPx ? hPx - pad * 2 : null;
 

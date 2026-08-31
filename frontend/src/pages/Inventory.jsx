@@ -433,51 +433,6 @@ export default function Inventory() {
             </div>
           </Card>
 
-          {/* Per-product detail of the current filter */}
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-base">Pending Items ({ovFiltered.length})</CardTitle></CardHeader>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 border-b">
-                  <tr>
-                    {['Product', 'Category', ...(ovSplitVariant ? ['Variant', 'Size'] : []), 'Qty', 'Available', 'Cost/Unit', 'Stock Value', 'Status'].map((h) => (
-                      <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {ovFiltered.length === 0 ? (
-                    <tr><td colSpan={ovSplitVariant ? 9 : 7} className="py-8 text-center text-gray-400">No products match these filters</td></tr>
-                  ) : [...ovFiltered]
-                    .sort((a, b) => (b.costPrice || 0) * b.quantity - (a.costPrice || 0) * a.quantity)
-                    .map((p) => {
-                      const avail = p.quantity - p.reservedQty;
-                      const status = stockStatusOf(p);
-                      return (
-                        <tr key={p._id} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 font-medium">{p.name}<div className="text-xs text-gray-400 font-mono">{p.SKU}</div></td>
-                          <td className="px-4 py-3 text-gray-600">
-                            {p.category || '—'}
-                            {p.subCategory ? <div className="text-xs text-gray-400">{p.subCategory}</div> : null}
-                          </td>
-                          {ovSplitVariant && <td className="px-4 py-3 text-gray-600">{p.color || '—'}</td>}
-                          {ovSplitVariant && <td className="px-4 py-3 text-gray-600">{p.size || '—'}</td>}
-                          <td className="px-4 py-3">{p.quantity}</td>
-                          <td className="px-4 py-3 text-gray-500">{avail}</td>
-                          <td className="px-4 py-3 text-gray-600">{inr(p.costPrice)}</td>
-                          <td className="px-4 py-3 font-medium">{inr((p.costPrice || 0) * p.quantity)}</td>
-                          <td className="px-4 py-3">
-                            <Badge variant={status === 'out' ? 'destructive' : status === 'low' ? 'warning' : 'success'}>
-                              {status === 'out' ? 'Out of Stock' : status === 'low' ? 'Low' : 'In Stock'}
-                            </Badge>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-            </div>
-          </Card>
         </div>
       )}
 

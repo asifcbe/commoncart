@@ -479,7 +479,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={onClose}><X size={14} className="mr-1.5" /> Cancel</Button>
-          {(isEdit ? editPrintItems.length > 0 : variantRows.length > 0) && (
+          {isEdit && editPrintItems.length > 0 && (
             <Button variant="outline" onClick={() => setShowPrintModal(true)}>
               <Printer size={14} className="mr-1.5" /> Print Labels
             </Button>
@@ -728,7 +728,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-sm">Barcode Previews — {printableVariants.length} barcode{printableVariants.length !== 1 ? 's' : ''}</CardTitle>
-                  <Button size="sm" onClick={() => setShowPrintModal(true)}><Printer size={13} className="mr-1.5" /> Print Labels</Button>
+                  <Button size="sm" disabled title="Save the purchase first to print labels"><Printer size={13} className="mr-1.5" /> Print Labels</Button>
                 </div>
               </CardHeader>
               <CardContent>
@@ -737,9 +737,10 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                 </div>
                 {printableVariants.length > BARCODE_PREVIEW_LIMIT && (
                   <p className="text-xs text-gray-400 mt-3">
-                    Showing the first {BARCODE_PREVIEW_LIMIT} of {printableVariants.length} barcodes. Use "Print Labels" to print any or all of them.
+                    Showing the first {BARCODE_PREVIEW_LIMIT} of {printableVariants.length} barcodes.
                   </p>
                 )}
+                <p className="text-xs text-amber-600 mt-3">Save the purchase to enable label printing.</p>
               </CardContent>
             </Card>
           )}
