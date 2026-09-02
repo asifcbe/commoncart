@@ -96,7 +96,9 @@ function ZoneDropArea({ zoneKey, label, keys, lbl, dragState, onDragStart, onDra
 }
 
 // `lbl`: the full label config object (fields on/off, fieldStyles,
-// fieldLabels, contentAlign, borderStyle, backgroundColor, textColor).
+// fieldLabels, contentAlign, borderStyle, backgroundColor). Text is always
+// rendered solid black (see renderLabelField in BarcodeLabel.jsx) — no color
+// picker for it here.
 // `zones`: the 5-zone placement map — see resolveZoneLayout() in
 // utils/barcodeLabel.js.
 // `setLbl`/`setZones`: setState-style updaters (accept either a value or a
@@ -307,16 +309,6 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
               );
             })}
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs font-semibold text-gray-600 shrink-0">Color</span>
-            <input type="color" value={fst.color || lbl.textColor || '#000000'} onChange={(e) => setFieldStyle(expandedField, 'color', e.target.value)}
-              className="flex-1 h-7 border border-gray-300 rounded cursor-pointer p-0.5" />
-            {fst.color && (
-              <button type="button" onClick={() => setFieldStyle(expandedField, 'color', '')} className="text-[0.65rem] text-gray-400 hover:text-red-500">
-                reset
-              </button>
-            )}
-          </div>
         </div>
       )}
 
@@ -332,18 +324,14 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
         {BORDER_STYLES.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </Select>
 
-      <div className="flex gap-2">
-        <div className="flex-1">
-          <p className="text-xs text-gray-500 mb-1">Background</p>
-          <input type="color" value={lbl.backgroundColor || '#ffffff'} onChange={(e) => setLblKey('backgroundColor', e.target.value)}
-            className="w-full h-9 border border-gray-300 rounded-md cursor-pointer p-0.5" />
-        </div>
-        <div className="flex-1">
-          <p className="text-xs text-gray-500 mb-1">Text Color</p>
-          <input type="color" value={lbl.textColor || '#000000'} onChange={(e) => setLblKey('textColor', e.target.value)}
-            className="w-full h-9 border border-gray-300 rounded-md cursor-pointer p-0.5" />
-        </div>
+      <div>
+        <p className="text-xs text-gray-500 mb-1">Background</p>
+        <input type="color" value={lbl.backgroundColor || '#ffffff'} onChange={(e) => setLblKey('backgroundColor', e.target.value)}
+          className="w-full h-9 border border-gray-300 rounded-md cursor-pointer p-0.5" />
       </div>
+      {/* Text is always solid black — no picker. A faded/grey color prints as
+          an invisible dither on direct-thermal printers, and this was the
+          source of accidentally-grey labels. */}
     </div>
   );
 }

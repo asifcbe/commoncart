@@ -54,12 +54,15 @@ export const QRImage = ({ value, size = 80, pixelRatio = 1 }) => {
 // `fieldStyles[key].align` override.
 function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = [], zoneAlign = 'center' }) {
   const show = (k) => lbl?.[k] !== false;
-  const globalTextColor = lbl?.textColor || '#000000';
   const fieldStyles = lbl?.fieldStyles || {};
   const fStyle = (k, baseFs) => {
     const s = fieldStyles[k] || {};
     const scale = FIELD_SIZE_SCALE[s.size] ?? 1.0;
-    return { fontSize: baseFs * scale, color: s.color || globalTextColor, textAlign: s.align || zoneAlign };
+    // Label text is always solid black — a faded/grey color prints as an
+    // invisible dither on direct-thermal printers, and per-field/global color
+    // pickers were a source of accidentally-grey labels. No override exists
+    // anymore; every field renders #000000 regardless of saved config.
+    return { fontSize: baseFs * scale, color: '#000000', textAlign: s.align || zoneAlign };
   };
   const fLabel = (k) => {
     const labels = lbl?.fieldLabels || {};
