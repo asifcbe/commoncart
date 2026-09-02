@@ -6,6 +6,15 @@ const productSchema = new mongoose.Schema(
     description: { type: String, default: '' },
     category: { type: String, required: true, trim: true },
     subCategory: { type: String, default: '', trim: true },
+    // HSN (Harmonized System of Nomenclature) code — GST-compliance field for
+    // the tax invoice's HSN summary. Optional; shown on the bill only for
+    // products that have one set.
+    hsnCode: { type: String, default: '', trim: true },
+    // Per-product GST rate override. null = "use the shop's default GST %
+    // (BUSINESS_CONFIG.gstPercent)" — the vast majority of products. A number
+    // (including 0) is an explicit override, e.g. for goods taxed at a
+    // different rate than the shop's usual rate.
+    gstPercent: { type: Number, default: null, min: 0, max: 100 },
     SKU: { type: String, unique: true },
     barcode: { type: String, unique: true },
     price: { type: Number, required: true, min: 0 },

@@ -8,6 +8,11 @@ const creditNoteItemSchema = new mongoose.Schema(
     qty: { type: Number, required: true, min: 1 },
     price: { type: Number, required: true, min: 0 },
     isDiscounted: { type: Boolean, default: false },
+    // Copied from the original sale item's own snapshot — the returned
+    // line's tax must reverse at the rate it was actually sold at, not the
+    // shop's current/blended rate. See SaleTransaction.saleItemSchema.
+    hsnCode: { type: String, default: '' },
+    gstPercent: { type: Number, default: null },
     // RETURN = plain return; EXCHANGE_OUT = returned-away side of an exchange.
     lineType: { type: String, enum: ['RETURN', 'EXCHANGE_OUT'], required: true },
     // Informational link to the new item this line was exchanged for, if any.
@@ -45,6 +50,18 @@ const creditNoteSchema = new mongoose.Schema(
     cgstAmount: { type: Number, default: 0 },
     sgstAmount: { type: Number, default: 0 },
     igstAmount: { type: Number, default: 0 },
+    // Per (hsnCode + rate) group breakdown of this note's tax reversal — the
+    // fields above stay the bill-wide SUM (backward-compat with any code
+    // still reading those), this is the finer detail for the HSN-summary-
+    // style display when the returned lines span more than one GST rate.
+    gstBreakup: [{
+      hsnCode: { type: String, default: '' },
+      rate: { type: Number, default: 0 },
+      taxableValue: { type: Number, default: 0 },
+      cgstAmount: { type: Number, default: 0 },
+      sgstAmount: { type: Number, default: 0 },
+      _id: false,
+    }],
     // creditNoteTotal is the actual refund owed — the returned lines' gross
     // value scaled by the original bill's net-payable ratio (so the
     // customer's own discount/round-off share on those lines is honoured,

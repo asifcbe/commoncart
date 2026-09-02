@@ -90,6 +90,8 @@ exports.placeOrder = async (req, res) => {
         price: product.price,
         qty: item.qty,
         image: product.images?.[0] || '',
+        hsnCode: product.hsnCode || '',
+        gstPercent: product.gstPercent,
       });
       subtotal += product.price * item.qty;
     }

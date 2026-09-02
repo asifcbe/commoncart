@@ -30,7 +30,7 @@ exports.listProducts = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, category, subCategory, color, size, price, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible } = req.body;
+    const { name, description, category, subCategory, color, size, price, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, hsnCode, gstPercent } = req.body;
     const providedBarcode = (req.body.barcode || '').trim();
     const providedSKU = (req.body.SKU || '').trim();
 
@@ -70,6 +70,8 @@ exports.createProduct = async (req, res) => {
       lowStockThreshold: Number(lowStockThreshold) || 10,
       // Hidden from the web store by default — only visible when explicitly enabled
       isWebVisible: isWebVisible === true || isWebVisible === 'true',
+      hsnCode: (hsnCode || '').trim(),
+      gstPercent: gstPercent === '' || gstPercent == null ? null : Math.max(0, Math.min(100, Number(gstPercent))),
       SKU, barcode, images,
     });
 
@@ -95,6 +97,10 @@ exports.updateProduct = async (req, res) => {
     delete updates.SKU;
     delete updates.barcode;
     delete updates._id;
+    // Unlike hsnCode (a String field where '' is valid), gstPercent is a
+    // Number field — an empty-string value from the form must become null
+    // ("use shop default"), not fail Mongoose's Number cast.
+    if (updates.gstPercent === '') updates.gstPercent = null;
 
     // If new images are uploaded they replace the old ones — capture old set to clean up
     let oldImages = [];

@@ -52,7 +52,7 @@ export default function Reports() {
         <div className="flex justify-center py-16"><Spinner /></div>
       ) : dayBook && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <Card>
               <CardContent className="pt-4">
                 <div className="text-xs text-gray-500">Transactions</div>
@@ -61,14 +61,8 @@ export default function Reports() {
             </Card>
             <Card>
               <CardContent className="pt-4">
-                <div className="text-xs text-gray-500">Net Cash Collected</div>
+                <div className="text-xs text-gray-500">Total Sales</div>
                 <div className="text-2xl font-bold mt-1">₹{dayBook.grandTotal.toFixed(2)}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-4">
-                <div className="text-xs text-gray-500">Total Discounts Given</div>
-                <div className="text-2xl font-bold mt-1">₹{dayBook.discountTotal.toFixed(2)}</div>
               </CardContent>
             </Card>
             <Card>

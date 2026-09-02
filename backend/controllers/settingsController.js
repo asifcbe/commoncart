@@ -4,7 +4,12 @@ const StockMovement = require('../models/StockMovement');
 const { deleteProductImageFiles } = require('../utils/productImages');
 
 const CREDIT_KEY = 'CREDIT_CONFIG';
-const DEFAULT_CREDIT = { rupeesPerPoint: 1000, pointValue: 1 };
+// pointsPerAmount/perRupees are the admin-facing "earn N points per ₹M" pair;
+// rupeesPerPoint is the derived single ratio the earning formula actually
+// uses (see salesController.processStoreSale). Old configs saved before
+// pointsPerAmount/perRupees existed only have rupeesPerPoint — getCreditConfig
+// backfills the pair for display so the settings form always has both.
+const DEFAULT_CREDIT = { pointsPerAmount: 1, perRupees: 1000, rupeesPerPoint: 1000, pointValue: 1 };
 
 const BUSINESS_KEY = 'BUSINESS_CONFIG';
 const DEFAULT_BUSINESS = {
@@ -16,6 +21,7 @@ const DEFAULT_BUSINESS = {
   gstEnabled: false,         // whether GST is shown/charged on bills
   gstPercent: 18,            // default GST rate %
   gstInclusive: true,        // true = prices already include GST; false = GST added on top
+  defaultHsnCode: '',        // pre-filled into new Product/Purchase HSN fields; no fallback at sale time
   stateName: '',
   footerNote: 'Thank you for shopping!',
 };
@@ -290,7 +296,12 @@ const DEFAULT_AGING = {
 
 exports.getCreditConfig = async (_req, res) => {
   try {
-    const config = await AppSettings.get(CREDIT_KEY, DEFAULT_CREDIT);
+    const saved = await AppSettings.get(CREDIT_KEY, DEFAULT_CREDIT);
+    // Backfill pointsPerAmount/perRupees for configs saved before those
+    // fields existed — derive "1 point per rupeesPerPoint rupees" as the pair.
+    const config = saved.pointsPerAmount != null
+      ? saved
+      : { ...saved, pointsPerAmount: 1, perRupees: saved.rupeesPerPoint };
     res.json({ config });
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -299,10 +310,21 @@ exports.getCreditConfig = async (_req, res) => {
 
 exports.updateCreditConfig = async (req, res) => {
   try {
-    const { rupeesPerPoint, pointValue } = req.body;
-    if (!rupeesPerPoint || rupeesPerPoint < 1) return res.status(400).json({ message: 'rupeesPerPoint must be >= 1' });
+    const { pointsPerAmount, perRupees, pointValue } = req.body;
+    if (!pointsPerAmount || pointsPerAmount < 0.01) return res.status(400).json({ message: 'pointsPerAmount must be >= 0.01' });
+    if (!perRupees || perRupees < 1) return res.status(400).json({ message: 'perRupees must be >= 1' });
     if (!pointValue || pointValue < 0.01) return res.status(400).json({ message: 'pointValue must be >= 0.01' });
-    const config = { rupeesPerPoint: Number(rupeesPerPoint), pointValue: Number(pointValue) };
+    const config = {
+      // Admin enters "earn N points per ₹M spent" — the earning formula
+      // elsewhere (processStoreSale) still reads a single rupeesPerPoint
+      // ratio (amount / rupeesPerPoint = points), so it's derived here once
+      // and stored alongside the two input numbers (kept so the settings
+      // form can show back exactly what was typed, not a rounded derivative).
+      pointsPerAmount: Number(pointsPerAmount),
+      perRupees: Number(perRupees),
+      rupeesPerPoint: Number(perRupees) / Number(pointsPerAmount),
+      pointValue: Number(pointValue),
+    };
     await AppSettings.set(CREDIT_KEY, config);
     res.json({ config });
   } catch (err) {
@@ -335,6 +357,7 @@ exports.updateBusinessConfig = async (req, res) => {
       gstEnabled: !!b.gstEnabled,
       gstPercent: Math.max(0, Math.min(100, Number(b.gstPercent) || 0)),
       gstInclusive: b.gstInclusive === undefined ? true : !!b.gstInclusive,
+      defaultHsnCode: (b.defaultHsnCode ?? '').toString().trim(),
       stateName: (b.stateName ?? '').toString().trim(),
       footerNote: (b.footerNote ?? '').toString().trim(),
     };

@@ -152,14 +152,13 @@ function StaffDirectory() {
 
 // ─── Attendance tab ───────────────────────────────────────────
 // Month calendar grid: rows = staff, columns = days. Click a cell to cycle
-// Present → Absent → Half-day → Leave → unmarked (like the sample app).
+// Full → Half-day → Leave → unmarked (like the sample app).
 const ATT_STATUS = {
-  PRESENT:  { label: 'P', text: '#15803d', bg: '#dcfce7', title: 'Present' },
-  ABSENT:   { label: 'A', text: '#b91c1c', bg: '#fee2e2', title: 'Absent' },
+  PRESENT:  { label: 'F', text: '#15803d', bg: '#dcfce7', title: 'Full' },
   HALF_DAY: { label: 'H', text: '#b45309', bg: '#fef3c7', title: 'Half Day' },
   LEAVE:    { label: 'L', text: '#6d28d9', bg: '#ede9fe', title: 'Leave' },
 };
-const STATUS_CYCLE = ['PRESENT', 'ABSENT', 'HALF_DAY', 'LEAVE', null];
+const STATUS_CYCLE = ['PRESENT', 'HALF_DAY', 'LEAVE', null];
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 const daysInMonth = (y, m) => new Date(y, m + 1, 0).getDate();
@@ -215,8 +214,10 @@ function AttendanceTab() {
   };
 
   const summary = (userId) => {
-    const s = { PRESENT: 0, ABSENT: 0, HALF_DAY: 0, LEAVE: 0 };
-    for (let d = 1; d <= dim; d++) { const st = records[`${userId}_${dateStr(year, month, d)}`]; if (st) s[st]++; }
+    const s = { PRESENT: 0, HALF_DAY: 0, LEAVE: 0 };
+    // st can still be 'ABSENT' from a record set before that status was
+    // removed — guard so an old record doesn't throw/produce NaN here.
+    for (let d = 1; d <= dim; d++) { const st = records[`${userId}_${dateStr(year, month, d)}`]; if (st && s[st] !== undefined) s[st]++; }
     return s;
   };
 
@@ -261,7 +262,7 @@ function AttendanceTab() {
                     <div className="px-3 py-2 flex flex-col justify-center">
                       <span className="text-sm font-medium truncate">{s.name}</span>
                       <span className="text-[10px] text-gray-400">
-                        P{sum.PRESENT} · A{sum.ABSENT} · H{sum.HALF_DAY} · L{sum.LEAVE}
+                        F{sum.PRESENT} · H{sum.HALF_DAY} · L{sum.LEAVE}
                       </span>
                     </div>
                     {days.map((d) => {

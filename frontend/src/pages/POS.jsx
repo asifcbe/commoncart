@@ -19,7 +19,7 @@ import Spinner from '../components/ui/Spinner';
 import { Card } from '../components/ui/Card';
 import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
-import { computeGst, printBillHTML, shareBillWhatsApp, carriedSettlementOf } from '../utils/bill';
+import { computeItemizedGst, scaleItemsToGoodsAmount, gstTotalsRows, printBillHTML, shareBillWhatsApp, carriedSettlementOf } from '../utils/bill';
 import { formatDateTime } from '../utils/date';
 import { makeEnterNav, makeEnterNavPastGroup, focusFirstInContainer } from '../utils/focusNav';
 
@@ -47,7 +47,9 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
   // GST is computed on the goods-only amount, matching utils/bill.js.
   const roundOffAmount = transaction.roundOffAmount || 0;
   const goodsAmount = transaction.totalAmount - roundOffAmount;
-  const gst = computeGst(goodsAmount, business);
+  const scaledItems = scaleItemsToGoodsAmount(transaction.items, goodsAmount);
+  const gst = computeItemizedGst(scaledItems, business, transaction.gst);
+  const hsnRows = gst ? gst.rows : null;
   const grandTotal = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(transaction);
   const netPayable = grandTotal + roundOffAmount + (carried?.amount || 0);
@@ -94,6 +96,12 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
               <span>Discount</span><span>-₹{saleData.discountAmount.toFixed(2)}</span>
             </div>
           )}
+          {roundOffAmount !== 0 && (
+            <div className="flex justify-between text-xs text-black font-bold">
+              <span>Round Off</span>
+              <span>{roundOffAmount > 0 ? '+' : '-'}₹{Math.abs(roundOffAmount).toFixed(2)}</span>
+            </div>
+          )}
           {pointsRedeemed > 0 && (
             <div className="flex justify-between text-xs text-black">
               <span>Points ({pointsRedeemed} pts)</span>
@@ -101,31 +109,23 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
             </div>
           )}
           {gst && (
-            <>
-              <div className="flex justify-between text-xs text-black">
-                <span>Taxable Value</span><span>₹{gst.net.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-xs text-black">
-                <span>CGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.cgst.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between text-xs text-black">
-                <span>SGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.sgst.toFixed(2)}</span>
-              </div>
-            </>
-          )}
-          {roundOffAmount !== 0 && (
-            <div className="flex justify-between text-xs text-black font-bold">
-              <span>Round Off</span>
-              <span>{roundOffAmount > 0 ? '+' : '-'}₹{Math.abs(roundOffAmount).toFixed(2)}</span>
+            <div className="border-t border-dashed border-black pt-1 mt-1 space-y-1">
+              {gstTotalsRows(gst).map(([label, val], i) => (
+                <div key={i} className="flex justify-between text-xs text-black">
+                  <span>{label}</span><span>{val}</span>
+                </div>
+              ))}
             </div>
           )}
           {carried && (
-            <div className="flex justify-between text-xs text-black font-bold">
-              <span>{carried.sourceLabel}</span>
-              <span>{carried.amount > 0 ? '+' : '-'}₹{Math.abs(carried.amount).toFixed(2)}</span>
+            <div className="border-t border-dashed border-black pt-1 mt-1 space-y-1">
+              <div className="flex justify-between text-xs text-black font-bold">
+                <span>{carried.sourceLabel}</span>
+                <span>{carried.amount > 0 ? '+' : '-'}₹{Math.abs(carried.amount).toFixed(2)}</span>
+              </div>
             </div>
           )}
-          <div className="flex justify-between font-extrabold text-base text-black">
+          <div className="flex justify-between font-extrabold text-base text-black border-t-2 border-black pt-1.5 mt-1.5">
             <span>{carried ? (netPayable < 0 ? 'Refund Due' : 'Net Payable') : 'TOTAL'}</span>
             <span>₹{Math.abs(netPayable).toFixed(2)}</span>
           </div>
@@ -140,6 +140,17 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
           ) : (
             <div className="flex justify-between text-xs text-black font-semibold">
               <span>Payment</span><span>{transaction.paymentMethod}</span>
+            </div>
+          )}
+          {hsnRows && hsnRows.length > 0 && (
+            <div className="border-t border-dashed border-black pt-1 mt-1">
+              <div className="text-[11px] font-bold text-black mb-0.5">HSN Summary</div>
+              {hsnRows.map((r, i) => (
+                <div key={i} className="flex justify-between text-[11px] text-black">
+                  <span>{r.hsnCode || '—'} @ {r.rate}%</span>
+                  <span>₹{r.taxableValue.toFixed(2)} | C ₹{r.cgst.toFixed(2)} | S ₹{r.sgst.toFixed(2)}</span>
+                </div>
+              ))}
             </div>
           )}
           {(pointsEarned > 0 || balancePoints !== null) && (
@@ -419,7 +430,7 @@ function CustomerPicker({ selected, onSelect, onClear, onEnterAdvance }) {
             <Input
               value={newName}
               onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleCreate(); } }}
               placeholder="Customer name (optional)"
               className="text-sm"
               autoFocus
@@ -590,6 +601,16 @@ export default function POS() {
     if (step !== 'checkout') return;
     requestAnimationFrame(() => focusFirstInContainer(checkoutPanelRef.current));
   }, [step, activeBillId]);
+
+  // Landing on Discount & Points: the Redeem Points field only renders when
+  // the customer actually has points to redeem, so focusing "the first field"
+  // naturally lands there when it exists and falls through to Additional
+  // Discount otherwise (new customer, or a returning one with 0 points) —
+  // same DOM-order approach the other steps use, not a special case.
+  useEffect(() => {
+    if (step !== 'discount') return;
+    requestAnimationFrame(() => focusFirstInContainer(discountPanelRef.current));
+  }, [step, activeBillId, loyaltyCustomer]);
 
   // Track fullscreen state from any source (our button, browser Esc, F11) so
   // the UI stays honest about whether we're actually fullscreen.
@@ -1060,7 +1081,6 @@ export default function POS() {
                       onKeyDown={discountEnterNav}
                       className="text-lg w-28"
                       placeholder="Enter points"
-                      autoFocus
                     />
                     <span className="text-base text-gray-400">pts</span>
                     {pointsDiscount > 0 && (

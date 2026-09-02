@@ -8,6 +8,12 @@ const orderItemSchema = new mongoose.Schema(
     price: { type: Number, required: true },
     qty: { type: Number, required: true, min: 1 },
     image: { type: String, default: '' },
+    // Snapshotted from the Product at order time — GST-compliance field for
+    // the bill's HSN-wise tax summary.
+    hsnCode: { type: String, default: '' },
+    // Per-item GST rate, snapshotted from Product at order time — see
+    // SaleTransaction.saleItemSchema.gstPercent for the same rule.
+    gstPercent: { type: Number, default: null },
   },
   { _id: false }
 );

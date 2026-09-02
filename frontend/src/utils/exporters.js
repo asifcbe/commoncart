@@ -2,7 +2,7 @@
 // Heavy libs (jspdf, html2canvas, xlsx) are dynamically imported so they're
 // only fetched when the user actually exports something.
 
-import { buildBillBodyHTML, resolveBillPaper, computeGst, invoiceLayout, buildCreditNoteHTML, buildReplacementNoteHTML, carriedSettlementOf } from './bill';
+import { buildBillBodyHTML, resolveBillPaper, computeItemizedGst, scaleItemsToGoodsAmount, invoiceLayout, buildCreditNoteHTML, buildReplacementNoteHTML, carriedSettlementOf } from './bill';
 import { formatDateTime } from './date';
 
 // Credit Notes / Replacement Notes are always full-page documents — fixed A4
@@ -78,29 +78,60 @@ function saleSheetRows(sale, business) {
   // out so GST is computed on the goods-only amount, matching bill.js.
   const roundOffAmount = sale.roundOffAmount || 0;
   const goodsAmount = sale.totalAmount - roundOffAmount;
-  const gst = computeGst(goodsAmount, b);
+  const scaledItems = scaleItemsToGoodsAmount(sale.items, goodsAmount);
+  const gst = computeItemizedGst(scaledItems, b, sale.gst);
+  const hsnRows = gst ? gst.rows : null;
+  const anyHsn = sale.items.some((it) => it.hsnCode);
   const rows = [];
   rows.push([b.businessName]);
   if (b.addressLine) rows.push([b.addressLine]);
   if (b.gstin) rows.push([`GSTIN: ${b.gstin}`]);
   rows.push([`Bill No: ${sale.transactionId}`, '', `Date: ${formatDateTime(sale.createdAt)}`]);
   rows.push([]);
-  rows.push(['#', 'Item', 'Qty', 'Unit Price', 'Amount']);
-  sale.items.forEach((it, i) => rows.push([i + 1, it.name + (it.isDiscounted ? ' (Discounted)' : ''), it.qty, it.price, it.price * it.qty]));
+  rows.push(anyHsn ? ['#', 'Item', 'HSN', 'Qty', 'Unit Price', 'Amount'] : ['#', 'Item', 'Qty', 'Unit Price', 'Amount']);
+  sale.items.forEach((it, i) => rows.push(
+    anyHsn
+      ? [i + 1, it.name + (it.isDiscounted ? ' (Discounted)' : ''), it.hsnCode || '', it.qty, it.price, it.price * it.qty]
+      : [i + 1, it.name + (it.isDiscounted ? ' (Discounted)' : ''), it.qty, it.price, it.price * it.qty]
+  ));
   rows.push([]);
   if (sale.discountAmount > 0) rows.push(['', '', '', 'Discount', -sale.discountAmount]);
+  if (roundOffAmount !== 0) rows.push(['', '', '', 'Round Off', roundOffAmount]);
+  // Numeric cells (not pre-formatted strings) so the sheet stays spreadsheet-
+  // friendly, same as every other amount column here — mirrors
+  // gstTotalsRows' distinctRates branch without its string formatting.
   if (gst) {
-    rows.push(['', '', '', 'Taxable', gst.net]);
-    rows.push(['', '', '', `CGST @ ${gst.halfRate}%`, gst.cgst]);
-    rows.push(['', '', '', `SGST @ ${gst.halfRate}%`, gst.sgst]);
+    if (gst.distinctRates <= 1) {
+      rows.push(['', '', '', 'Taxable', gst.net]);
+      rows.push(['', '', '', `CGST @ ${gst.halfRate}%`, gst.cgst]);
+      rows.push(['', '', '', `SGST @ ${gst.halfRate}%`, gst.sgst]);
+    } else {
+      const byRate = new Map();
+      for (const r of gst.rows) {
+        const g = byRate.get(r.rate) || { rate: r.rate, halfRate: r.halfRate, taxableValue: 0, cgst: 0, sgst: 0 };
+        g.taxableValue += r.taxableValue; g.cgst += r.cgst; g.sgst += r.sgst;
+        byRate.set(r.rate, g);
+      }
+      for (const g of [...byRate.values()].sort((a, b2) => a.rate - b2.rate)) {
+        rows.push(['', '', '', `Taxable @ ${g.rate}%`, g.taxableValue]);
+        rows.push(['', '', '', `CGST @ ${g.halfRate}%`, g.cgst]);
+        rows.push(['', '', '', `SGST @ ${g.halfRate}%`, g.sgst]);
+      }
+    }
   }
   const grand = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(sale);
   const netPayable = grand + roundOffAmount + (carried?.amount || 0);
-  if (roundOffAmount !== 0) rows.push(['', '', '', 'Round Off', roundOffAmount]);
   if (carried) rows.push(['', '', '', carried.sourceLabel, carried.amount]);
   rows.push(['', '', '', carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL', netPayable]);
   rows.push(['', '', '', 'Payment', sale.paymentMethod]);
+  // HSN Summary sits below the total, matching every other bill surface.
+  if (hsnRows && hsnRows.length) {
+    rows.push([]);
+    rows.push(['HSN Summary']);
+    rows.push(['HSN Code', 'Rate', '', 'Taxable Value', 'CGST', 'SGST']);
+    hsnRows.forEach((r) => rows.push([r.hsnCode || '', `${r.rate}%`, '', r.taxableValue, r.cgst, r.sgst]));
+  }
   return rows;
 }
 const SALE_COLS = [{ wch: 4 }, { wch: 34 }, { wch: 6 }, { wch: 12 }, { wch: 12 }];

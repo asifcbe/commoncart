@@ -44,6 +44,8 @@ exports.processStoreSale = async (req, res) => {
         price: effectivePrice,
         // isDiscounted here means "aged" → blocks return/exchange. Manual discounts stay exchangeable.
         isDiscounted: !!product.isAged,
+        hsnCode: product.hsnCode || '',
+        gstPercent: product.gstPercent,
       });
 
       totalAmount += effectivePrice * item.qty;

@@ -17,7 +17,7 @@ import ExportMenu from '../components/ExportMenu';
 import api from '../utils/api';
 import { connectSocket } from '../utils/socket';
 import {
-  computeGst, printBillHTML, shareBillWhatsApp, carriedSettlementOf,
+  computeItemizedGst, scaleItemsToGoodsAmount, gstTotalsRows, printBillHTML, shareBillWhatsApp, carriedSettlementOf,
   printCreditNoteHTML, printReplacementNoteHTML,
 } from '../utils/bill';
 import {
@@ -514,32 +514,47 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
             // matching utils/bill.js.
             const roundOffAmount = sale.roundOffAmount || 0;
             const goodsAmount = sale.totalAmount - roundOffAmount;
-            const gst = computeGst(goodsAmount, business, sale.gst);
+            const scaledItems = scaleItemsToGoodsAmount(sale.items, goodsAmount);
+            const gst = computeItemizedGst(scaledItems, business, sale.gst);
+            const hsnRows = gst ? gst.rows : null;
             const grand = gst ? gst.grandTotal : goodsAmount;
             const carried = carriedSettlementOf(sale);
             const netPayable = grand + roundOffAmount + (carried?.amount || 0);
             return (
               <div className="border-t pt-3 text-sm space-y-1">
-                {gst && (
-                  <>
-                    <div className="flex justify-between text-gray-500"><span>Taxable Value</span><span>₹{gst.net.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-gray-500"><span>CGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.cgst.toFixed(2)}</span></div>
-                    <div className="flex justify-between text-gray-500"><span>SGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.sgst.toFixed(2)}</span></div>
-                  </>
-                )}
                 {roundOffAmount !== 0 && (
                   <div className={`flex justify-between ${roundOffAmount > 0 ? 'text-red-500' : 'text-green-600'}`}>
                     <span>Round Off</span><span>{roundOffAmount > 0 ? '+' : '-'}₹{Math.abs(roundOffAmount).toFixed(2)}</span>
                   </div>
                 )}
-                {carried && (
-                  <div className={`flex justify-between ${carried.amount > 0 ? 'text-red-500' : 'text-green-600'}`}>
-                    <span>{carried.sourceLabel}</span><span>{carried.amount > 0 ? '+' : '-'}₹{Math.abs(carried.amount).toFixed(2)}</span>
+                {gst && (
+                  <div className={`space-y-1 ${roundOffAmount !== 0 ? 'border-t pt-1 mt-1' : ''}`}>
+                    {gstTotalsRows(gst).map(([label, val], i) => (
+                      <div key={i} className="flex justify-between text-gray-500"><span>{label}</span><span>{val}</span></div>
+                    ))}
                   </div>
                 )}
-                <div className="flex justify-between items-center font-bold">
+                {carried && (
+                  <div className={`space-y-1 ${(gst || roundOffAmount !== 0) ? 'border-t pt-1 mt-1' : ''}`}>
+                    <div className={`flex justify-between ${carried.amount > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                      <span>{carried.sourceLabel}</span><span>{carried.amount > 0 ? '+' : '-'}₹{Math.abs(carried.amount).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
+                <div className="flex justify-between items-center font-bold border-t-2 pt-1.5 mt-1.5">
                   <span>{carried ? (netPayable < 0 ? 'Refund Due' : 'Net Payable') : 'Total'}</span><span>₹{Math.abs(netPayable).toFixed(2)}</span>
                 </div>
+                {hsnRows && hsnRows.length > 0 && (
+                  <div className="border-t pt-1 mt-1">
+                    <div className="text-xs font-semibold text-gray-500">HSN Summary</div>
+                    {hsnRows.map((r, i) => (
+                      <div key={i} className="flex justify-between text-xs text-gray-400">
+                        <span>{r.hsnCode || '—'} @ {r.rate}%</span>
+                        <span>₹{r.taxableValue.toFixed(2)} | CGST ₹{r.cgst.toFixed(2)} | SGST ₹{r.sgst.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 {business?.gstin && <div className="text-xs text-gray-400">GSTIN: {business.gstin}</div>}
               </div>
             );

@@ -291,7 +291,7 @@ export default function Settings() {
   const [showResetModal, setShowResetModal] = useState(false);
   const [tab, setTab] = useState('users');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [creditConfig, setCreditConfig] = useState({ rupeesPerPoint: 1000, pointValue: 1 });
+  const [creditConfig, setCreditConfig] = useState({ pointsPerAmount: 1, perRupees: 1000, pointValue: 1 });
   const [savingCredit, setSavingCredit] = useState(false);
 
   const DEFAULT_STEPS = [
@@ -310,7 +310,7 @@ export default function Settings() {
   const [business, setBusiness] = useState({
     businessName: '', addressLine: '', phone: '', email: '',
     gstin: '', gstEnabled: false, gstPercent: 18, gstInclusive: true,
-    stateName: '', footerNote: 'Thank you for shopping!',
+    defaultHsnCode: '', stateName: '', footerNote: 'Thank you for shopping!',
   });
   const [savingBusiness, setSavingBusiness] = useState(false);
 
@@ -933,6 +933,17 @@ export default function Settings() {
                     <p className="text-xs text-gray-400 mt-1">15-character GST identification number printed on every bill.</p>
                   </div>
 
+                  <div>
+                    <label className="text-sm font-medium block mb-1">Default HSN Code</label>
+                    <Input
+                      value={business.defaultHsnCode}
+                      onChange={(e) => setBusiness((b) => ({ ...b, defaultHsnCode: e.target.value }))}
+                      placeholder="e.g. 6109"
+                      className="font-mono"
+                    />
+                    <p className="text-xs text-gray-400 mt-1">Pre-fills the HSN Code field when adding a new product — each product can still override it.</p>
+                  </div>
+
                   <label className="flex items-center gap-2 cursor-pointer">
                     <input
                       type="checkbox"
@@ -946,13 +957,13 @@ export default function Settings() {
                   {business.gstEnabled && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-6">
                       <div>
-                        <label className="text-sm font-medium block mb-1">GST Rate (%)</label>
+                        <label className="text-sm font-medium block mb-1">Default GST %</label>
                         <Input
                           type="number" min="0" max="100" step="0.01"
                           value={business.gstPercent}
                           onChange={(e) => setBusiness((b) => ({ ...b, gstPercent: Number(e.target.value) }))}
                         />
-                        <p className="text-xs text-gray-400 mt-1">Split equally as CGST {(business.gstPercent / 2) || 0}% + SGST {(business.gstPercent / 2) || 0}% on bills.</p>
+                        <p className="text-xs text-gray-400 mt-1">Used for products/purchase items that don't set their own GST % — each product can override it. Split equally as CGST {(business.gstPercent / 2) || 0}% + SGST {(business.gstPercent / 2) || 0}% on bills.</p>
                       </div>
                       <div>
                         <label className="text-sm font-medium block mb-1">Price Basis</label>
@@ -1564,17 +1575,31 @@ export default function Settings() {
             <CardContent>
               <form onSubmit={handleSaveCreditConfig} className="space-y-5">
                 <div>
-                  <label className="text-sm font-medium block mb-1">Rupees Per Point</label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={creditConfig.rupeesPerPoint}
-                    onChange={(e) => setCreditConfig((c) => ({ ...c, rupeesPerPoint: Number(e.target.value) }))}
-                    required
-                  />
+                  <label className="text-sm font-medium block mb-1">Earning Rate</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-gray-600">Earn</span>
+                    <Input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={creditConfig.pointsPerAmount}
+                      onChange={(e) => setCreditConfig((c) => ({ ...c, pointsPerAmount: Number(e.target.value) }))}
+                      required
+                      className="w-24"
+                    />
+                    <span className="text-sm text-gray-600">points for every ₹</span>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={creditConfig.perRupees}
+                      onChange={(e) => setCreditConfig((c) => ({ ...c, perRupees: Number(e.target.value) }))}
+                      required
+                      className="w-28"
+                    />
+                    <span className="text-sm text-gray-600">spent.</span>
+                  </div>
                   <p className="text-xs text-gray-400 mt-1">
-                    Customer earns 1 point for every ₹{creditConfig.rupeesPerPoint} spent.
-                    E.g. ₹{(creditConfig.rupeesPerPoint * 5).toLocaleString()} purchase = 5 points.
+                    E.g. ₹{(creditConfig.perRupees * 5).toLocaleString()} purchase = {(creditConfig.pointsPerAmount * 5).toFixed(2).replace(/\.?0+$/, '')} points.
                   </p>
                 </div>
                 <div>
@@ -1593,8 +1618,8 @@ export default function Settings() {
                   </p>
                 </div>
                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg text-sm text-yellow-800">
-                  <strong>Example:</strong> Customer spends ₹{(creditConfig.rupeesPerPoint * 3).toLocaleString()} →
-                  earns 3 points → worth ₹{(3 * creditConfig.pointValue).toFixed(2)} in discounts.
+                  <strong>Example:</strong> Customer spends ₹{(creditConfig.perRupees * 3).toLocaleString()} →
+                  earns {(creditConfig.pointsPerAmount * 3).toFixed(2).replace(/\.?0+$/, '')} points → worth ₹{(creditConfig.pointsPerAmount * 3 * creditConfig.pointValue).toFixed(2)} in discounts.
                 </div>
                 <div className="flex justify-end">
                   <Button type="submit" disabled={savingCredit}>

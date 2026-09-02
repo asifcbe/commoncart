@@ -304,6 +304,11 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('');
   const [prodSubCategory, setProdSubCategory] = useState('');
+  // HSN (Harmonized System of Nomenclature) code — GST-compliance field, one
+  // per product (shared across all color/size variants of this purchase).
+  const [prodHsnCode, setProdHsnCode] = useState('');
+  // GST % override for this product — blank means "use the shop's default".
+  const [prodGstPercent, setProdGstPercent] = useState('');
   const [prodCostPrice, setProdCostPrice] = useState('');
   const [prodPrice, setProdPrice] = useState('');
   const [prodDiscountPrice, setProdDiscountPrice] = useState('');
@@ -386,7 +391,13 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     focusFirstInContainer(variantsStepRef.current);
   }, [purchaseStep]);
   useEffect(() => {
-    api.get('/settings/business-config').then(({ data }) => setBusinessName(data.config?.businessName || '')).catch(() => {});
+    api.get('/settings/business-config').then(({ data }) => {
+      setBusinessName(data.config?.businessName || '');
+      // Pre-fill only on create — an existing purchase's HSN/GST fields
+      // already hold their own saved values, loaded separately below.
+      if (!isEdit && data.config?.defaultHsnCode) setProdHsnCode(data.config.defaultHsnCode);
+      if (!isEdit && data.config?.gstPercent != null) setProdGstPercent(String(data.config.gstPercent));
+    }).catch(() => {});
   }, []);
 
   // Load existing purchase
@@ -404,7 +415,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
         const overrides = {};
         p.items.forEach((item, i) => {
           overrides[i] = {
-            name: item.name, category: item.category ?? '', subCategory: item.subCategory ?? '', description: item.description ?? '',
+            name: item.name, category: item.category ?? '', subCategory: item.subCategory ?? '', hsnCode: item.hsnCode ?? '',
+            gstPercent: item.gstPercent != null ? String(item.gstPercent) : '', description: item.description ?? '',
             color: item.color ?? '', size: item.size ?? '', qty: String(item.qty),
             costPrice: String(item.costPrice),
             price: item.price != null ? String(item.price) : String(item.costPrice),
@@ -618,7 +630,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     if (!builtGroups.length) { toast({ message: 'No units to submit', type: 'error' }); return; }
 
     const items = builtGroups.map((v) => ({
-      name: prodName.trim(), category: prodCategory.trim() || 'General', subCategory: prodSubCategory.trim(),
+      name: prodName.trim(), category: prodCategory.trim() || 'General', subCategory: prodSubCategory.trim(), hsnCode: prodHsnCode.trim(),
+      gstPercent: prodGstPercent === '' ? null : Number(prodGstPercent),
       costPrice: v.costPrice, price: v.price, discountPrice: v.discountPrice,
       color: v.color, size: v.size, qty: 1, barcode: v.barcode,
     }));
@@ -745,7 +758,11 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     labelClass="text-xs font-medium text-gray-600 block mb-1"
                   />
                 </div>
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-6 gap-4">
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">HSN Code <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
+                    <Input value={prodHsnCode} onChange={(e) => setProdHsnCode(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 6109" /></div>
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">GST % <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
+                    <Input type="number" min="0" max="100" step="0.01" value={prodGstPercent} onChange={(e) => setProdGstPercent(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 12" /></div>
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">Cost Price (₹)</label>
                     <Input type="number" min="0" step="0.01" value={prodCostPrice} onChange={(e) => setProdCostPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="0.00" /></div>
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">MRP (₹) *</label>
@@ -1024,6 +1041,10 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
               const name = firstOv.name ?? firstItem.name;
               const category = firstOv.category ?? firstItem.category ?? '';
               const subCategory = firstOv.subCategory ?? firstItem.subCategory ?? '';
+              const hsnCode = firstOv.hsnCode ?? firstItem.hsnCode ?? '';
+              const gstPercent = firstOv.gstPercent !== undefined
+                ? (firstOv.gstPercent == null ? '' : String(firstOv.gstPercent))
+                : (firstItem.gstPercent != null ? String(firstItem.gstPercent) : '');
               const setAllField = (field, val) =>
                 grp.indices.forEach((i) => setItemOverrides((prev) => ({ ...prev, [i]: { ...prev[i], [field]: val } })));
               const soldCount = grp.indices.filter((i) => existingPurchase.items[i].isSold).length;
@@ -1035,7 +1056,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                   <Card>
                     <CardHeader className="pb-2"><CardTitle className="text-sm">Step 1 — Product Details</CardTitle></CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                         <div><label className="text-xs font-medium text-gray-600 block mb-1">Product Name *</label>
                           <Input value={name} onChange={(e) => setAllField('name', e.target.value)} onKeyDown={enterNav} /></div>
                         <CategoryFields
@@ -1045,6 +1066,10 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                           onKeyDown={enterNav}
                           labelClass="text-xs font-medium text-gray-600 block mb-1"
                         />
+                        <div><label className="text-xs font-medium text-gray-600 block mb-1">HSN Code <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
+                          <Input value={hsnCode} onChange={(e) => setAllField('hsnCode', e.target.value)} onKeyDown={enterNav} placeholder="e.g. 6109" /></div>
+                        <div><label className="text-xs font-medium text-gray-600 block mb-1">GST % <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
+                          <Input type="number" min="0" max="100" step="0.01" value={gstPercent} onChange={(e) => setAllField('gstPercent', e.target.value === '' ? null : Number(e.target.value))} onKeyDown={enterNav} placeholder="e.g. 12" /></div>
                       </div>
                       <div className="flex gap-4 text-xs text-gray-500">
                         <span>Total units: <strong className="text-gray-700">{grp.indices.length}</strong></span>

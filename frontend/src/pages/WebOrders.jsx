@@ -173,8 +173,8 @@ function OrderDetailModal({ orderId, onClose, onUpdated }) {
                       </div>
                     </td>
                     <td className="px-3 py-2">{item.qty}</td>
-                    <td className="px-3 py-2">${item.price.toFixed(2)}</td>
-                    <td className="px-3 py-2 font-medium">${(item.price * item.qty).toFixed(2)}</td>
+                    <td className="px-3 py-2">₹{item.price.toFixed(2)}</td>
+                    <td className="px-3 py-2 font-medium">₹{(item.price * item.qty).toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -184,13 +184,13 @@ function OrderDetailModal({ orderId, onClose, onUpdated }) {
           {/* Totals */}
           <div className="space-y-1 text-sm">
             {order.subtotal !== undefined && (
-              <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>${order.subtotal.toFixed(2)}</span></div>
+              <div className="flex justify-between text-gray-600"><span>Subtotal</span><span>₹{order.subtotal.toFixed(2)}</span></div>
             )}
             {order.shippingCost > 0 && (
-              <div className="flex justify-between text-gray-600"><span>Shipping</span><span>${order.shippingCost.toFixed(2)}</span></div>
+              <div className="flex justify-between text-gray-600"><span>Shipping</span><span>₹{order.shippingCost.toFixed(2)}</span></div>
             )}
             <div className="flex justify-between font-bold text-base border-t pt-2">
-              <span>Total</span><span>${order.totalAmount.toFixed(2)}</span>
+              <span>Total</span><span>₹{order.totalAmount.toFixed(2)}</span>
             </div>
           </div>
 
@@ -318,7 +318,7 @@ export default function WebOrders() {
                       {o.customerId?.email && <div className="text-xs text-gray-400">{o.customerId.email}</div>}
                     </td>
                     <td className="px-4 py-3 text-gray-600">{o.items.length} item(s)</td>
-                    <td className="px-4 py-3 font-semibold">${o.totalAmount.toFixed(2)}</td>
+                    <td className="px-4 py-3 font-semibold">₹{o.totalAmount.toFixed(2)}</td>
                     <td className="px-4 py-3">
                       <Badge variant={PAYMENT_VARIANT[o.paymentStatus] || 'secondary'}>{o.paymentStatus}</Badge>
                     </td>

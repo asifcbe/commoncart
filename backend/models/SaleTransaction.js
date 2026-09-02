@@ -8,6 +8,16 @@ const saleItemSchema = new mongoose.Schema(
     qty: { type: Number, required: true, min: 1 },
     price: { type: Number, required: true, min: 0 },
     isDiscounted: { type: Boolean, default: false },
+    // Snapshotted from the Product at sale time — GST-compliance field for the
+    // bill's HSN-wise tax summary. Absent (undefined) on sales made before
+    // this field existed, or when the product had no HSN code set.
+    hsnCode: { type: String, default: '' },
+    // Per-item GST rate, snapshotted from Product/Purchase at sale time — a
+    // sale's tax basis must never drift if a product's rate changes later,
+    // same rule as hsnCode. null = this line used the shop's default GST %
+    // (sale.gst.percent) at sale time. No min/max validators here — a
+    // snapshot must always be able to save whatever was true at sale time.
+    gstPercent: { type: Number, default: null },
   },
   { _id: false }
 );

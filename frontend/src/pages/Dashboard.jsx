@@ -84,11 +84,11 @@ export default function Dashboard() {
         />
         <StatCard
           title="Today's Revenue"
-          value={`$${(stats.todayRevenue || 0).toFixed(2)}`}
+          value={`₹${(stats.todayRevenue || 0).toFixed(2)}`}
           sub={
             stats.todayRefundTotal > 0
-              ? `Store: $${(stats.todayStoreSales?.revenue ?? 0).toFixed(2)} · Web: $${(stats.todayWebOrders?.revenue ?? 0).toFixed(2)} · Refunds: -$${stats.todayRefundTotal.toFixed(2)}`
-              : `Store: $${(stats.todayStoreSales?.revenue ?? 0).toFixed(2)} · Web: $${(stats.todayWebOrders?.revenue ?? 0).toFixed(2)}`
+              ? `Store: ₹${(stats.todayStoreSales?.revenue ?? 0).toFixed(2)} · Web: ₹${(stats.todayWebOrders?.revenue ?? 0).toFixed(2)} · Refunds: -₹${stats.todayRefundTotal.toFixed(2)}`
+              : `Store: ₹${(stats.todayStoreSales?.revenue ?? 0).toFixed(2)} · Web: ₹${(stats.todayWebOrders?.revenue ?? 0).toFixed(2)}`
           }
           icon={TrendingUp}
           color="blue"
@@ -156,7 +156,7 @@ export default function Dashboard() {
                       <Badge variant={sale.channel === 'STORE' ? 'info' : 'secondary'}>
                         {sale.channel}
                       </Badge>
-                      <span className="text-sm font-semibold">${sale.totalAmount.toFixed(2)}</span>
+                      <span className="text-sm font-semibold">₹{sale.totalAmount.toFixed(2)}</span>
                     </div>
                   </div>
                 ))}

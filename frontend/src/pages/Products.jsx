@@ -63,7 +63,7 @@ function DeleteConfirmModal({ product, onConfirm, onClose }) {
   );
 }
 
-function ProductForm({ product, categoryCatalog, variants, sizes, onSave, onClose }) {
+function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode, defaultGstPercent, onSave, onClose }) {
   const toast = useToast();
   const showCost = canViewCostPrice(useAuthStore.getState().user);
   const [form, setForm] = useState({
@@ -71,6 +71,9 @@ function ProductForm({ product, categoryCatalog, variants, sizes, onSave, onClos
     description: product?.description || '',
     category: product?.category || '',
     subCategory: product?.subCategory || '',
+    hsnCode: product?.hsnCode ?? (product ? '' : defaultHsnCode) ?? '',
+    // Per-product GST % override — blank means "use the shop's default GST %".
+    gstPercent: product?.gstPercent != null ? String(product.gstPercent) : (product ? '' : (defaultGstPercent ?? '')),
     color: product?.color || '',
     size: product?.size || '',
     price: product?.price || '',
@@ -130,6 +133,14 @@ function ProductForm({ product, categoryCatalog, variants, sizes, onSave, onClos
           onSubCategoryChange={(v) => setForm((f) => ({ ...f, subCategory: v }))}
           required
         />
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">HSN Code <span className="text-xs text-gray-400 font-normal">optional</span></label>
+          <Input value={form.hsnCode} onChange={set('hsnCode')} placeholder="e.g. 6109" />
+        </div>
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">GST % <span className="text-xs text-gray-400 font-normal">optional — uses shop default if blank</span></label>
+          <Input type="number" min="0" max="100" step="0.01" value={form.gstPercent} onChange={set('gstPercent')} placeholder="e.g. 12" />
+        </div>
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-1">Price *</label>
           <Input type="number" step="0.01" value={form.price} onChange={set('price')} required />
@@ -318,10 +329,16 @@ export default function Products() {
   const [checkedIds, setCheckedIds] = useState(new Set());
   const [bulkBarcodeOpen, setBulkBarcodeOpen] = useState(false);
   const [businessName, setBusinessName] = useState('');
+  const [defaultHsnCode, setDefaultHsnCode] = useState('');
+  const [defaultGstPercent, setDefaultGstPercent] = useState('');
 
   useEffect(() => { fetchCategories(); fetchCategoryCatalog(); fetchVariantConfig(); }, []);
   useEffect(() => {
-    api.get('/settings/business-config').then(({ data }) => setBusinessName(data.config?.businessName || '')).catch(() => {});
+    api.get('/settings/business-config').then(({ data }) => {
+      setBusinessName(data.config?.businessName || '');
+      setDefaultHsnCode(data.config?.defaultHsnCode || '');
+      setDefaultGstPercent(data.config?.gstPercent != null ? String(data.config.gstPercent) : '');
+    }).catch(() => {});
   }, []);
 
   const filters = { search, category, subCategory, color: variant, size, page, isActive: showInactive ? undefined : true };
@@ -622,6 +639,8 @@ export default function Products() {
           categoryCatalog={categoryCatalog}
           variants={variants}
           sizes={sizes}
+          defaultHsnCode={defaultHsnCode}
+          defaultGstPercent={defaultGstPercent}
           onSave={handleSave}
           onClose={() => { setShowForm(false); setEditProduct(null); }}
         />

@@ -43,6 +43,8 @@ async function resolveItems(items, supplier) {
         description: item.description || '',
         category,
         subCategory: (item.subCategory || '').trim(),
+        hsnCode: (item.hsnCode || '').trim(),
+        gstPercent: item.gstPercent === '' || item.gstPercent == null ? null : Math.max(0, Math.min(100, Number(item.gstPercent))),
         price: Number(item.price) || 0,
         costPrice,
         quantity: 1, // each purchase line unit is always qty:1
@@ -68,6 +70,8 @@ async function resolveItems(items, supplier) {
     name: product.name,
     category: product.category,
     subCategory: product.subCategory,
+    hsnCode: product.hsnCode,
+    gstPercent: product.gstPercent,
     description: product.description,
     qty: 1,
     costPrice: product.costPrice,
@@ -196,6 +200,14 @@ exports.updatePurchase = async (req, res) => {
         if (ov.name != null && ov.name.trim()) purchaseItem.name = ov.name.trim();
         if (ov.category != null) purchaseItem.category = ov.category.trim();
         if (ov.subCategory != null) purchaseItem.subCategory = ov.subCategory.trim();
+        if (ov.hsnCode != null) purchaseItem.hsnCode = ov.hsnCode.trim();
+        // gstPercent deliberately uses !== undefined (not hsnCode's != null)
+        // — null is a meaningful, settable value here ("clear back to shop
+        // default"), unlike hsnCode where null/undefined both just mean "no
+        // override sent."
+        if (ov.gstPercent !== undefined) {
+          purchaseItem.gstPercent = ov.gstPercent === '' || ov.gstPercent == null ? null : Math.max(0, Math.min(100, Number(ov.gstPercent)));
+        }
         if (ov.description != null) purchaseItem.description = ov.description;
         if (ov.color != null) purchaseItem.color = ov.color.trim();
         if (ov.size != null) purchaseItem.size = ov.size.trim();
@@ -245,6 +257,10 @@ exports.updatePurchase = async (req, res) => {
         if (ov.name?.trim()) product.name = ov.name.trim();
         if (ov.category != null) product.category = ov.category.trim() || product.category;
         if (ov.subCategory != null) product.subCategory = ov.subCategory.trim();
+        if (ov.hsnCode != null) product.hsnCode = ov.hsnCode.trim();
+        if (ov.gstPercent !== undefined) {
+          product.gstPercent = ov.gstPercent === '' || ov.gstPercent == null ? null : Math.max(0, Math.min(100, Number(ov.gstPercent)));
+        }
         if (ov.description != null) product.description = ov.description;
         if (ov.color != null) product.color = ov.color.trim();
         if (ov.size != null) product.size = ov.size.trim();

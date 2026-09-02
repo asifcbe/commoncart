@@ -13,6 +13,10 @@ const purchaseSchema = new Schema(
         name: { type: String, required: true },
         category: { type: String, default: '' },
         subCategory: { type: String, default: '' },
+        hsnCode: { type: String, default: '' },
+        // Per-product GST rate override — see Product.gstPercent. null = use
+        // the shop's default GST %.
+        gstPercent: { type: Number, default: null, min: 0, max: 100 },
         description: { type: String, default: '' },
         qty: { type: Number, required: true, min: 1 },
         costPrice: { type: Number, required: true, min: 0 },

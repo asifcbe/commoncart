@@ -7,7 +7,7 @@ const Product = require('../models/Product');
 const Customer = require('../models/Customer');
 const StockMovement = require('../models/StockMovement');
 const { generateInvoiceNumber } = require('../utils/invoiceNumber');
-const { getGstSnapshot, computeGstFromSnapshot } = require('../utils/gstSnapshot');
+const { getGstSnapshot, computeItemizedGst } = require('../utils/gstSnapshot');
 
 // Sum of returned/replaced qty so far per productId, across ALL CreditNotes /
 // ReplacementNotes referencing this original sale — the sole source of truth
@@ -108,6 +108,9 @@ exports.processReturnSession = async (req, res) => {
           returnLines.push({
             productId: originalItem.productId, barcode: originalItem.barcode, name: originalItem.name,
             qty, price: originalItem.price, isDiscounted: originalItem.isDiscounted,
+            // Copied from the original sale item's own snapshot — a return
+            // must reverse tax at the rate the item was actually sold at.
+            hsnCode: originalItem.hsnCode || '', gstPercent: originalItem.gstPercent,
             // EXCHANGE_OUT is otherwise identical to RETURN — the customer picks their
             // new item(s) as a normal POS purchase afterwards, carrying this Credit
             // Note's balance forward, rather than a new invoice being built here.
@@ -152,7 +155,17 @@ exports.processReturnSession = async (req, res) => {
 
         const returnGrossTotal = returnLines.reduce((s, l) => s + l.price * l.qty, 0);
         const returnTotal = Math.round(returnGrossTotal * netPayableRatio * 100) / 100;
-        const gstCalc = computeGstFromSnapshot(returnTotal, effectiveGst);
+        // Each returned line reverses tax at its OWN stored rate, not one
+        // blended shop rate — same per-item-rate rule the original sale used.
+        // Scale each line's price by the same netPayableRatio the flat
+        // returnTotal above already applies, so the itemized groups sum to
+        // exactly returnTotal (same proportional-allocation method bill.js
+        // uses for discount/round-off).
+        const scale = returnGrossTotal > 0 ? returnTotal / returnGrossTotal : 1;
+        const scaledReturnLines = returnLines.map((l) => ({ ...l, price: l.price * scale }));
+        const itemized = computeItemizedGst(scaledReturnLines, {
+          enabled: effectiveGst.enabled, inclusive: effectiveGst.inclusive, defaultPercent: effectiveGst.percent,
+        });
 
         // Loyalty points reversal — same proportional share of this session's
         // returned value against the bill's own totals. Each return session
@@ -174,10 +187,16 @@ exports.processReturnSession = async (req, res) => {
             cgstPercent: effectiveGst.cgstPercent, sgstPercent: effectiveGst.sgstPercent, igstPercent: effectiveGst.igstPercent,
           },
           gstFallbackUsed,
-          taxableValue: gstCalc ? gstCalc.net : returnTotal,
-          cgstAmount: gstCalc ? gstCalc.cgst : 0,
-          sgstAmount: gstCalc ? gstCalc.sgst : 0,
+          taxableValue: itemized ? itemized.net : returnTotal,
+          cgstAmount: itemized ? itemized.cgst : 0,
+          sgstAmount: itemized ? itemized.sgst : 0,
           igstAmount: 0,
+          // Per (hsnCode+rate) breakdown — populated only when GST applies;
+          // rows[] naturally collapses to one entry when every returned line
+          // shares one rate, same effect as the old blended calc.
+          gstBreakup: itemized ? itemized.rows.map((r) => ({
+            hsnCode: r.hsnCode, rate: r.rate, taxableValue: r.taxableValue, cgstAmount: r.cgst, sgstAmount: r.sgst,
+          })) : [],
           creditNoteTotal: returnTotal,
           netPayableRatio,
           pointsClawedBack,
