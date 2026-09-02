@@ -72,7 +72,10 @@ const DEFAULT_LABEL_PRINT = {
   showMrp: true,
   showSalePrice: true,
   showBarcode: true,
-  showBarcodeNumber: true,
+  // Opt-in — the barcode/QR image already carries the scannable value; the
+  // human-readable number is only drawn (wherever its chip is placed) when
+  // this field is explicitly turned on.
+  showBarcodeNumber: false,
   showBusinessName: false,
   showHsn: false,
   showCategory: false,
@@ -80,7 +83,7 @@ const DEFAULT_LABEL_PRINT = {
   showVariant: false,
   showExtraFields: true,
   fieldOrder: [],           // ordered list of ALL_LABEL_FIELDS keys (derived from `zones` on the frontend)
-  fieldStyles: {},          // { [fieldKey]: { size, color } }
+  fieldStyles: {},          // { [fieldKey]: { size, color, align } }
   fieldLabels: {},          // { [fieldKey]: customPrefixText }
   // 5-zone drag-and-drop placement (top/left/center/right/bottom + '__code__').
   // null until first saved; the frontend derives codePosition/fieldOrder from it.

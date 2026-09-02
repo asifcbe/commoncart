@@ -49,14 +49,17 @@ export const QRImage = ({ value, size = 80, pixelRatio = 1 }) => {
 // this item). `zoneKeys` is the ordered key list of the zone this field sits
 // in — used only by the price fields to decide whether MRP + Sale Price draw
 // as one combined row (same zone) or separately (different zones).
-function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = [] }) {
+// `zoneAlign` is the zone's own alignment (from the label's global
+// `contentAlign`) — the fallback for any field that hasn't set its own
+// `fieldStyles[key].align` override.
+function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = [], zoneAlign = 'center' }) {
   const show = (k) => lbl?.[k] !== false;
   const globalTextColor = lbl?.textColor || '#000000';
   const fieldStyles = lbl?.fieldStyles || {};
   const fStyle = (k, baseFs) => {
     const s = fieldStyles[k] || {};
     const scale = FIELD_SIZE_SCALE[s.size] ?? 1.0;
-    return { fontSize: baseFs * scale, color: s.color || globalTextColor };
+    return { fontSize: baseFs * scale, color: s.color || globalTextColor, textAlign: s.align || zoneAlign };
   };
   const fLabel = (k) => {
     const labels = lbl?.fieldLabels || {};
@@ -163,8 +166,10 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       // Solid black + solid strike line, no opacity — a faded (opacity 0.5)
       // grey prints as an invisible dither on direct-thermal printers.
       const mrpColor = mrpSt.color || '#000000';
+      const priceAlign = (bothHere ? mrpSt.textAlign : (key === 'showMrp' ? mrpSt.textAlign : spSt.textAlign)) || zoneAlign;
+      const priceJustify = priceAlign === 'left' ? 'flex-start' : priceAlign === 'right' ? 'flex-end' : 'center';
       return (
-        <div key={key} style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 2, margin: '1px 0 0' }}>
+        <div key={key} style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 2, margin: '1px 0 0', justifyContent: priceJustify, width: '100%' }}>
           {drawMrp && (
             <span style={{
               fontSize: mrpSt.fontSize,
@@ -182,6 +187,20 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
             </span>
           )}
         </div>
+      );
+    }
+    case 'showBarcodeNumber': {
+      // The human-readable barcode value, as its own field — only drawn where
+      // its chip is placed (any zone, like every other field), and only when
+      // explicitly turned on. Distinct from JsBarcode's own baked-in number
+      // under the bars (that one is part of the scannable image itself and
+      // can't be repositioned).
+      if (!show(key) || !item?.barcode) return null;
+      const st = fStyle(key, smallFontSize);
+      return (
+        <p key={key} style={{ margin: '0 0 1px', fontFamily: 'monospace', ...st }}>
+          {item.barcode}
+        </p>
       );
     }
     case 'showExtraFields':
@@ -213,30 +232,36 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align, zoneKey }) {
   const show = (k) => lbl?.[k] !== false;
   const qrValue = item?.barcode || item?.itemCode || item?.name || 'item';
 
+  // Note: the human-readable barcode number is its own field
+  // ('showBarcodeNumber', handled in renderLabelField) — it's rendered
+  // wherever its chip is placed, not hardcoded here under the image. The
+  // QR/barcode image itself may still carry its own baked-in text (QR never
+  // does; CODE128 barcodes do, via JsBarcode's displayValue) independent of
+  // this field.
   const codeEl = mode === 'qr' ? (
     <div key={CODE_KEY} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
       <QRImage value={qrValue} size={Math.round(qrSize)} pixelRatio={pixelRatio} />
-      {show('showBarcodeNumber') && item?.barcode && (
-        <p style={{ margin: '1px 0 0', fontSize: smallFontSize, color: lbl?.textColor || '#000000', textAlign: 'center' }}>{item.barcode}</p>
-      )}
     </div>
   ) : (
     (show('showBarcode') && item?.barcode) ? (
       <div key={CODE_KEY} style={{ flexShrink: 0, width: '100%' }}>
         <BarcodeImage value={item.barcode} height={barcodeHeight} fontSize={smallFontSize} barWidth={barWidth} pixelRatio={pixelRatio} />
-        {show('showBarcodeNumber') && (
-          <p style={{ margin: 0, fontSize: smallFontSize, color: lbl?.textColor || '#000000', textAlign: 'center' }}>{item.barcode}</p>
-        )}
       </div>
     ) : null
   );
 
-  const nodes = keys.map((k) => (k === CODE_KEY ? codeEl : renderLabelField(k, { item, lbl, fontSize, smallFontSize, zoneKeys: keys })));
+  const nodes = keys.map((k) => (k === CODE_KEY ? codeEl : renderLabelField(k, { item, lbl, fontSize, smallFontSize, zoneKeys: keys, zoneAlign: align })));
   if (!nodes.some(Boolean)) return null;
 
   const hasCode = keys.includes(CODE_KEY);
   const horizontal = (zoneKey === 'top' || zoneKey === 'bottom') && !hasCode;
   const justify = align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center';
+  // Per-field alignment override — a field's own fieldStyles[key].align (set
+  // in the zone editor's field style panel) wins over the zone's alignment
+  // for that field's BLOCK position, not just its text wrapping. CODE_KEY has
+  // no override (the barcode/QR image is always zone-aligned).
+  const alignOf = (k) => (k === CODE_KEY ? align : ((lbl?.fieldStyles || {})[k]?.align || align));
+  const justifyOf = (a) => (a === 'left' ? 'flex-start' : a === 'right' ? 'flex-end' : 'center');
 
   if (horizontal) {
     const visible = nodes.filter(Boolean);
@@ -263,7 +288,9 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align, zoneKey }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: justify, textAlign: align, fontFamily: 'Arial, sans-serif', minWidth: 0 }}>
-      {nodes}
+      {keys.map((k, i) => (nodes[i] == null ? null : (
+        <div key={k} style={{ alignSelf: justifyOf(alignOf(k)), maxWidth: '100%' }}>{nodes[i]}</div>
+      )))}
     </div>
   );
 }

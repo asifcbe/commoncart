@@ -271,6 +271,42 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
               );
             })}
           </div>
+          <p className="text-xs font-semibold text-gray-600 mb-1 mt-2">Alignment</p>
+          <div className="flex gap-1 flex-wrap mb-2">
+            <button
+              type="button"
+              onClick={() => setFieldStyle(expandedField, 'align', '')}
+              className="flex-1 text-center py-1 px-1 rounded text-[0.62rem]"
+              style={{
+                border: `1px solid ${!fst.align ? ACCENT : '#e5e7eb'}`,
+                fontWeight: !fst.align ? 700 : 400,
+                background: !fst.align ? 'rgba(13,148,136,0.12)' : 'transparent',
+                color: !fst.align ? ACCENT : '#6b7280',
+              }}
+              title="Use the label's overall Text Alignment"
+            >
+              Default
+            </button>
+            {CONTENT_ALIGNS.map((o) => {
+              const active = fst.align === o.value;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => setFieldStyle(expandedField, 'align', o.value)}
+                  className="flex-1 text-center py-1 px-1 rounded text-[0.62rem]"
+                  style={{
+                    border: `1px solid ${active ? ACCENT : '#e5e7eb'}`,
+                    fontWeight: active ? 700 : 400,
+                    background: active ? 'rgba(13,148,136,0.12)' : 'transparent',
+                    color: active ? ACCENT : '#6b7280',
+                  }}
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-semibold text-gray-600 shrink-0">Color</span>
             <input type="color" value={fst.color || lbl.textColor || '#000000'} onChange={(e) => setFieldStyle(expandedField, 'color', e.target.value)}
@@ -285,7 +321,8 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
       )}
 
       <p className="text-[0.7rem] font-bold uppercase tracking-wider text-gray-500 mb-1">Style</p>
-      <label className="text-xs font-medium text-gray-600 block mb-1">Text Alignment</label>
+      <label className="text-xs font-medium text-gray-600 block mb-1">Default Text Alignment</label>
+      <p className="text-[0.62rem] text-gray-400 mb-1">Applies to any field that hasn't set its own alignment above.</p>
       <Select value={lbl.contentAlign || 'center'} onChange={(e) => setLblKey('contentAlign', e.target.value)} className="mb-3">
         {CONTENT_ALIGNS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
       </Select>

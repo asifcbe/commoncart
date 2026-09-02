@@ -271,7 +271,12 @@ export const DEFAULT_BARCODE_LABEL = {
   showMrp: true,
   showSalePrice: true,
   showBarcode: true,
-  showBarcodeNumber: true,
+  // Opt-in only — the barcode/QR image already carries its own scannable
+  // value; a second human-readable copy of the number is only drawn when this
+  // field is explicitly turned on (and, like every other field, only wherever
+  // its chip is placed in a zone — see renderLabelField's 'showBarcodeNumber'
+  // case in components/BarcodeLabel.jsx).
+  showBarcodeNumber: false,
   showBusinessName: false,
   showHsn: false,
   showCategory: false,
@@ -323,10 +328,15 @@ export function barcodeDataURL(value, { height = 70, fontSize = 13, barWidth = 1
       format: 'CODE128',
       width: barWidth * pixelRatio,
       height: height * pixelRatio,
-      displayValue: true,
+      // Never bake the human-readable number into the barcode bitmap itself —
+      // that used to always show regardless of the 'showBarcodeNumber' field
+      // setting, since it's drawn by JsBarcode into the image, not by our own
+      // React field renderer. The ONLY way a number now shows is the
+      // 'showBarcodeNumber' field (see renderLabelField in BarcodeLabel.jsx) —
+      // off by default, on and positioned only when explicitly added.
+      displayValue: false,
       fontSize: fontSize * pixelRatio,
       margin: 2 * pixelRatio,
-      textMargin: 2 * pixelRatio,
       background: '#ffffff', lineColor: '#000000',
     });
     const entry = {
