@@ -509,10 +509,15 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
           )}
 
           {!editing && (() => {
-            const gst = computeGst(sale.totalAmount, business, sale.gst);
-            const grand = gst ? gst.grandTotal : sale.totalAmount;
+            // sale.totalAmount has round-off baked into it at checkout — back
+            // it back out so GST is computed on the goods-only amount,
+            // matching utils/bill.js.
+            const roundOffAmount = sale.roundOffAmount || 0;
+            const goodsAmount = sale.totalAmount - roundOffAmount;
+            const gst = computeGst(goodsAmount, business, sale.gst);
+            const grand = gst ? gst.grandTotal : goodsAmount;
             const carried = carriedSettlementOf(sale);
-            const netPayable = grand + (carried?.amount || 0);
+            const netPayable = grand + roundOffAmount + (carried?.amount || 0);
             return (
               <div className="border-t pt-3 text-sm space-y-1">
                 {gst && (
@@ -521,6 +526,11 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                     <div className="flex justify-between text-gray-500"><span>CGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.cgst.toFixed(2)}</span></div>
                     <div className="flex justify-between text-gray-500"><span>SGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.sgst.toFixed(2)}</span></div>
                   </>
+                )}
+                {roundOffAmount !== 0 && (
+                  <div className={`flex justify-between ${roundOffAmount > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                    <span>Round Off</span><span>{roundOffAmount > 0 ? '+' : '-'}₹{Math.abs(roundOffAmount).toFixed(2)}</span>
+                  </div>
                 )}
                 {carried && (
                   <div className={`flex justify-between ${carried.amount > 0 ? 'text-red-500' : 'text-green-600'}`}>

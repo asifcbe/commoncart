@@ -8,6 +8,7 @@ import useAuthStore from '../store/useAuthStore';
 import { useToast } from '../components/ui/Toast';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
+import Textarea from '../components/ui/Textarea';
 import Select from '../components/ui/Select';
 import Modal from '../components/ui/Modal';
 import Badge from '../components/ui/Badge';
@@ -972,7 +973,8 @@ export default function Settings() {
                 {/* Footer note */}
                 <div className="border-t pt-4">
                   <label className="text-sm font-medium block mb-1">Bill Footer Note</label>
-                  <Input value={business.footerNote} onChange={(e) => setBusiness((b) => ({ ...b, footerNote: e.target.value }))} placeholder="Thank you for shopping!" />
+                  <p className="text-xs text-gray-500 mb-1">Printed at the bottom of every bill — e.g. an exchange/return policy. Press Enter for a new line.</p>
+                  <Textarea value={business.footerNote} onChange={(e) => setBusiness((b) => ({ ...b, footerNote: e.target.value }))} placeholder="Thank you for shopping!" rows={3} />
                 </div>
 
                 <div className="flex justify-end">

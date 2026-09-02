@@ -74,7 +74,11 @@ export async function exportSalePDF(sale, business, billConfig, extra = {}) {
 // Sheet rows (AoA) for one sale bill — reused by single + bulk Excel export.
 function saleSheetRows(sale, business) {
   const b = { businessName: 'CommonCart Store', ...(business || {}) };
-  const gst = computeGst(sale.totalAmount, b);
+  // sale.totalAmount has round-off baked into it at checkout — back it back
+  // out so GST is computed on the goods-only amount, matching bill.js.
+  const roundOffAmount = sale.roundOffAmount || 0;
+  const goodsAmount = sale.totalAmount - roundOffAmount;
+  const gst = computeGst(goodsAmount, b);
   const rows = [];
   rows.push([b.businessName]);
   if (b.addressLine) rows.push([b.addressLine]);
@@ -90,9 +94,10 @@ function saleSheetRows(sale, business) {
     rows.push(['', '', '', `CGST @ ${gst.halfRate}%`, gst.cgst]);
     rows.push(['', '', '', `SGST @ ${gst.halfRate}%`, gst.sgst]);
   }
-  const grand = gst ? gst.grandTotal : sale.totalAmount;
+  const grand = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(sale);
-  const netPayable = grand + (carried?.amount || 0);
+  const netPayable = grand + roundOffAmount + (carried?.amount || 0);
+  if (roundOffAmount !== 0) rows.push(['', '', '', 'Round Off', roundOffAmount]);
   if (carried) rows.push(['', '', '', carried.sourceLabel, carried.amount]);
   rows.push(['', '', '', carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL', netPayable]);
   rows.push(['', '', '', 'Payment', sale.paymentMethod]);
@@ -161,7 +166,7 @@ ${itemsHTML}
 <div style="border-top:1px dashed #ccc;margin-top:6px;padding-top:6px;">
   <div style="display:flex;justify-content:space-between;font-weight:bold;font-size:14px;"><span>TOTAL COST</span><span>₹${Number(purchase.totalCost).toFixed(2)}</span></div>
 </div>
-${b.footerNote ? `<div style="text-align:center;font-size:10px;color:#888;margin-top:8px;">${b.footerNote}</div>` : ''}`;
+${b.footerNote ? `<div style="text-align:center;font-size:10px;color:#888;margin-top:8px;white-space:pre-line;">${b.footerNote}</div>` : ''}`;
 }
 
 export function printPurchaseHTML(purchase, business, billConfig) {

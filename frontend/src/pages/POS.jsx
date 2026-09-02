@@ -42,10 +42,15 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
   const hasDiscountedItems = transaction.items.some((i) => i.isDiscounted);
   const customerPhone = saleData?.customer?.phone;
   const customerName = saleData?.customer?.name;
-  const gst = computeGst(transaction.totalAmount, business);
-  const grandTotal = gst ? gst.grandTotal : transaction.totalAmount;
+  // transaction.totalAmount has round-off baked into it at checkout (see
+  // SaleTransaction.roundOffAmount's schema comment) — back it back out so
+  // GST is computed on the goods-only amount, matching utils/bill.js.
+  const roundOffAmount = transaction.roundOffAmount || 0;
+  const goodsAmount = transaction.totalAmount - roundOffAmount;
+  const gst = computeGst(goodsAmount, business);
+  const grandTotal = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(transaction);
-  const netPayable = grandTotal + (carried?.amount || 0);
+  const netPayable = grandTotal + roundOffAmount + (carried?.amount || 0);
   const pointsEarned = saleData?.pointsEarned || 0;
   const pointsRedeemed = saleData?.pointsRedeemed || 0;
   const pointsRedeemedValue = saleData?.pointsRedeemedValue ?? pointsRedeemed;
@@ -81,7 +86,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
         <div className="border-t-2 border-black pt-2 space-y-1 text-black">
           {saleData?.discountAmount > 0 && (
             <div className="flex justify-between text-xs font-bold">
-              <span>Bill Value</span><span>₹{(transaction.totalAmount + saleData.discountAmount).toFixed(2)}</span>
+              <span>Bill Value</span><span>₹{(goodsAmount + saleData.discountAmount).toFixed(2)}</span>
             </div>
           )}
           {saleData?.discountAmount > 0 && (
@@ -91,7 +96,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
           )}
           {pointsRedeemed > 0 && (
             <div className="flex justify-between text-xs text-black">
-              <span>Points Redeemed ({pointsRedeemed} pts)</span>
+              <span>Points ({pointsRedeemed} pts)</span>
               <span>-₹{Number(pointsRedeemed).toFixed(2)}</span>
             </div>
           )}
@@ -107,6 +112,12 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
                 <span>SGST @ {gst.halfRate}%{gst.inclusive ? ' (incl.)' : ''}</span><span>₹{gst.sgst.toFixed(2)}</span>
               </div>
             </>
+          )}
+          {roundOffAmount !== 0 && (
+            <div className="flex justify-between text-xs text-black font-bold">
+              <span>Round Off</span>
+              <span>{roundOffAmount > 0 ? '+' : '-'}₹{Math.abs(roundOffAmount).toFixed(2)}</span>
+            </div>
           )}
           {carried && (
             <div className="flex justify-between text-xs text-black font-bold">
@@ -155,7 +166,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
             * Discounted items cannot be replaced or exchanged.
           </div>
         )}
-        <div className="text-center text-xs text-black pt-2 border-t border-black">{business?.footerNote || 'Thank you for shopping!'}</div>
+        <div className="text-center text-xs text-black pt-2 border-t border-black whitespace-pre-line">{business?.footerNote || 'Thank you for shopping!'}</div>
         {billedByName && <div className="text-center text-[10px] text-gray-500">Billed by: {billedByName}</div>}
       </div>
       <div className="flex gap-3 mt-4 justify-end flex-wrap">

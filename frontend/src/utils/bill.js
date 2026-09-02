@@ -101,11 +101,17 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   // don't both list the same rupees (they used to double-count).
   const discount = sale.discountAmount || 0;
   const nonPointsDiscount = Math.max(0, discount - (Number(extra.pointsRedeemedValue ?? extra.pointsRedeemed) || 0));
-  const gst = computeGst(sale.totalAmount, b);
+  // sale.totalAmount has round-off baked into it at checkout (see
+  // SaleTransaction.roundOffAmount's schema comment) — back it back out here
+  // so GST is computed on the goods-only amount, never on a non-taxable
+  // rounding tweak (same rule this file already applies to carriedSettlement).
+  const roundOffAmount = sale.roundOffAmount || 0;
+  const goodsAmount = sale.totalAmount - roundOffAmount;
+  const gst = computeGst(goodsAmount, b);
   const hasDiscounted = sale.items.some((i) => i.isDiscounted);
-  const grand = gst ? gst.grandTotal : sale.totalAmount;
+  const grand = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(sale);
-  const netPayable = grand + (carried?.amount || 0);
+  const netPayable = grand + roundOffAmount + (carried?.amount || 0);
   const pointsEarned = Number(extra.pointsEarned) || 0;
   const pointsRedeemed = Number(extra.pointsRedeemed) || 0;
   // Rupee value of pointsRedeemed — NOT the same number as the point count
@@ -125,10 +131,10 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   const paymentLabel = splitPayments.length
     ? splitPayments.map((p) => `${p.method} ₹${Number(p.amount).toFixed(2)}`).join(' + ')
     : sale.paymentMethod;
-  // sale.totalAmount is stored net of discount (goods total minus discountAmount,
+  // goodsAmount is stored net of discount (goods total minus discountAmount,
   // see processStoreSale) — add the discount back to show the true pre-discount
   // bill value, not the same figure as the final payable total.
-  const billValue = sale.totalAmount + discount;
+  const billValue = goodsAmount + discount;
   // Computed once, shared by both layouts below — every printed/exported bill
   // (thermal or A4/A5) carries the same scannable bill-number barcode.
   const barcodeImg = billBarcodeDataURL(sale.transactionId);
@@ -156,12 +162,13 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
     totals: [
       ...(discount > 0 ? [['Bill Value', `₹${billValue.toFixed(2)}`, true]] : []),
       ...(nonPointsDiscount > 0 ? [['Discount', `-₹${nonPointsDiscount.toFixed(2)}`, false]] : []),
-      ...(pointsRedeemed > 0 ? [[`Points Redeemed (${pointsRedeemed} pts)`, `-₹${pointsRedeemedValue.toFixed(2)}`, false]] : []),
+      ...(pointsRedeemed > 0 ? [[`Points (${pointsRedeemed} pts)`, `-₹${pointsRedeemedValue.toFixed(2)}`, false]] : []),
       ...(gst ? [
         ['Taxable Value', `₹${gst.net.toFixed(2)}`, false],
         [`CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}`, `₹${gst.cgst.toFixed(2)}`, false],
         [`SGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}`, `₹${gst.sgst.toFixed(2)}`, false],
       ] : []),
+      ...(roundOffAmount !== 0 ? [['Round Off', `${roundOffAmount > 0 ? '+' : '-'}₹${Math.abs(roundOffAmount).toFixed(2)}`, false]] : []),
       ...(carried ? [[carried.sourceLabel, `${carried.amount > 0 ? '+' : '-'}₹${Math.abs(carried.amount).toFixed(2)}`, false]] : []),
       [carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL', `₹${Math.abs(netPayable).toFixed(2)}`, true],
       ...(pointsEarnedRedeemedNow > 0
@@ -193,12 +200,21 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
        <div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}</span><span>₹${gst.cgst.toFixed(2)}</span></div>
        <div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>SGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}</span><span>₹${gst.sgst.toFixed(2)}</span></div>`
     : '';
+  const roundOffHTML = roundOffAmount !== 0
+    ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>Round Off</span><span>${roundOffAmount > 0 ? '+' : '-'}₹${Math.abs(roundOffAmount).toFixed(2)}</span></div>`
+    : '';
   const carriedHTML = carried
     ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>${carried.sourceLabel}</span><span>${carried.amount > 0 ? '+' : '-'}₹${Math.abs(carried.amount).toFixed(2)}</span></div>`
     : '';
-  const pointsHTML = (pointsRedeemed > 0 || pointsEarned > 0 || balancePoints !== null)
+  // "Points Redeemed" reduces what's owed, so it belongs in the totals block
+  // above the final amount, same as Discount/GST/Round Off — Points Earned
+  // and Balance Points are forward-looking loyalty info, not part of this
+  // bill's payable amount, so they stay in their own block after the total.
+  const pointsRedeemedHTML = pointsRedeemed > 0
+    ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>Points (${pointsRedeemed} pts)</span><span>-₹${pointsRedeemedValue.toFixed(2)}</span></div>`
+    : '';
+  const pointsHTML = (pointsEarned > 0 || balancePoints !== null)
     ? `<div style="border-top:1px dashed #000;margin-top:6px;padding-top:6px;">
-        ${pointsRedeemed > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Points Redeemed (${pointsRedeemed} pts)</span><span>-₹${pointsRedeemedValue.toFixed(2)}</span></div>` : ''}
         ${pointsEarnedRedeemedNow > 0
           ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Points Earned &amp; Redeemed This Bill</span><span>+${pointsEarnedRedeemedNow} pts (-₹${pointsEarnedRedeemedNow.toFixed(2)})</span></div>`
           : (pointsEarned > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;"><span>Points Earned</span><span>+${pointsEarned} pts</span></div>` : '')}
@@ -218,7 +234,9 @@ ${itemsHTML}
 <div style="border-top:2px solid #000;margin-top:6px;padding-top:6px;">
   ${discount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:bold;color:#000;"><span>Bill Value</span><span>₹${billValue.toFixed(2)}</span></div>` : ''}
   ${nonPointsDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>Discount</span><span>-₹${nonPointsDiscount.toFixed(2)}</span></div>` : ''}
+  ${pointsRedeemedHTML}
   ${gstHTML}
+  ${roundOffHTML}
   ${carriedHTML}
   <div style="display:flex;justify-content:space-between;font-weight:800;font-size:16px;margin-top:4px;color:#000;"><span>${carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL'}</span><span>₹${Math.abs(netPayable).toFixed(2)}</span></div>
   <div style="font-size:12px;color:#000;margin-top:2px;font-weight:600;">Payment: ${paymentLabel}</div>
@@ -226,7 +244,7 @@ ${itemsHTML}
 ${pointsHTML}
 ${hasDiscounted ? '<p style="font-size:11px;color:#000;font-weight:700;margin-top:8px;border-top:1px dashed #000;padding-top:6px;">* Discounted items cannot be replaced or exchanged.</p>' : ''}
 ${barcodeImg ? `<div style="text-align:center;margin-top:10px;border-top:2px solid #000;padding-top:10px;"><img src="${barcodeImg}" style="width:100%;max-width:340px;" alt="${sale.transactionId}" /></div>` : ''}
-<div style="text-align:center;font-size:11px;color:#000;margin-top:8px;font-weight:600;">${b.footerNote || 'Thank you for shopping!'}</div>
+<div style="text-align:center;font-size:11px;color:#000;margin-top:8px;font-weight:600;white-space:pre-line;">${b.footerNote || 'Thank you for shopping!'}</div>
 ${billedByName ? `<div style="text-align:center;font-size:9px;color:#000;margin-top:4px;">Billed by: ${billedByName}</div>` : ''}
 </div>`;
 }
@@ -285,7 +303,7 @@ export function invoiceLayout(opts) {
 
   ${opts.note ? `<p style="font-size:11px;color:#000;font-weight:700;margin-top:16px;border-top:1px solid #999;padding-top:8px;">${opts.note}</p>` : ''}
   ${opts.barcodeImg ? `<div style="text-align:center;margin-top:16px;"><img src="${opts.barcodeImg}" style="max-width:360px;width:100%;" alt="barcode" /></div>` : ''}
-  <div style="text-align:center;font-size:11px;color:#000;margin-top:18px;border-top:1px solid #999;padding-top:10px;">${esc(opts.footer || '')}</div>
+  <div style="text-align:center;font-size:11px;color:#000;margin-top:18px;border-top:1px solid #999;padding-top:10px;white-space:pre-line;">${esc(opts.footer || '')}</div>
 </div>`;
 }
 
@@ -439,7 +457,11 @@ export function shareBillWhatsApp(sale, phone, business, extra = {}) {
   let digits = String(phone).replace(/\D/g, '');
   if (digits.length === 10) digits = '91' + digits;
 
-  const gst = computeGst(sale.totalAmount, b);
+  // sale.totalAmount has round-off baked into it at checkout — back it back
+  // out so GST is computed on the goods-only amount, matching buildBillBodyHTML.
+  const roundOffAmount = sale.roundOffAmount || 0;
+  const goodsAmount = sale.totalAmount - roundOffAmount;
+  const gst = computeGst(goodsAmount, b);
   const lines = [];
   lines.push(`*${b.businessName}*`);
   if (b.addressLine) lines.push(b.addressLine);
@@ -456,21 +478,25 @@ export function shareBillWhatsApp(sale, phone, business, extra = {}) {
   // in the "Points Redeemed" line below).
   const pointsRedeemedValue = extra.pointsRedeemedValue != null ? Number(extra.pointsRedeemedValue) : (Number(extra.pointsRedeemed) || 0);
   const nonPointsDiscount = Math.max(0, (sale.discountAmount || 0) - pointsRedeemedValue);
-  if (sale.discountAmount > 0) lines.push(`*Bill Value: ₹${(sale.totalAmount + sale.discountAmount).toFixed(2)}*`);
+  if (sale.discountAmount > 0) lines.push(`*Bill Value: ₹${(goodsAmount + sale.discountAmount).toFixed(2)}*`);
   if (nonPointsDiscount > 0) lines.push(`Discount: -₹${nonPointsDiscount.toFixed(2)}`);
+  // Points Redeemed reduces what's owed, so it belongs above the total —
+  // Points Earned/Balance Points (forward-looking, not part of this bill's
+  // payable amount) stay listed after it, further down.
+  if (extra.pointsRedeemed > 0) lines.push(`Points (${extra.pointsRedeemed} pts): -₹${pointsRedeemedValue.toFixed(2)}`);
   if (gst) {
     lines.push(`Taxable: ₹${gst.net.toFixed(2)}`);
     lines.push(`CGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}: ₹${gst.cgst.toFixed(2)}`);
     lines.push(`SGST @ ${gst.halfRate}%${gst.inclusive ? ' (incl.)' : ''}: ₹${gst.sgst.toFixed(2)}`);
   }
-  const grand = gst ? gst.grandTotal : sale.totalAmount;
+  const grand = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(sale);
-  const netPayable = grand + (carried?.amount || 0);
+  const netPayable = grand + roundOffAmount + (carried?.amount || 0);
+  if (roundOffAmount !== 0) lines.push(`Round Off: ${roundOffAmount > 0 ? '+' : '-'}₹${Math.abs(roundOffAmount).toFixed(2)}`);
   if (carried) lines.push(`${carried.sourceLabel}: ${carried.amount > 0 ? '+' : '-'}₹${Math.abs(carried.amount).toFixed(2)}`);
   lines.push(`*${carried ? (netPayable < 0 ? 'REFUND DUE' : 'NET PAYABLE') : 'TOTAL'}: ₹${Math.abs(netPayable).toFixed(2)}*`);
   const splitPayments = sale.splitPayments || [];
   lines.push(`Payment: ${splitPayments.length ? splitPayments.map((p) => `${p.method} ₹${Number(p.amount).toFixed(2)}`).join(' + ') : sale.paymentMethod}`);
-  if (extra.pointsRedeemed > 0) lines.push(`Points Redeemed: ${extra.pointsRedeemed} pts (-₹${pointsRedeemedValue.toFixed(2)})`);
   if (extra.pointsEarnedRedeemedNow > 0) lines.push(`Points Earned & Redeemed This Bill: +${extra.pointsEarnedRedeemedNow} pts (-₹${Number(extra.pointsEarnedRedeemedNow).toFixed(2)})`);
   else if (extra.pointsEarned > 0) lines.push(`Points Earned: +${extra.pointsEarned} pts`);
   if (extra.balancePoints != null) lines.push(`Balance Points: ${extra.balancePoints} pts`);
