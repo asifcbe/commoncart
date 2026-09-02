@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, Suspense, lazy } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Plus, Minus, ShoppingCart, AlertTriangle, Printer, ScanLine, Camera, X,
-  Phone, Star, Tag, CheckCircle, UserPlus, UserCircle, MessageCircle, ArrowRightCircle,
+  Phone, Star, Tag, UserPlus, UserCircle, MessageCircle, ArrowRightCircle,
   Zap, Keyboard, RotateCcw, Lock, Unlock, Maximize, Eye, EyeOff, SplitSquareHorizontal,
   Check, ChevronRight as ChevronRightIcon,
 } from 'lucide-react';
@@ -13,6 +13,7 @@ import { useToast } from '../components/ui/Toast';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Select from '../components/ui/Select';
+import Combobox from '../components/ui/Combobox';
 import Modal from '../components/ui/Modal';
 import Spinner from '../components/ui/Spinner';
 import { Card } from '../components/ui/Card';
@@ -20,6 +21,7 @@ import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 import { computeGst, printBillHTML, shareBillWhatsApp, carriedSettlementOf } from '../utils/bill';
 import { formatDateTime } from '../utils/date';
+import { makeEnterNav, makeEnterNavPastGroup, focusFirstInContainer } from '../utils/focusNav';
 
 const DEFAULT_PAYMENT_MODES = [
   { key: 'CASH', label: 'Cash' },
@@ -50,8 +52,9 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
   const pointsEarnedRedeemedNow = saleData?.pointsEarnedRedeemedNow || 0;
   const balancePoints = saleData?.customer?.creditPoints ?? null;
   const splitPayments = transaction.splitPayments || [];
+  const billedByName = saleData?.billedByName || transaction.soldBy?.name || null;
 
-  const billExtra = { pointsEarned, pointsRedeemed, pointsRedeemedValue, pointsEarnedRedeemedNow, balancePoints, customer: saleData?.customer };
+  const billExtra = { pointsEarned, pointsRedeemed, pointsRedeemedValue, pointsEarnedRedeemedNow, balancePoints, customer: saleData?.customer, billedByName };
 
   return (
     <Modal open onClose={onClose} title="Receipt" size="sm">
@@ -153,6 +156,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
           </div>
         )}
         <div className="text-center text-xs text-black pt-2 border-t border-black">{business?.footerNote || 'Thank you for shopping!'}</div>
+        {billedByName && <div className="text-center text-[10px] text-gray-500">Billed by: {billedByName}</div>}
       </div>
       <div className="flex gap-3 mt-4 justify-end flex-wrap">
         {customerPhone && (
@@ -517,8 +521,8 @@ export default function POS() {
   const bill = bills.find((b) => b.id === activeBillId) || bills[0];
   const {
     step, cart, customerName, loyaltyCustomer, redeemPoints, redeemEarnedNow,
-    couponCode, couponData, discountMode, discountInput, roundOff,
-    paymentMethod, splitMode, splitRows, soldBy, carryForward,
+    discountMode, discountInput, roundOff,
+    paymentMethod, amountReceived, splitMode, splitRows, soldBy, carryForward,
   } = bill;
 
   const [paymentModes, setPaymentModes] = useState(DEFAULT_PAYMENT_MODES);
@@ -533,13 +537,17 @@ export default function POS() {
   const [saleData, setSaleData] = useState(null);
   const [business, setBusiness] = useState(null);
   const [billConfig, setBillConfig] = useState(null);
-  const [couponValidating, setCouponValidating] = useState(false);
   const [creditConfig, setCreditConfig] = useState({ rupeesPerPoint: 1000, pointValue: 1 });
   const scanRef = useRef(null);
-  // Round-off stepper: repeated clicks in the same direction widen the
-  // denomination (₹1 → ₹10 → ₹100 → …); switching direction or editing the
-  // cart resets it back to ₹1.
-  const roundStepRef = useRef({ dir: null, scale: 1 });
+  const discountPanelRef = useRef(null);
+  const discountEnterNav = makeEnterNav(discountPanelRef);
+  const checkoutPanelRef = useRef(null);
+  const checkoutEnterNav = makeEnterNav(checkoutPanelRef);
+  // Payment method is a single-choice button group, not a row of fields —
+  // Enter on whichever button is focused must jump past the whole group
+  // (to Cash Tendered / Checkout), not cycle to the group's next button.
+  const paymentGroupRef = useRef(null);
+  const handlePaymentButtonKeyDown = makeEnterNavPastGroup(checkoutPanelRef, paymentGroupRef);
 
   // Fullscreen + kiosk lock — confines the browser to this page (see Layout.jsx
   // for the route guard) until the current user re-enters their password.
@@ -553,11 +561,23 @@ export default function POS() {
     if (idx < STEPS.length - 1) setStep(STEPS[idx + 1].id);
   };
 
-  const focusScan = () => scanRef.current?.focus();
+  // Deferred one frame — callers fire this right after a state change (cart
+  // update, toast, modal close) whose DOM hasn't necessarily committed yet;
+  // focusing after paint means nothing rendered a beat later (e.g. a toast's
+  // dismiss button) can end up "more recent" than this and win the focus.
+  const focusScan = () => requestAnimationFrame(() => scanRef.current?.focus());
 
   // Focus whatever the active step's primary input is.
   useEffect(() => {
     if (step === 'scan') focusScan();
+  }, [step, activeBillId]);
+
+  // Landing on Checkout should start at the first field — Sale Attended By —
+  // same as every other step; Enter from there walks the normal chain
+  // (Sale Attended By → Payment Method → Cash Tendered → Checkout & Print).
+  useEffect(() => {
+    if (step !== 'checkout') return;
+    requestAnimationFrame(() => focusFirstInContainer(checkoutPanelRef.current));
   }, [step, activeBillId]);
 
   // Track fullscreen state from any source (our button, browser Esc, F11) so
@@ -641,6 +661,14 @@ export default function POS() {
 
   const handleScanKeyDown = (e) => {
     if (e.key === 'Enter') {
+      // Without this, a barcode-wedge scanner's Enter (or a real Enter
+      // keypress) has no in-app default action on a plain <input>, but some
+      // browsers/extensions (autofill helpers, scanner input plugins) treat
+      // an unhandled Enter as "advance to the next focusable element" — which
+      // landed on the just-inserted toast's dismiss button, since it's the
+      // newest focusable node in the DOM at that instant. Blocking the
+      // browser's default here removes that competition outright.
+      e.preventDefault();
       if (scanInput.trim()) {
         handleScan(scanInput.trim());
         setScanInput('');
@@ -670,11 +698,11 @@ export default function POS() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Wipes this tab's in-progress sale — cart, customer, discounts/coupon,
+  // Wipes this tab's in-progress sale — cart, customer, discounts,
   // payment method — back to a blank bill. For starting over mid-sale
   // (wrong customer, wrong items) without reloading the page.
   const handleResetSale = () => {
-    if (cart.length === 0 && !loyaltyCustomer && !customerName && !couponData && !discountInput && !roundOff && !carryForward) {
+    if (cart.length === 0 && !loyaltyCustomer && !customerName && !discountInput && !roundOff && !carryForward) {
       focusScan();
       return;
     }
@@ -684,34 +712,21 @@ export default function POS() {
     toast({ message: 'Bill reset', type: 'info' });
   };
 
-  const handleValidateCoupon = async () => {
-    if (!couponCode.trim()) return;
-    setCouponValidating(true);
-    try {
-      const { data } = await api.get('/coupons/validate', { params: { code: couponCode.trim(), subtotal: cartTotal } });
-      if (data.valid) {
-        patchBill({ couponData: data });
-        toast({ message: `Coupon applied: -₹${data.discount.toFixed(2)}`, type: 'success' });
-      }
-    } catch (err) {
-      patchBill({ couponData: null });
-      toast({ message: err.response?.data?.message || 'Invalid coupon', type: 'error' });
-    } finally {
-      setCouponValidating(false);
-    }
-  };
-
-  const handleCheckout = async (printAfter = false) => {
+  // Checkout always prints — the separate no-print "Checkout" button was removed.
+  const handleCheckout = async () => {
     if (cart.length === 0) { toast({ message: 'Cart is empty', type: 'warning' }); return; }
     if (splitMode && Math.abs(splitRemaining) > 0.01) {
       toast({ message: `Split payment must add up to ₹${finalTotal.toFixed(2)} (₹${Math.abs(splitRemaining).toFixed(2)} ${splitRemaining > 0 ? 'remaining' : 'over'})`, type: 'warning' });
+      return;
+    }
+    if (changeDue != null && changeDue < -0.01) {
+      toast({ message: `Amount received is ₹${Math.abs(changeDue).toFixed(2)} short of the total due`, type: 'warning' });
       return;
     }
     try {
       const result = await checkout(paymentMethod, {
         customerName: customerName.trim(),
         customerPhone: loyaltyCustomer?.phone || '',
-        couponCode: couponCode.trim(),
         redeemPoints: Number(redeemPoints) || 0,
         redeemEarnedNow: earnedNowDiscount > 0,
         soldBy,
@@ -720,20 +735,20 @@ export default function POS() {
         carryForward: carryForward || undefined,
         splitPayments: splitMode ? splitRows.filter((r) => Number(r.amount) > 0).map((r) => ({ method: r.method, amount: Number(r.amount) })) : undefined,
       });
-      setSaleData(result);
+      const billedByName = staffList.find((s) => s._id === soldBy)?.name || null;
+      setSaleData({ ...result, billedByName });
       setReceipt(result.transaction);
       setShowReceipt(true);
-      if (printAfter) {
-        const billExtra = {
-          pointsEarned: result.pointsEarned || 0,
-          pointsRedeemed: result.pointsRedeemed || 0,
-          pointsRedeemedValue: result.pointsRedeemedValue ?? result.pointsRedeemed ?? 0,
-          pointsEarnedRedeemedNow: result.pointsEarnedRedeemedNow || 0,
-          balancePoints: result.customer?.creditPoints ?? null,
-          customer: result.customer,
-        };
-        printBillHTML(result.transaction, business, billConfig, billExtra);
-      }
+      const billExtra = {
+        pointsEarned: result.pointsEarned || 0,
+        pointsRedeemed: result.pointsRedeemed || 0,
+        pointsRedeemedValue: result.pointsRedeemedValue ?? result.pointsRedeemed ?? 0,
+        pointsEarnedRedeemedNow: result.pointsEarnedRedeemedNow || 0,
+        balancePoints: result.customer?.creditPoints ?? null,
+        customer: result.customer,
+        billedByName,
+      };
+      printBillHTML(result.transaction, business, billConfig, billExtra);
       toast({ message: 'Sale completed!', type: 'success' });
     } catch (err) {
       const errData = err.response?.data;
@@ -747,45 +762,25 @@ export default function POS() {
 
   const cartTotal = cart.reduce((sum, i) => sum + i.price * i.qty, 0);
   const pointsDiscount = loyaltyCustomer ? (Number(redeemPoints) || 0) : 0; // 1 point = ₹1
-  const couponDiscount = couponData?.discount || 0;
   const manualDiscount = discountMode === '%'
     ? Math.min(cartTotal, (Number(discountInput) || 0) / 100 * cartTotal)
     : Math.min(cartTotal, Number(discountInput) || 0);
   // Points this bill qualifies for — based on what the customer actually pays
-  // (cart total minus points-from-balance/coupon/manual discounts), mirroring
+  // (cart total minus points-from-balance/manual discounts), mirroring
   // the backend calc. Excludes the redeem-now discount itself (circular).
-  const preEarnDiscount = pointsDiscount + couponDiscount + manualDiscount;
+  const preEarnDiscount = pointsDiscount + manualDiscount;
   const pointsEarnedThisBill = Math.floor(Math.max(0, cartTotal - preEarnDiscount) / (creditConfig.rupeesPerPoint || 1000));
   const earnedNowDiscount = (loyaltyCustomer && redeemEarnedNow) ? pointsEarnedThisBill * (creditConfig.pointValue || 1) : 0;
-  const totalDiscount = pointsDiscount + couponDiscount + manualDiscount + earnedNowDiscount;
+  const totalDiscount = pointsDiscount + manualDiscount + earnedNowDiscount;
   const preRound = Math.max(0, cartTotal - totalDiscount);
   const roundOffAmount = Number(roundOff) || 0;
   const carryForwardAmount = carryForward?.amount || 0;
   const finalTotal = preRound + roundOffAmount + carryForwardAmount;
-
-  // Step the round-off adjustment down/up through widening denominations.
-  // First click snaps to the nearest whole rupee; each further click in the
-  // *same* direction widens the scale ×10 (rupee → ten → hundred → …), so
-  // repeated clicks walk e.g. 1234.4 → 1234 → 1230 → 1200. Switching
-  // direction restarts at the ₹1 scale.
-  //
-  // The stepper works off `finalTotal` — the amount actually shown as payable,
-  // which includes any carry-forward from an exchange/replace session. Rounding
-  // off a base that excluded the carry-forward made a ₹13.33 payable step to
-  // ₹12.33 (a flat -₹1) instead of snapping to ₹13.00.
-  const stepRoundOff = (dir) => {
-    const current = Math.round(finalTotal * 100) / 100;
-    const streak = roundStepRef.current;
-    const scale = streak.dir === dir ? streak.scale * 10 : 1;
-    roundStepRef.current = { dir, scale };
-    const snapped = dir === 'down' ? Math.floor(current / scale) * scale : Math.ceil(current / scale) * scale;
-    const target = snapped !== current ? snapped : (dir === 'down' ? current - scale : current + scale);
-    patchBill({ roundOff: Math.round((target - preRound - carryForwardAmount) * 100) / 100 });
-  };
-
-  // Any change to what's owed invalidates the click streak — otherwise the
-  // next +/- press would jump by a stale denomination against a new total.
-  useEffect(() => { roundStepRef.current = { dir: null, scale: 1 }; }, [preRound, carryForwardAmount]);
+  // Cash tendered vs. what's owed — single-payment Cash only (digital methods
+  // are exact, split mode has its own per-row balancing below).
+  const changeDue = (paymentMethod === 'CASH' && !splitMode && Number(amountReceived) > 0)
+    ? Number(amountReceived) - finalTotal
+    : null;
 
   // "Redeem now" only has an effect (and is only shown) while this bill
   // actually earns points — if editing the balance-redeem field, cart, or
@@ -794,6 +789,24 @@ export default function POS() {
   useEffect(() => {
     if (redeemEarnedNow && pointsEarnedThisBill === 0) patchBill({ redeemEarnedNow: false });
   }, [pointsEarnedThisBill, redeemEarnedNow]);
+
+  // Cash can only be picked once across a split — if an earlier row is set to
+  // Cash, bump any later row that's also stuck on Cash to the next mode so
+  // the dropdown and the actual state never disagree.
+  useEffect(() => {
+    if (!splitMode) return;
+    let changed = false;
+    const rows = splitRows.map((r, idx) => {
+      const cashUsedEarlier = splitRows.some((r2, idx2) => idx2 < idx && r2.method === 'CASH');
+      if (r.method === 'CASH' && cashUsedEarlier) {
+        changed = true;
+        return { ...r, method: paymentModes.find((m) => m.key !== 'CASH')?.key || r.method };
+      }
+      return r;
+    });
+    if (changed) patchBill({ splitRows: rows });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [splitMode, splitRows, paymentModes]);
 
   const maxRedeemable = loyaltyCustomer ? Math.floor(Math.min(loyaltyCustomer.creditPoints, cartTotal)) : 0;
 
@@ -810,7 +823,7 @@ export default function POS() {
 
       if (e.key === 'F2' || (e.ctrlKey && e.key === 'Enter')) {
         e.preventDefault();
-        handleCheckout(true);
+        handleCheckout();
         return;
       }
       if (!isTyping && !splitMode) {
@@ -822,7 +835,7 @@ export default function POS() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cart, paymentMethod, paymentModes, splitMode, customerName, loyaltyCustomer, couponCode, redeemPoints, redeemEarnedNow, soldBy, discountMode, discountInput, roundOff, carryForward, splitRows]);
+  }, [cart, paymentMethod, paymentModes, splitMode, customerName, loyaltyCustomer, redeemPoints, redeemEarnedNow, soldBy, discountMode, discountInput, roundOff, carryForward, splitRows]);
 
   return (
     <div className="space-y-4">
@@ -884,9 +897,9 @@ export default function POS() {
         <StepBar step={step} onJump={setStep} cartCount={cart.length} />
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
         {/* Left: step content */}
-        <div className="xl:col-span-2 space-y-4">
+        <div className="space-y-4">
           {/* Step 1: Customer */}
           {step === 'customer' && (
             <Card className="p-4 border-2 border-blue-100 bg-blue-50/40 space-y-3">
@@ -962,18 +975,18 @@ export default function POS() {
           {/* Cart — always visible once it has items, regardless of step */}
           <Card className="flex flex-col">
             <div className="flex items-center justify-between p-4 border-b">
-              <div className="flex items-center gap-2 font-semibold">
-                <ShoppingCart size={18} /> Cart ({cart.length})
+              <div className="flex items-center gap-2 font-semibold text-xl">
+                <ShoppingCart size={26} /> Cart ({cart.length})
               </div>
               {cart.length > 0 && (
-                <button onClick={() => { clearCart(); focusScan(); }} className="text-xs text-red-500 hover:underline">Clear</button>
+                <button onClick={() => { clearCart(); focusScan(); }} className="text-base text-red-500 hover:underline">Clear</button>
               )}
             </div>
 
             <div className="min-h-[200px] max-h-[calc(100vh-480px)] overflow-y-auto">
               {cart.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-52 text-gray-400 text-sm">
-                  <ScanLine size={32} className="mb-2 opacity-30" />
+                <div className="flex flex-col items-center justify-center h-52 text-gray-400 text-lg">
+                  <ScanLine size={36} className="mb-2 opacity-30" />
                   {step === 'customer' ? 'Pick a customer, then scan items' : 'Scan a barcode to add the first item'}
                 </div>
               ) : (
@@ -981,24 +994,24 @@ export default function POS() {
                   {cart.map((item, i) => (
                     <div key={item.productId} className="p-3 flex items-center gap-3">
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium truncate">
+                        <div className="text-lg font-medium truncate">
                           {i + 1}. {item.name}
-                          {item.isDiscounted && <span className="ml-1 text-xs text-red-500">(Discounted)</span>}
+                          {item.isDiscounted && <span className="ml-1 text-base text-red-500">(Discounted)</span>}
                         </div>
-                        <div className="text-xs text-gray-500 font-mono">{item.barcode} · ₹{item.price.toFixed(2)} each</div>
+                        <div className="text-base text-gray-500 font-mono">{item.barcode} · ₹{item.price.toFixed(2)} each</div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <button onClick={() => updateQty(item.productId, item.qty - 1)} className="h-7 w-7 rounded border flex items-center justify-center hover:bg-gray-100">
-                          <Minus size={12} />
+                        <button onClick={() => updateQty(item.productId, item.qty - 1)} className="h-9 w-9 rounded border flex items-center justify-center hover:bg-gray-100">
+                          <Minus size={16} />
                         </button>
-                        <span className="text-sm font-medium w-6 text-center">{item.qty}</span>
-                        <button onClick={() => updateQty(item.productId, item.qty + 1)} disabled={item.qty >= item.maxQty} className="h-7 w-7 rounded border flex items-center justify-center hover:bg-gray-100 disabled:opacity-40">
-                          <Plus size={12} />
+                        <span className="text-lg font-medium w-8 text-center">{item.qty}</span>
+                        <button onClick={() => updateQty(item.productId, item.qty + 1)} disabled={item.qty >= item.maxQty} className="h-9 w-9 rounded border flex items-center justify-center hover:bg-gray-100 disabled:opacity-40">
+                          <Plus size={16} />
                         </button>
                       </div>
-                      <span className="text-sm font-bold w-20 text-right shrink-0">₹{(item.price * item.qty).toFixed(2)}</span>
+                      <span className="text-lg font-bold w-28 text-right shrink-0">₹{(item.price * item.qty).toFixed(2)}</span>
                       <button onClick={() => removeFromCart(item.productId)} className="text-gray-400 hover:text-red-500 shrink-0">
-                        <X size={14} />
+                        <X size={20} />
                       </button>
                     </div>
                   ))}
@@ -1011,15 +1024,15 @@ export default function POS() {
         {/* Right: Discount/Points + Checkout panels, shown per step (but Total summary always visible) */}
         <Card className="flex flex-col">
           {step === 'discount' && (
-            <div className="p-3 space-y-3 bg-gray-50 border-b">
-              <div className="flex items-center gap-2 font-semibold text-gray-800">
-                <Tag size={16} /> Step 3 — Discount &amp; Points
+            <div className="p-3 space-y-3 bg-gray-50 border-b" ref={discountPanelRef}>
+              <div className="flex items-center gap-2 font-semibold text-gray-800 text-lg">
+                <Tag size={18} /> Step 3 — Discount &amp; Points
               </div>
 
               {/* Redeem points */}
               {loyaltyCustomer && loyaltyCustomer.creditPoints > 0 && (
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                  <label className="text-base text-gray-500 mb-1 flex items-center gap-1">
                     <Star size={11} /> Redeem Points (1 pt = ₹1, max {maxRedeemable})
                   </label>
                   <div className="flex items-center gap-2">
@@ -1033,14 +1046,14 @@ export default function POS() {
                         if (raw === '') { patchBill({ redeemPoints: '' }); return; }
                         patchBill({ redeemPoints: Math.min(maxRedeemable, Math.max(0, Math.floor(Number(raw) || 0))) });
                       }}
-                      onKeyDown={(e) => { if (e.key === 'Enter') goNextStep(); }}
-                      className="text-sm w-28"
+                      onKeyDown={discountEnterNav}
+                      className="text-lg w-28"
                       placeholder="Enter points"
                       autoFocus
                     />
-                    <span className="text-xs text-gray-400">pts</span>
+                    <span className="text-base text-gray-400">pts</span>
                     {pointsDiscount > 0 && (
-                      <span className="text-xs text-green-600 ml-1">= -₹{pointsDiscount.toFixed(2)}</span>
+                      <span className="text-base text-green-600 ml-1">= -₹{pointsDiscount.toFixed(2)}</span>
                     )}
                   </div>
                 </div>
@@ -1049,51 +1062,20 @@ export default function POS() {
               {/* Points earned by this bill — redeem now instead of carrying forward */}
               {loyaltyCustomer && pointsEarnedThisBill > 0 && (
                 <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                  <div className="text-xs text-amber-800">
+                  <div className="text-base text-amber-800">
                     Earns <strong>{pointsEarnedThisBill} pts</strong> on this bill
                     {redeemEarnedNow && <span className="text-green-600"> · redeeming now = -₹{earnedNowDiscount.toFixed(2)}</span>}
                   </div>
-                  <label className="flex items-center gap-1.5 text-xs text-amber-800 cursor-pointer whitespace-nowrap">
-                    <input type="checkbox" checked={redeemEarnedNow} onChange={(e) => patchBill({ redeemEarnedNow: e.target.checked })} className="rounded" />
+                  <label className="flex items-center gap-1.5 text-base text-amber-800 cursor-pointer whitespace-nowrap">
+                    <input type="checkbox" checked={redeemEarnedNow} onChange={(e) => patchBill({ redeemEarnedNow: e.target.checked })} onKeyDown={discountEnterNav} className="rounded" />
                     Redeem now
                   </label>
                 </div>
               )}
 
-              {/* Coupon */}
-              <div>
-                <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                  <Tag size={11} /> Coupon Code
-                </label>
-                {couponData ? (
-                  <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-3 py-2">
-                    <div>
-                      <div className="text-sm font-medium text-green-800 flex items-center gap-1">
-                        <CheckCircle size={13} /> {couponData.coupon.code}
-                      </div>
-                      <div className="text-xs text-green-600">-₹{couponData.discount.toFixed(2)} off</div>
-                    </div>
-                    <button onClick={() => { patchBill({ couponCode: '', couponData: null }); }} className="text-gray-400 hover:text-red-500"><X size={14} /></button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <Input
-                      value={couponCode}
-                      onChange={(e) => patchBill({ couponCode: e.target.value.toUpperCase() })}
-                      onKeyDown={(e) => e.key === 'Enter' && handleValidateCoupon()}
-                      placeholder="Enter coupon code"
-                      className="text-sm uppercase"
-                    />
-                    <Button size="sm" variant="outline" onClick={handleValidateCoupon} disabled={couponValidating || !couponCode.trim()}>
-                      {couponValidating ? <Spinner size="sm" /> : 'Apply'}
-                    </Button>
-                  </div>
-                )}
-              </div>
-
               {/* Manual discount */}
               <div>
-                <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
+                <label className="text-base text-gray-500 mb-1 flex items-center gap-1">
                   <Tag size={11} /> Additional Discount
                 </label>
                 <div className="flex items-center gap-2">
@@ -1101,12 +1083,12 @@ export default function POS() {
                     <button
                       type="button"
                       onClick={() => patchBill({ discountMode: '%' })}
-                      className={`px-2.5 py-1.5 text-xs font-semibold transition-colors ${discountMode === '%' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      className={`px-2.5 py-1.5 text-base font-semibold transition-colors ${discountMode === '%' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
                     >%</button>
                     <button
                       type="button"
                       onClick={() => patchBill({ discountMode: '₹' })}
-                      className={`px-2.5 py-1.5 text-xs font-semibold transition-colors ${discountMode === '₹' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
+                      className={`px-2.5 py-1.5 text-base font-semibold transition-colors ${discountMode === '₹' ? 'bg-blue-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}`}
                     >₹</button>
                   </div>
                   <Input
@@ -1116,45 +1098,42 @@ export default function POS() {
                     step="0.01"
                     value={discountInput}
                     onChange={(e) => patchBill({ discountInput: e.target.value })}
-                    onKeyDown={(e) => { if (e.key === 'Enter') goNextStep(); }}
+                    onKeyDown={discountEnterNav}
                     placeholder={discountMode === '%' ? 'e.g. 10' : 'e.g. 50'}
-                    className="text-sm flex-1"
+                    className="text-lg flex-1"
                   />
                   {manualDiscount > 0 && (
-                    <span className="text-xs text-green-600 whitespace-nowrap">-₹{manualDiscount.toFixed(2)}</span>
+                    <span className="text-base text-green-600 whitespace-nowrap">-₹{manualDiscount.toFixed(2)}</span>
                   )}
                 </div>
               </div>
 
-              {/* Round off — step down/up through ₹1 → ₹10 → ₹100 denominations */}
-              <div className="flex items-center justify-between">
-                <label className="text-xs text-gray-500">Round Off Total</label>
+              {/* Round off — typed rupee adjustment (can be negative) */}
+              <div>
+                <label className="text-base text-gray-500 mb-1 flex items-center gap-1">
+                  <Tag size={11} /> Round Off (₹, +/-)
+                </label>
                 <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    step="0.01"
+                    value={roundOff === 0 ? '' : roundOff}
+                    onChange={(e) => patchBill({ roundOff: e.target.value === '' ? 0 : Number(e.target.value) })}
+                    onKeyDown={discountEnterNav}
+                    placeholder="0.00"
+                    className="text-lg flex-1"
+                  />
                   {roundOffAmount !== 0 && (
-                    <>
-                      <span className={`text-xs font-medium ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
-                        {roundOffAmount > 0 ? '+' : ''}₹{roundOffAmount.toFixed(2)}
-                      </span>
-                      <button type="button" onClick={() => { roundStepRef.current = { dir: null, scale: 1 }; patchBill({ roundOff: 0 }); }}
-                        className="text-gray-400 hover:text-red-500" title="Clear round off">
-                        <X size={12} />
-                      </button>
-                    </>
+                    <span className={`text-base font-medium whitespace-nowrap ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                      {roundOffAmount > 0 ? '+' : ''}₹{roundOffAmount.toFixed(2)}
+                    </span>
                   )}
-                  <button type="button" onClick={() => stepRoundOff('down')}
-                    className="h-6 w-6 rounded border flex items-center justify-center hover:bg-gray-50 bg-white" title="Round down">
-                    <Minus size={12} />
-                  </button>
-                  <button type="button" onClick={() => stepRoundOff('up')}
-                    className="h-6 w-6 rounded border flex items-center justify-center hover:bg-gray-50 bg-white" title="Round up">
-                    <Plus size={12} />
-                  </button>
                 </div>
               </div>
 
               <div className="flex justify-between items-center pt-1">
                 <Button size="sm" variant="ghost" onClick={() => setStep('scan')}>Back</Button>
-                <Button size="sm" onClick={goNextStep}>
+                <Button size="sm" onClick={goNextStep} data-enter-submit>
                   Next: Checkout <ChevronRightIcon size={14} className="ml-1" />
                 </Button>
               </div>
@@ -1163,7 +1142,7 @@ export default function POS() {
 
           {step !== 'discount' && (carryForward && carryForwardAmount !== 0) && (
             <div className="p-3 bg-gray-50 border-b">
-              <div className={`flex justify-between text-xs ${carryForwardAmount > 0 ? 'text-red-500' : 'text-green-600'}`}>
+              <div className={`flex justify-between text-base ${carryForwardAmount > 0 ? 'text-red-500' : 'text-green-600'}`}>
                 <span className="flex items-center gap-1">
                   <ArrowRightCircle size={11} /> {carryForward.sourceLabel || 'Carried forward'}
                   <button type="button" onClick={() => patchBill({ carryForward: null })} className="text-gray-400 hover:text-red-500 ml-1"><X size={11} /></button>
@@ -1175,67 +1154,67 @@ export default function POS() {
 
           {/* Order summary — always visible so the running total is never hidden */}
           <div className="p-4 space-y-3">
-            <div className="space-y-1 text-sm">
+            <div className="space-y-1 text-lg">
               <div className="flex justify-between text-gray-500">
                 <span>Subtotal</span><span>₹{cartTotal.toFixed(2)}</span>
               </div>
               {pointsDiscount > 0 && (
-                <div className="flex justify-between text-amber-600 text-xs">
+                <div className="flex justify-between text-amber-600 text-base">
                   <span>Points ({Number(redeemPoints)} pts)</span><span>-₹{pointsDiscount.toFixed(2)}</span>
                 </div>
               )}
               {earnedNowDiscount > 0 && (
-                <div className="flex justify-between text-amber-600 text-xs">
+                <div className="flex justify-between text-amber-600 text-base">
                   <span>Points Earned & Redeemed Now ({pointsEarnedThisBill} pts)</span><span>-₹{earnedNowDiscount.toFixed(2)}</span>
                 </div>
               )}
-              {couponDiscount > 0 && (
-                <div className="flex justify-between text-green-600 text-xs">
-                  <span>Coupon</span><span>-₹{couponDiscount.toFixed(2)}</span>
-                </div>
-              )}
               {manualDiscount > 0 && (
-                <div className="flex justify-between text-green-600 text-xs">
+                <div className="flex justify-between text-green-600 text-base">
                   <span>Discount ({discountMode === '%' ? `${discountInput}%` : `₹${discountInput}`})</span>
                   <span>-₹{manualDiscount.toFixed(2)}</span>
                 </div>
               )}
               {roundOffAmount !== 0 && (
-                <div className={`flex justify-between text-xs ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
+                <div className={`flex justify-between text-base ${roundOffAmount > 0 ? 'text-green-600' : 'text-red-500'}`}>
                   <span>Round Off</span>
                   <span>{roundOffAmount > 0 ? '+' : ''}₹{roundOffAmount.toFixed(2)}</span>
                 </div>
               )}
               {step === 'discount' && carryForward && carryForwardAmount !== 0 && (
-                <div className={`flex justify-between text-xs ${carryForwardAmount > 0 ? 'text-red-500' : 'text-green-600'}`}>
+                <div className={`flex justify-between text-base ${carryForwardAmount > 0 ? 'text-red-500' : 'text-green-600'}`}>
                   <span>{carryForward.sourceLabel || 'Carried forward'}</span>
                   <span>{carryForwardAmount > 0 ? '+' : ''}₹{carryForwardAmount.toFixed(2)}</span>
                 </div>
               )}
-              <div className="flex items-center justify-between text-base font-bold pt-1 border-t">
+              <div className="flex items-center justify-between text-2xl font-bold pt-1 border-t">
                 <span>{finalTotal < 0 ? 'Refund Due' : 'Total'}</span>
                 <span className={finalTotal < 0 ? 'text-green-600' : ''}>₹{Math.abs(finalTotal).toFixed(2)}</span>
               </div>
             </div>
 
             {step === 'checkout' && (
-              <>
+              <div ref={checkoutPanelRef}>
                 <div>
-                  <label className="text-xs text-gray-500 mb-1 flex items-center gap-1">
-                    <UserCircle size={11} /> Sale Attended By
+                  <label className="text-lg text-gray-500 mb-1 flex items-center gap-1">
+                    <UserCircle size={14} /> Sale Attended By
                   </label>
-                  <Select value={soldBy} onChange={(e) => patchBill({ soldBy: e.target.value })}>
-                    {staffList.map((s) => (
-                      <option key={s._id} value={s._id}>
-                        {s.name}{s.role === 'ADMIN' ? ' (Admin)' : ''}{(s._id === (user?.id || user?._id)) ? ' — You' : ''}
-                      </option>
-                    ))}
-                  </Select>
+                  <Combobox
+                    options={staffList.map((s) => ({
+                      value: s._id,
+                      label: s.name + (s.role === 'ADMIN' ? ' (Admin)' : '') + ((s._id === (user?.id || user?._id)) ? ' — You' : ''),
+                    }))}
+                    value={soldBy}
+                    onChange={(v) => patchBill({ soldBy: v })}
+                    onKeyDown={checkoutEnterNav}
+                    placeholder="Select staff…"
+                    required
+                    className="text-lg"
+                  />
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs text-gray-500 flex items-center gap-1">
-                      <Zap size={11} /> Payment Method {!splitMode && <span className="text-gray-300">(press 1-4)</span>}
+                    <label className="text-lg text-gray-500 flex items-center gap-1">
+                      <Zap size={14} /> Payment Method {!splitMode && <span className="text-gray-300">(press 1-4)</span>}
                     </label>
                     <button
                       type="button"
@@ -1243,34 +1222,55 @@ export default function POS() {
                         splitMode: !splitMode,
                         splitRows: !splitMode ? splitRows.map((r, i) => ({ ...r, amount: i === 0 ? finalTotal.toFixed(2) : '' })) : splitRows,
                       })}
-                      className={`flex items-center gap-1 text-[11px] font-medium ${splitMode ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
+                      className={`flex items-center gap-1 text-xs font-medium ${splitMode ? 'text-blue-600' : 'text-gray-400 hover:text-gray-600'}`}
                     >
                       <SplitSquareHorizontal size={12} /> Split payment
                     </button>
                   </div>
                   {splitMode ? (
                     <div className="space-y-1.5">
-                      {splitRows.map((row, i) => (
+                      {splitRows.map((row, i) => {
+                        // Cash can only be used once across the split — once an earlier
+                        // row is set to Cash, later rows drop it from their own options
+                        // (still shown here if it's this row's own current choice).
+                        const cashUsedEarlier = splitRows.some((r, idx) => idx < i && r.method === 'CASH');
+                        const rowModeOptions = paymentModes.filter((m) => m.key !== 'CASH' || row.method === 'CASH' || !cashUsedEarlier);
+                        return (
                         <div key={i} className="flex items-center gap-1.5">
                           <Select
                             value={row.method}
                             onChange={(e) => patchBill({ splitRows: splitRows.map((r, idx) => idx === i ? { ...r, method: e.target.value } : r) })}
-                            className="text-sm flex-1"
+                            onKeyDown={checkoutEnterNav}
+                            className="text-lg flex-1"
                           >
-                            {paymentModes.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+                            {rowModeOptions.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                           </Select>
                           <Input
                             type="number" min="0" step="0.01"
                             value={row.amount}
-                            onChange={(e) => patchBill({ splitRows: splitRows.map((r, idx) => idx === i ? { ...r, amount: e.target.value } : r) })}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              let rows = splitRows.map((r, idx) => idx === i ? { ...r, amount: val } : r);
+                              // Auto-balance the very next row so a two-row split never
+                              // needs the second amount typed by hand — e.g. total ₹650,
+                              // type 600 in row 1, row 2 fills in with 50 automatically.
+                              const next = i + 1;
+                              if (next < rows.length) {
+                                const others = rows.reduce((s, r, idx) => idx === next ? s : s + (Number(r.amount) || 0), 0);
+                                const bal = Math.round((finalTotal - others) * 100) / 100;
+                                rows = rows.map((r, idx) => idx === next ? { ...r, amount: bal > 0.01 ? bal.toFixed(2) : '' } : r);
+                              }
+                              patchBill({ splitRows: rows });
+                            }}
                             onFocus={() => {
                               if (Number(row.amount) > 0) return;
                               const others = splitRows.reduce((s, r, idx) => idx === i ? s : s + (Number(r.amount) || 0), 0);
                               const bal = finalTotal - others;
                               if (bal > 0.01) patchBill({ splitRows: splitRows.map((r, idx) => idx === i ? { ...r, amount: bal.toFixed(2) } : r) });
                             }}
+                            onKeyDown={checkoutEnterNav}
                             placeholder="0.00"
-                            className="text-sm w-24"
+                            className="text-lg w-24"
                           />
                           {splitRows.length > 2 && (
                             <button type="button" onClick={() => patchBill({ splitRows: splitRows.filter((_, idx) => idx !== i) })} className="text-gray-400 hover:text-red-500">
@@ -1278,17 +1278,18 @@ export default function POS() {
                             </button>
                           )}
                         </div>
-                      ))}
+                        );
+                      })}
                       <div className="flex items-center justify-between">
                         <button
                           type="button"
                           onClick={() => patchBill({ splitRows: [...splitRows, { method: paymentModes[0]?.key || 'CASH', amount: splitRemaining > 0.01 ? splitRemaining.toFixed(2) : '' }] })}
-                          className="text-xs text-blue-600 hover:underline"
+                          className="text-base text-blue-600 hover:underline"
                         >
                           + Add split
                         </button>
                         {Math.abs(splitRemaining) < 0.01 ? (
-                          <span className="text-xs font-medium text-green-600">Balanced</span>
+                          <span className="text-base font-medium text-green-600">Balanced</span>
                         ) : (
                           <button
                             type="button"
@@ -1301,7 +1302,7 @@ export default function POS() {
                               rows[target] = { ...rows[target], amount: (finalTotal - others).toFixed(2) };
                               patchBill({ splitRows: rows });
                             }}
-                            className="text-xs font-medium text-red-500 hover:underline"
+                            className="text-base font-medium text-red-500 hover:underline"
                             title="Fill balance into a split row"
                           >
                             ₹{Math.abs(splitRemaining).toFixed(2)} {splitRemaining > 0 ? 'remaining' : 'over'}
@@ -1310,49 +1311,68 @@ export default function POS() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div className="grid grid-cols-4 gap-1.5" ref={paymentGroupRef}>
                       {paymentModes.map((m, i) => (
                         <button
                           key={m.key}
                           type="button"
+                          // Every button is a real Enter-chain stop (matching the
+                          // fetched payment-mode key exactly is fragile — a relabeled
+                          // mode can normalize to a key that never equals the bill's
+                          // default paymentMethod, which left Enter dead until the
+                          // button was clicked once to force a match). Whichever one
+                          // has focus, Enter jumps past the *whole group* in one go
+                          // instead of cycling to the next button — see
+                          // handlePaymentButtonKeyDown.
+                          data-enter-target
                           onClick={() => patchBill({ paymentMethod: m.key })}
-                          className={`relative px-2 py-2 rounded-lg border-2 text-xs font-semibold transition-colors ${
+                          onKeyDown={handlePaymentButtonKeyDown}
+                          className={`relative px-2 py-2.5 rounded-lg border-2 text-base font-semibold transition-colors ${
                             paymentMethod === m.key ? 'border-blue-500 bg-blue-50 text-blue-800' : 'border-gray-200 text-gray-500 hover:border-gray-300'
                           }`}
                         >
-                          {i < 4 && <span className="absolute top-0.5 right-1 text-[9px] text-gray-300">{i + 1}</span>}
+                          {i < 4 && <span className="absolute top-0.5 right-1 text-[10px] text-gray-300">{i + 1}</span>}
                           {m.label}
                         </button>
                       ))}
                     </div>
                   )}
+                  {!splitMode && paymentMethod === 'CASH' && (
+                    <div className="mt-2">
+                      <label className="text-lg text-gray-500 mb-1 block">Cash Tendered</label>
+                      <Input
+                        type="number" min="0" step="0.01"
+                        value={amountReceived}
+                        onChange={(e) => patchBill({ amountReceived: e.target.value })}
+                        onKeyDown={checkoutEnterNav}
+                        placeholder={finalTotal > 0 ? finalTotal.toFixed(2) : '0.00'}
+                        className="text-lg"
+                      />
+                      {changeDue != null && (
+                        <div className={`flex justify-between text-xl mt-1 font-semibold ${changeDue < 0 ? 'text-red-500' : 'text-green-600'}`}>
+                          <span>{changeDue < 0 ? 'Amount Short' : 'Change Due'}</span>
+                          <span>₹{Math.abs(changeDue).toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div className="flex gap-2">
-                  <Button
-                    className="flex-1 h-12 text-base"
-                    onClick={() => handleCheckout(true)}
-                    disabled={processing || cart.length === 0 || (splitMode && Math.abs(splitRemaining) > 0.01)}
-                    title="Complete the sale and print the bill immediately"
-                  >
-                    {processing ? <Spinner size="sm" className="mr-2" /> : null}
-                    {processing
-                      ? 'Processing…'
-                      : finalTotal < 0
-                        ? `Checkout & Print — Refund ₹${Math.abs(finalTotal).toFixed(2)}`
-                        : `Checkout & Print ₹${finalTotal.toFixed(2)}  (F2)`}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="h-12 px-4 shrink-0"
-                    onClick={() => handleCheckout(false)}
-                    disabled={processing || cart.length === 0 || (splitMode && Math.abs(splitRemaining) > 0.01)}
-                    title="Complete the sale without printing"
-                  >
-                    Checkout
-                  </Button>
-                </div>
+                <Button
+                  className="w-full h-16 text-xl mt-4"
+                  onClick={handleCheckout}
+                  disabled={processing || cart.length === 0 || (splitMode && Math.abs(splitRemaining) > 0.01) || (changeDue != null && changeDue < -0.01)}
+                  title={changeDue != null && changeDue < -0.01 ? 'Amount received is less than the total due' : 'Complete the sale and print the bill immediately'}
+                  data-enter-submit
+                >
+                  {processing ? <Spinner size="sm" className="mr-2" /> : null}
+                  {processing
+                    ? 'Processing…'
+                    : finalTotal < 0
+                      ? `Checkout & Print — Refund ₹${Math.abs(finalTotal).toFixed(2)}`
+                      : `Checkout & Print ₹${finalTotal.toFixed(2)}  (F2)`}
+                </Button>
                 <Button size="sm" variant="ghost" onClick={() => setStep('discount')} className="w-full">Back</Button>
-              </>
+              </div>
             )}
 
             {step !== 'checkout' && cart.length > 0 && (

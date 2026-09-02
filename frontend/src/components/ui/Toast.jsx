@@ -35,7 +35,11 @@ export function ToastProvider({ children }) {
           >
             {icons[t.type]}
             <span className="flex-1">{t.message}</span>
-            <button onClick={() => remove(t.id)} className="text-gray-400 hover:text-gray-600">
+            {/* tabIndex={-1} — a toast can pop in mid-flow anywhere in the app
+                (e.g. right after a barcode scan in POS); it must never become
+                a tab/focus target competing with whatever the user is
+                actually doing, only reachable by an explicit click. */}
+            <button onClick={() => remove(t.id)} tabIndex={-1} className="text-gray-400 hover:text-gray-600">
               <X size={14} />
             </button>
           </div>

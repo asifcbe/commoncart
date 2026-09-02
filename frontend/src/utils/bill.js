@@ -116,6 +116,11 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   const balancePoints = extra.balancePoints != null ? Number(extra.balancePoints) : null;
   const customerName = extra.customer?.name || sale.customer?.name || null;
   const customerPhone = extra.customer?.phone || sale.customer?.phone || sale.customerPhone || null;
+  // Staff attribution — `sale.soldBy` is populated with `.name` wherever the
+  // sale was fetched from the API (Sales History); immediately after POS
+  // checkout the transaction doc isn't populated yet, so the caller passes
+  // the already-known name via extra.billedByName instead.
+  const billedByName = extra.billedByName || sale.soldBy?.name || null;
   const splitPayments = sale.splitPayments || [];
   const paymentLabel = splitPayments.length
     ? splitPayments.map((p) => `${p.method} ₹${Number(p.amount).toFixed(2)}`).join(' + ')
@@ -137,6 +142,7 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
       ['Date', formatDateTime(sale.createdAt)],
       ['Payment', paymentLabel],
       ...(customerName ? [['Customer', customerPhone ? `${customerName} (${customerPhone})` : customerName]] : []),
+      ...(billedByName ? [['Billed By', billedByName]] : []),
     ],
     columns: ['#', 'Item', 'Qty', 'Rate', 'Amount'],
     align: ['left', 'left', 'right', 'right', 'right'],
@@ -221,6 +227,7 @@ ${pointsHTML}
 ${hasDiscounted ? '<p style="font-size:11px;color:#000;font-weight:700;margin-top:8px;border-top:1px dashed #000;padding-top:6px;">* Discounted items cannot be replaced or exchanged.</p>' : ''}
 ${barcodeImg ? `<div style="text-align:center;margin-top:10px;border-top:2px solid #000;padding-top:10px;"><img src="${barcodeImg}" style="width:100%;max-width:340px;" alt="${sale.transactionId}" /></div>` : ''}
 <div style="text-align:center;font-size:11px;color:#000;margin-top:8px;font-weight:600;">${b.footerNote || 'Thank you for shopping!'}</div>
+${billedByName ? `<div style="text-align:center;font-size:9px;color:#000;margin-top:4px;">Billed by: ${billedByName}</div>` : ''}
 </div>`;
 }
 
@@ -469,6 +476,8 @@ export function shareBillWhatsApp(sale, phone, business, extra = {}) {
   if (extra.balancePoints != null) lines.push(`Balance Points: ${extra.balancePoints} pts`);
   lines.push('');
   lines.push(b.footerNote || 'Thank you for shopping with us!');
+  const billedByName = extra.billedByName || sale.soldBy?.name || null;
+  if (billedByName) lines.push(`_Billed by: ${billedByName}_`);
 
   const text = encodeURIComponent(lines.join('\n'));
   window.open(`https://wa.me/${digits}?text=${text}`, '_blank');

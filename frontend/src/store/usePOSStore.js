@@ -14,12 +14,11 @@ function blankBill(id) {
     loyaltyCustomer: null,
     redeemPoints: '',
     redeemEarnedNow: false,
-    couponCode: '',
-    couponData: null,
     discountMode: '%',
     discountInput: '',
-    roundOff: 0, // rupee adjustment from the +/- round-off stepper (can be negative)
+    roundOff: 0, // typed rupee adjustment to the total (can be negative)
     paymentMethod: 'CASH',
+    amountReceived: '', // cash tendered, single-payment mode only — drives the change-due display
     splitMode: false,
     splitRows: [{ method: 'CASH', amount: '' }, { method: 'CARD', amount: '' }],
     soldBy: '',
@@ -119,7 +118,7 @@ const usePOSStore = create((set, get) => ({
     bills: state.bills.map((b) => (b.id !== state.activeBillId ? b : { ...b, cart: [] })),
   })),
 
-  checkout: async (paymentMethod, { customerName, customerPhone, couponCode, redeemPoints, redeemEarnedNow, soldBy, manualDiscount, roundOff, carryForward, splitPayments } = {}) => {
+  checkout: async (paymentMethod, { customerName, customerPhone, redeemPoints, redeemEarnedNow, soldBy, manualDiscount, roundOff, carryForward, splitPayments } = {}) => {
     set({ processing: true });
     try {
       const bill = get().activeBill();
@@ -130,7 +129,6 @@ const usePOSStore = create((set, get) => ({
         splitPayments: splitPayments?.length ? splitPayments : undefined,
         customerName: customerName || '',
         customerPhone: customerPhone || '',
-        couponCode: couponCode || '',
         redeemPoints: redeemPoints || 0,
         redeemEarnedNow: !!redeemEarnedNow,
         soldBy: soldBy || undefined,

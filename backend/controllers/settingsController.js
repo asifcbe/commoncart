@@ -33,7 +33,7 @@ const DEFAULT_AUTO_DELETE = { enabled: false, days: 3 };
 // Managed master lists of variants (colors) and sizes. Products/purchases may
 // only use values defined here (the UI also allows adding new ones inline).
 const VARIANT_KEY = 'VARIANT_CONFIG';
-const DEFAULT_VARIANTS = { variants: [], sizes: [] };
+const DEFAULT_VARIANTS = { variants: [], sizes: [], variantSelectorEnabled: false };
 
 // Default barcode-label printing preferences applied when a print dialog opens.
 // Shape matches DigitZebra's `config.barcodeLabel` (ported UI in
@@ -414,6 +414,7 @@ exports.getVariantConfig = async (_req, res) => {
     const config = {
       variants: normalizeStringList(saved?.variants),
       sizes: normalizeStringList(saved?.sizes),
+      variantSelectorEnabled: !!saved?.variantSelectorEnabled,
     };
     res.json({ config });
   } catch (err) {
@@ -426,6 +427,7 @@ exports.updateVariantConfig = async (req, res) => {
     const config = {
       variants: normalizeStringList(req.body?.variants),
       sizes: normalizeStringList(req.body?.sizes),
+      variantSelectorEnabled: !!req.body?.variantSelectorEnabled,
     };
     await AppSettings.set(VARIANT_KEY, config);
     res.json({ config });
@@ -514,6 +516,7 @@ exports.ensureVariantSizeEntries = async function ensureVariantSizeEntries({ col
   const config = {
     variants: normalizeStringList([...(saved?.variants || []), ...newColors]),
     sizes: normalizeStringList([...(saved?.sizes || []), ...newSizes]),
+    variantSelectorEnabled: !!saved?.variantSelectorEnabled,
   };
   await AppSettings.set(VARIANT_KEY, config);
 };

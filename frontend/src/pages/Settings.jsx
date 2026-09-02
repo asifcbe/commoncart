@@ -365,6 +365,7 @@ export default function Settings() {
   const [sizes, setSizes] = useState([]);
   const [newVariant, setNewVariant] = useState('');
   const [newSize, setNewSize] = useState('');
+  const [variantSelectorEnabled, setVariantSelectorEnabled] = useState(false);
   const [savingVariants, setSavingVariants] = useState(false);
 
   // Payment modes offered at POS checkout / split payment
@@ -399,7 +400,7 @@ export default function Settings() {
     }).catch(() => {});
     api.get('/settings/bill-print-config').then(({ data }) => setBillPrint(data.config)).catch(() => {});
     api.get('/settings/display-config').then(({ data }) => setDisplayConfig(data.config)).catch(() => {});
-    api.get('/settings/variant-config').then(({ data }) => { setVariants(data.config?.variants || []); setSizes(data.config?.sizes || []); }).catch(() => {});
+    api.get('/settings/variant-config').then(({ data }) => { setVariants(data.config?.variants || []); setSizes(data.config?.sizes || []); setVariantSelectorEnabled(!!data.config?.variantSelectorEnabled); }).catch(() => {});
     api.get('/settings/payment-modes-config').then(({ data }) => setPaymentModes(data.config?.modes || [])).catch(() => {});
     api.get('/settings/barcode-config').then(({ data }) => { setBarcodeConfig(data.config); setBarcodeNextVal(data.nextBarcode); }).catch(() => {});
     api.get('/settings/doc-numbering-config').then(({ data }) => setDocNumbering((c) => ({ ...c, ...data.config }))).catch(() => {});
@@ -418,9 +419,10 @@ export default function Settings() {
   const handleSaveVariants = async () => {
     setSavingVariants(true);
     try {
-      const { data } = await api.put('/settings/variant-config', { variants, sizes });
+      const { data } = await api.put('/settings/variant-config', { variants, sizes, variantSelectorEnabled });
       setVariants(data.config?.variants || []);
       setSizes(data.config?.sizes || []);
+      setVariantSelectorEnabled(!!data.config?.variantSelectorEnabled);
       toast({ message: 'Variants & sizes saved', type: 'success' });
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to save', type: 'error' });
@@ -1089,6 +1091,22 @@ export default function Settings() {
                 Define the sizes available when creating products and recording purchases.
                 These appear as dropdowns on those forms.
               </p>
+
+              <div className="flex items-center justify-between bg-gray-50 border rounded-lg px-3 py-2.5 mb-5">
+                <div>
+                  <div className="text-sm font-medium text-gray-800">Show Variant Selector in Purchase</div>
+                  <div className="text-xs text-gray-500 mt-0.5">When off, the Purchase form hides the Variant (color) column — only Size is shown.</div>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={variantSelectorEnabled}
+                  onClick={() => setVariantSelectorEnabled((v) => !v)}
+                  className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${variantSelectorEnabled ? 'bg-blue-600' : 'bg-gray-300'}`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${variantSelectorEnabled ? 'translate-x-6' : 'translate-x-1'}`} />
+                </button>
+              </div>
 
               <div className="grid grid-cols-1 gap-6">
                 {/* Sizes */}

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import Input from './ui/Input';
-import Select from './ui/Select';
+import Combobox from './ui/Combobox';
 import Button from './ui/Button';
 import { Plus, X } from 'lucide-react';
 
@@ -29,6 +29,7 @@ export default function CategoryFields({
   required = false,
   labelClass = 'text-sm font-medium text-gray-700 block mb-1',
   inputClass = '',
+  onKeyDown,
 }) {
   const knownCat = catalog.some((c) => c.name === category);
   // A category value that's set but not (yet) in the catalog — a pending new
@@ -46,7 +47,7 @@ export default function CategoryFields({
 
   const setCategory = (val) => { onCategoryChange?.(val); onSubCategoryChange?.(''); };
 
-  const onCatSelect = (e) => setCategory(e.target.value);
+  const onCatSelect = (val) => setCategory(val);
 
   const openNewCat = () => { setShowNewCat(true); setNewCatDraft(''); };
   const confirmNewCat = () => {
@@ -56,7 +57,7 @@ export default function CategoryFields({
     setShowNewCat(false);
   };
 
-  const onSubSelect = (e) => onSubCategoryChange?.(e.target.value);
+  const onSubSelect = (val) => onSubCategoryChange?.(val);
 
   const openNewSub = () => { setShowNewSub(true); setNewSubDraft(''); };
   const confirmNewSub = () => {
@@ -79,10 +80,11 @@ export default function CategoryFields({
           </div>
         ) : (
           <div className="flex gap-2">
-            <Select value={category} onChange={onCatSelect} required={required} className={`flex-1 ${inputClass}`}>
-              <option value="" disabled={required}>Select a category…</option>
-              {catalog.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
-            </Select>
+            <Combobox
+              options={catalog.map((c) => ({ value: c.name, label: c.name }))}
+              value={category} onChange={onCatSelect} onCreateNew={setCategory} onKeyDown={onKeyDown} required={required}
+              placeholder="Select a category…" className={`flex-1 ${inputClass}`}
+            />
             <Button type="button" size="sm" variant="outline" onClick={openNewCat}>
               <Plus size={13} className="mr-1" /> New
             </Button>
@@ -117,10 +119,11 @@ export default function CategoryFields({
           </div>
         ) : (
           <div className="flex gap-2">
-            <Select value={subCategory} onChange={onSubSelect} disabled={!category} className={`flex-1 ${inputClass}`}>
-              <option value="">{category ? 'None' : 'Select a category first'}</option>
-              {subs.map((s) => <option key={s} value={s}>{s}</option>)}
-            </Select>
+            <Combobox
+              options={subs.map((s) => ({ value: s, label: s }))}
+              value={subCategory} onChange={onSubSelect} onCreateNew={(v) => onSubCategoryChange?.(v)} onKeyDown={onKeyDown} disabled={!category}
+              placeholder={category ? 'None' : 'Select a category first'} className={`flex-1 ${inputClass}`}
+            />
             <Button type="button" size="sm" variant="outline" onClick={openNewSub} disabled={!category}>
               <Plus size={13} className="mr-1" /> New
             </Button>

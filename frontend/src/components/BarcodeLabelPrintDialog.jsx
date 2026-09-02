@@ -244,6 +244,8 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   const [printMode, setPrintMode] = useState('barcode');
   const [copiesMap, setCopiesMap] = useState({});
   const printRef = useRef(null);
+  const printButtonRef = useRef(null);
+  const hasAutoFocused = useRef(false);
 
   // Fill in each item's copy count from the saved default once it loads.
   useEffect(() => {
@@ -269,6 +271,21 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   });
   const totalLabels = entries.reduce((s, e) => s + e.copies, 0);
   const printEntries = entries.filter((e) => e.copies > 0).map((e) => ({ item: e.item, copies: e.copies }));
+
+  // The Print button starts `disabled` on the very first paint — copiesMap is
+  // still empty until the effect above fills it in, so totalLabels is 0 for
+  // that first render. A plain `autoFocus` attribute is silently ignored on a
+  // disabled element and doesn't retroactively apply once it's enabled a
+  // moment later, so this focuses it imperatively instead, once and only
+  // once totalLabels actually has something to print (so Enter works
+  // immediately when the dialog opens, matching every other Enter-to-confirm
+  // popup in the app).
+  useEffect(() => {
+    if (!hasAutoFocused.current && totalLabels > 0) {
+      hasAutoFocused.current = true;
+      printButtonRef.current?.focus();
+    }
+  }, [totalLabels]);
 
   const handlePrint = useReactToPrint({
     contentRef: printRef,
@@ -353,6 +370,7 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
       <div className="flex items-center justify-end gap-3 pt-4 mt-4 border-t">
         <Button variant="outline" onClick={onClose}>Close</Button>
         <Button
+          ref={printButtonRef}
           onClick={triggerPrint}
           disabled={totalLabels === 0}
           style={{ background: `linear-gradient(135deg, #0f766e 0%, ${ACCENT} 100%)` }}

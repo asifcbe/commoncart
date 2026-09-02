@@ -2,13 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import JsBarcode from 'jsbarcode';
 import {
   Plus, Trash2, Eye, ChevronLeft, ChevronRight, ShoppingBag,
-  Printer, X, Edit2, Minus, AlertTriangle, RotateCcw, ScanLine,
+  Printer, X, Edit2, Minus, AlertTriangle, RotateCcw, ScanLine, CheckCircle,
 } from 'lucide-react';
 import { useToast } from '../components/ui/Toast';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import Modal from '../components/ui/Modal';
 import Spinner from '../components/ui/Spinner';
+import Combobox from '../components/ui/Combobox';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import CategoryFields from '../components/CategoryFields';
 import ManagedSelect from '../components/ManagedSelect';
@@ -20,6 +21,7 @@ import useAutoRefresh from '../hooks/useAutoRefresh';
 import useAuthStore from '../store/useAuthStore';
 import { canManage } from '../config/permissions';
 import { formatDateTime, toLocalDateTimeInput } from '../utils/date';
+import { makeEnterNav, focusFirstInContainer } from '../utils/focusNav';
 
 // Live SVG barcode previews are expensive (one JsBarcode render + DOM node each) —
 // cap how many render at once so large purchases (100s of units) don't lock up the page.
@@ -113,8 +115,39 @@ function DeleteConfirmModal({ purchase, onClose, onDeleted }) {
   );
 }
 
+// ─── Post-save print prompt ───────────────────────────────────
+// Shown the instant a purchase is saved, while its barcodes are still in
+// local form state — "Print Labels" is the default (autoFocus) action, so
+// Enter fires it immediately without a click; "Skip" and the modal's own
+// close (backdrop/X) both just move on without printing.
+function PostSavePrintPrompt({ unitCount, onPrint, onSkip }) {
+  return (
+    <Modal open onClose={onSkip} title="Purchase Saved" size="sm">
+      <div className="space-y-4">
+        <div className="flex items-start gap-3 p-3 bg-green-50 rounded-lg border border-green-200">
+          <CheckCircle size={20} className="text-green-600 mt-0.5 shrink-0" />
+          <div className="text-sm text-green-800">
+            <p className="font-semibold">Purchase recorded.</p>
+            <p className="text-xs text-green-700 mt-0.5">{unitCount} barcode{unitCount !== 1 ? 's' : ''} ready to print.</p>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 pt-2 border-t">
+          <Button variant="outline" onClick={onSkip}>Skip</Button>
+          <Button onClick={onPrint} autoFocus>
+            <Printer size={14} className="mr-2" /> Print Labels
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 // ─── Supplier selector with create-on-go ─────────────────────
-function SupplierSelector({ value, onChange }) {
+// Typing a name that doesn't match anyone and pressing Enter creates that
+// supplier immediately (Combobox's onCreateNew) — no separate "+ New" click
+// needed to stay keyboard-only. The "+ New" button remains for anyone who
+// wants to set a phone number at creation time too.
+function SupplierSelector({ value, onChange, onKeyDown, autoFocus }) {
   const toast = useToast();
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -122,6 +155,7 @@ function SupplierSelector({ value, onChange }) {
   const [newName, setNewName] = useState('');
   const [newPhone, setNewPhone] = useState('');
   const [creating, setCreating] = useState(false);
+  const comboRef = useRef(null);
 
   const loadSuppliers = () => {
     api.get('/suppliers', { params: { limit: 200 } })
@@ -130,11 +164,21 @@ function SupplierSelector({ value, onChange }) {
   };
   useEffect(() => { loadSuppliers(); }, []);
 
-  const handleCreate = async () => {
-    if (!newName.trim()) { toast({ message: 'Supplier name is required', type: 'error' }); return; }
+  // The combobox starts life `disabled` while suppliers are still loading —
+  // the browser ignores `autoFocus` on a disabled control entirely, and it
+  // doesn't retroactively apply once `disabled` clears a moment later. Once
+  // loading finishes, focus it ourselves instead of relying on the attribute.
+  useEffect(() => {
+    // eslint-disable-next-line no-console
+    console.log('[SupplierSelector] focus effect', { autoFocus, loading, hasRef: !!comboRef.current });
+    if (autoFocus && !loading) comboRef.current?.focus();
+  }, [autoFocus, loading]);
+
+  const createSupplier = async (name, phone = '') => {
+    if (!name.trim()) { toast({ message: 'Supplier name is required', type: 'error' }); return; }
     setCreating(true);
     try {
-      const { data } = await api.post('/suppliers', { name: newName.trim(), phone: newPhone.trim() });
+      const { data } = await api.post('/suppliers', { name: name.trim(), phone: phone.trim() });
       toast({ message: `Supplier "${data.supplier.name}" created`, type: 'success' });
       loadSuppliers();
       onChange(data.supplier._id, data.supplier.name);
@@ -151,14 +195,22 @@ function SupplierSelector({ value, onChange }) {
     } finally { setCreating(false); }
   };
 
+  const supplierOptions = suppliers.map((s) => ({ value: s._id, label: s.name }));
+
   return (
     <div className="space-y-2">
       <div className="flex gap-2">
-        <select value={value} onChange={(e) => { const s = suppliers.find((s) => s._id === e.target.value); onChange(e.target.value, s?.name || ''); }}
-          className="flex-1 rounded border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white" disabled={loading}>
-          <option value="">— Select supplier —</option>
-          {suppliers.map((s) => <option key={s._id} value={s._id}>{s.name}{s.phone ? ` · ${s.phone}` : ''}</option>)}
-        </select>
+        <Combobox
+          ref={comboRef}
+          options={supplierOptions}
+          value={value}
+          onChange={(id) => { const s = suppliers.find((s) => s._id === id); onChange(id, s?.name || ''); }}
+          onCreateNew={(name) => createSupplier(name)}
+          onKeyDown={onKeyDown}
+          placeholder="Type or select supplier…"
+          disabled={loading}
+          className="flex-1"
+        />
         <Button type="button" size="sm" variant="outline" onClick={() => setShowCreate((v) => !v)}>
           <Plus size={13} className="mr-1" /> New
         </Button>
@@ -172,7 +224,7 @@ function SupplierSelector({ value, onChange }) {
           </div>
           <div className="flex gap-2 justify-end">
             <Button type="button" size="sm" variant="ghost" onClick={() => { setShowCreate(false); setNewName(''); setNewPhone(''); }}>Cancel</Button>
-            <Button type="button" size="sm" onClick={handleCreate} disabled={creating}>{creating ? <Spinner size="sm" /> : 'Create & Select'}</Button>
+            <Button type="button" size="sm" onClick={() => createSupplier(newName, newPhone)} disabled={creating}>{creating ? <Spinner size="sm" /> : 'Create & Select'}</Button>
           </div>
         </div>
       )}
@@ -180,6 +232,36 @@ function SupplierSelector({ value, onChange }) {
   );
 }
 
+
+// ─── Step indicator for the create-mode guided flow (mirrors POS's StepBar) ───
+function PurchaseStepBar({ steps, step, onJump }) {
+  const currentIdx = steps.findIndex((s) => s.id === step);
+  return (
+    <div className="flex items-center gap-1 bg-white rounded-lg border p-3 overflow-x-auto">
+      {steps.map((s, i) => {
+        const done = i < currentIdx;
+        const active = s.id === step;
+        return (
+          <React.Fragment key={s.id}>
+            {i > 0 && <div className={`h-px w-4 sm:w-8 ${i <= currentIdx ? 'bg-blue-300' : 'bg-gray-200'}`} />}
+            <button
+              type="button"
+              onClick={() => onJump(s.id)}
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-colors whitespace-nowrap ${
+                active ? 'bg-blue-600 text-white' : done ? 'bg-blue-50 text-blue-700 hover:bg-blue-100' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              <span className={`flex items-center justify-center h-4 w-4 rounded-full text-[10px] ${active ? 'bg-white/20' : done ? 'bg-blue-200' : 'bg-gray-300'}`}>
+                {done && !active ? '✓' : i + 1}
+              </span>
+              {s.label}
+            </button>
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
 
 // ─── Purchase Form (New + Edit) ───────────────────────────────
 // New flow: one product header → total qty → variant slot table
@@ -197,11 +279,31 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [note, setNote] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(() => toLocalDateTimeInput(new Date()));
 
+  // Create-mode guided flow — one section visible at a time, Enter moves
+  // through it (see POS's `step`/StepBar for the same pattern).
+  const [purchaseStep, setPurchaseStep] = useState('meta'); // 'meta' | 'product' | 'variants'
+  const PURCHASE_STEPS = [
+    { id: 'meta', label: 'Purchase Details' },
+    { id: 'product', label: 'Product Details' },
+    { id: 'variants', label: 'Assign Variant & Size' },
+  ];
+  // Next buttons are never `disabled` — a disabled button swallows Enter
+  // silently (native <button disabled> ignores .click()), which dead-ends a
+  // keyboard-only flow with zero feedback. Validate here instead and toast
+  // what's missing, same as handleSubmit already does for the final submit.
+  const goNextPurchaseStep = () => {
+    if (purchaseStep === 'product') {
+      if (!prodName.trim()) { toast({ message: 'Product name is required', type: 'error' }); return; }
+      if (!totalQty || Number(totalQty) <= 0) { toast({ message: 'Total quantity must be > 0', type: 'error' }); return; }
+    }
+    const idx = PURCHASE_STEPS.findIndex((s) => s.id === purchaseStep);
+    if (idx < PURCHASE_STEPS.length - 1) setPurchaseStep(PURCHASE_STEPS[idx + 1].id);
+  };
+
   // ── NEW: product header
   const [prodName, setProdName] = useState('');
   const [prodCategory, setProdCategory] = useState('');
   const [prodSubCategory, setProdSubCategory] = useState('');
-  const [prodDescription, setProdDescription] = useState('');
   const [prodCostPrice, setProdCostPrice] = useState('');
   const [prodPrice, setProdPrice] = useState('');
   const [prodDiscountPrice, setProdDiscountPrice] = useState('');
@@ -217,12 +319,17 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [categoryCatalog, setCategoryCatalog] = useState([]);
   const [variantOptions, setVariantOptions] = useState([]);
   const [sizeOptions, setSizeOptions] = useState([]);
+  const [variantSelectorEnabled, setVariantSelectorEnabled] = useState(false);
   useEffect(() => {
     api.get('/settings/category-config')
       .then(({ data }) => setCategoryCatalog(data.config?.categories || []))
       .catch(() => {});
     api.get('/settings/variant-config')
-      .then(({ data }) => { setVariantOptions(data.config?.variants || []); setSizeOptions(data.config?.sizes || []); })
+      .then(({ data }) => {
+        setVariantOptions(data.config?.variants || []);
+        setSizeOptions(data.config?.sizes || []);
+        setVariantSelectorEnabled(!!data.config?.variantSelectorEnabled);
+      })
       .catch(() => {});
   }, []);
 
@@ -233,8 +340,51 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   // When set, the print modal opens pre-filtered to just this one barcode
   // (quick "print this label" action instead of zeroing out every other row).
   const [printOnlyBarcode, setPrintOnlyBarcode] = useState(null);
+  // Shown right after a successful create-mode save, before handing control
+  // back to the list (onSaved) — the just-saved purchase's barcodes are still
+  // sitting in local form state at this point, so this is the only moment the
+  // print dialog can use them without a re-fetch.
+  const [showPostSaveConfirm, setShowPostSaveConfirm] = useState(false);
+  // Tracks whether the currently-open print dialog was opened from that
+  // post-save prompt specifically — closing it then also means "done with
+  // this purchase", so it should hand off to the list (onSaved) same as Skip
+  // would. Print Labels opened any other way (mid-form previews, edit mode)
+  // must not trigger that hand-off.
+  const [printingAfterSave, setPrintingAfterSave] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [businessName, setBusinessName] = useState('');
+  // Edit mode keeps everything visible — one shared container, Enter chains
+  // straight through. Create mode is step-gated (see purchaseStep above), so
+  // each section is its own container: Enter inside it only ever needs to
+  // reach that section's own fields, since the next section isn't mounted yet.
+  const formRef = useRef(null);
+  const enterNav = makeEnterNav(formRef);
+  const metaStepRef = useRef(null);
+  const metaStepEnterNav = makeEnterNav(metaStepRef);
+  const productStepRef = useRef(null);
+  const productStepEnterNav = makeEnterNav(productStepRef);
+  const variantsStepRef = useRef(null);
+  const variantsStepEnterNav = makeEnterNav(variantsStepRef);
+  // When a draft (unassigned-slot) row gets its first qty, it's promoted into
+  // variantRows and re-rendered at a different table position — the input the
+  // user was typing in gets unmounted mid-keystroke and focus is lost to
+  // nowhere. This remembers "focus this field once it (re)appears" across
+  // that DOM move so Enter-only entry never stalls after typing a qty.
+  const pendingRowFocusRef = useRef(null);
+  useEffect(() => {
+    if (!pendingRowFocusRef.current || !variantsStepRef.current) return;
+    const el = variantsStepRef.current.querySelector(`[data-row-field="${pendingRowFocusRef.current}"]`);
+    if (el) { el.focus(); el.select?.(); pendingRowFocusRef.current = null; }
+  });
+  // Landing on Step 3 (by clicking Next or via Enter) leaves keyboard focus
+  // wherever it was — nothing in the newly-visible table is focused, so the
+  // very next Enter/keystroke goes nowhere until the user clicks a field by
+  // hand. Focus the first Variant/Size field the moment this step becomes
+  // active, same as POS auto-focuses its scan field on step change.
+  useEffect(() => {
+    if (purchaseStep !== 'variants') return;
+    focusFirstInContainer(variantsStepRef.current);
+  }, [purchaseStep]);
   useEffect(() => {
     api.get('/settings/business-config').then(({ data }) => setBusinessName(data.config?.businessName || '')).catch(() => {});
   }, []);
@@ -340,21 +490,31 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     setSlotDrafts((prev) => prev.map((d, i) => i !== draftIdx ? d : { ...d, [field]: value }));
   };
 
-  // When a draft row gets a qty, promote it to a real variantRow and fetch barcodes
-  const handleDraftQtyChange = async (draftIdx, value) => {
-    const qty = Number(value) || 0;
+  // Promote a draft row into a real variantRow and fetch barcodes — only ever
+  // called on Enter (commit), never on every keystroke. Promoting on keystroke
+  // used to fire the instant a single digit was typed (qty "1" is already
+  // > 0), unmounting the field the user was still typing into and stealing
+  // the rest of what they typed (e.g. the "0" of "10") into whatever took
+  // its place.
+  const commitDraftQty = async (draftIdx) => {
+    const draft = slotDrafts[draftIdx];
+    if (!draft) return; // guard against a stray double-call
+    const qty = Number(draft.qty) || 0;
     if (qty <= 0) return;
     if (qty > MAX_ROW_QTY) {
       toast({ message: `Max ${MAX_ROW_QTY} units per row — split larger quantities into multiple rows.`, type: 'warning' });
       return;
     }
-    const draft = slotDrafts[draftIdx];
     // Capture the index before setState (React state is synchronous snapshot here)
     const newRowIdx = variantRows.length;
-    const newRow = { color: draft.color || '', size: draft.size || '', qty: value, costPrice: draft.costPrice || '', price: draft.price || '', discountPrice: draft.discountPrice || '', barcodes: [] };
+    const newRow = { color: draft.color || '', size: draft.size || '', qty: draft.qty, costPrice: draft.costPrice || '', price: draft.price || '', discountPrice: draft.discountPrice || '', barcodes: [] };
     setVariantRows((prev) => [...prev, newRow]);
     setSlotDrafts((prev) => prev.filter((_, i) => i !== draftIdx));
     setLoadingRowIdx(newRowIdx);
+    // The qty field itself is about to unmount (draft → filled row swap) —
+    // land on Cost Price next, continuing the same left-to-right order Enter
+    // would have used if the row had never moved.
+    pendingRowFocusRef.current = `row-${newRowIdx}-cost`;
     try {
       const { data } = await api.post('/settings/reserve-barcodes', { count: qty });
       setVariantRows((prev) => prev.map((r, i) => i !== newRowIdx ? r : { ...r, barcodes: data.barcodes }));
@@ -364,6 +524,16 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     } finally {
       setLoadingRowIdx((prev) => prev === newRowIdx ? null : prev);
     }
+  };
+
+  // Enter in a draft row's Qty field: commit the promotion first (which sets
+  // pendingRowFocusRef so the effect above lands on the new row's Cost
+  // field), instead of running the normal nav scan — the field it would scan
+  // from is about to be unmounted by the promotion this same keystroke causes.
+  const handleDraftQtyKeyDown = (draftIdx) => (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    commitDraftQty(draftIdx);
   };
 
   // Build one item per barcode per row for submission
@@ -448,7 +618,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     if (!builtGroups.length) { toast({ message: 'No units to submit', type: 'error' }); return; }
 
     const items = builtGroups.map((v) => ({
-      name: prodName.trim(), category: prodCategory.trim() || 'General', subCategory: prodSubCategory.trim(), description: prodDescription,
+      name: prodName.trim(), category: prodCategory.trim() || 'General', subCategory: prodSubCategory.trim(),
       costPrice: v.costPrice, price: v.price, discountPrice: v.discountPrice,
       color: v.color, size: v.size, qty: 1, barcode: v.barcode,
     }));
@@ -457,7 +627,9 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     try {
       await api.post('/purchases', { supplierId: supplierId || undefined, supplier: supplierName, items, note, purchaseDate });
       toast({ message: 'Purchase recorded — products created / stock updated', type: 'success' });
-      onSaved();
+      // Offer to print labels before handing off to the list (onSaved) — the
+      // barcodes are only available from this local form state, not after.
+      setShowPostSaveConfirm(true);
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to save purchase', type: 'error' });
     } finally { setSaving(false); }
@@ -468,7 +640,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const dErrGlobal = discountError(prodPrice, prodDiscountPrice);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" ref={formRef}>
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
@@ -489,79 +661,133 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
               <Trash2 size={14} className="mr-1.5" /> Delete
             </Button>
           )}
-          <Button onClick={handleSubmit} disabled={saving || (isEdit && !allowManage)}>
-            {saving ? <Spinner size="sm" className="mr-2" /> : <ShoppingBag size={14} className="mr-2" />}
-            {isEdit ? 'Update Purchase' : 'Save Purchase'}
-          </Button>
+          {/* Create mode's submit lives at the end of the guided flow (Step 3)
+              instead of here, since the earlier steps aren't ready to submit yet. */}
+          {isEdit && (
+            <Button onClick={handleSubmit} disabled={saving || !allowManage} data-enter-submit>
+              {saving ? <Spinner size="sm" className="mr-2" /> : <ShoppingBag size={14} className="mr-2" />}
+              Update Purchase
+            </Button>
+          )}
         </div>
       </div>
 
-      {/* Purchase meta */}
-      <Card>
-        <CardHeader className="pb-2"><CardTitle className="text-sm">Purchase Details</CardTitle></CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Supplier</label>
-              <SupplierSelector value={supplierId} onChange={(id, name) => { setSupplierId(id); setSupplierName(name); }} />
+      {/* Purchase meta — always visible in edit mode; gated to Step 1 in create mode */}
+      {isEdit && (
+        <Card>
+          <CardHeader className="pb-2"><CardTitle className="text-sm">Purchase Details</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Supplier</label>
+                <SupplierSelector value={supplierId} onChange={(id, name) => { setSupplierId(id); setSupplierName(name); }} onKeyDown={enterNav} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Purchase Date</label>
+                <Input type="datetime-local" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} onKeyDown={enterNav} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-gray-600 block mb-1">Note</label>
+                <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" onKeyDown={enterNav} />
+              </div>
             </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Purchase Date</label>
-              <Input type="datetime-local" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-1">Note</label>
-              <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
 
-      {/* NEW MODE */}
+      {/* NEW MODE — guided one-step-at-a-time flow, Enter advances through each step */}
       {!isEdit && (
         <>
-          <Card>
-            <CardHeader className="pb-2"><CardTitle className="text-sm">Step 1 — Product Details</CardTitle></CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div><label className="text-xs font-medium text-gray-600 block mb-1">Product Name *</label>
-                  <Input value={prodName} onChange={(e) => setProdName(e.target.value)} placeholder="e.g. Cotton T-Shirt" /></div>
-                <CategoryFields
-                  catalog={categoryCatalog}
-                  category={prodCategory}
-                  subCategory={prodSubCategory}
-                  onCategoryChange={setProdCategory}
-                  onSubCategoryChange={setProdSubCategory}
-                  labelClass="text-xs font-medium text-gray-600 block mb-1"
-                />
-                <div><label className="text-xs font-medium text-gray-600 block mb-1">Description</label>
-                  <Input value={prodDescription} onChange={(e) => setProdDescription(e.target.value)} placeholder="Optional" /></div>
-              </div>
-              <div className="grid grid-cols-4 gap-4">
-                <div><label className="text-xs font-medium text-gray-600 block mb-1">Cost Price (₹)</label>
-                  <Input type="number" min="0" step="0.01" value={prodCostPrice} onChange={(e) => setProdCostPrice(e.target.value)} placeholder="0.00" /></div>
-                <div><label className="text-xs font-medium text-gray-600 block mb-1">MRP (₹) *</label>
-                  <Input type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} placeholder="0.00" /></div>
-                <div>
-                  <label className="text-xs font-medium text-gray-600 block mb-1">Discount Price (₹) <span className="text-[10px] text-gray-400 font-normal">strikes original on label</span></label>
-                  <Input type="number" min="0" step="0.01" value={prodDiscountPrice}
-                    onChange={(e) => setProdDiscountPrice(e.target.value)} placeholder="Leave blank for none"
-                    className={dErrGlobal ? 'border-red-400' : ''} />
-                  {dErrGlobal && <p className="text-xs text-red-500 mt-0.5">{dErrGlobal}</p>}
-                </div>
-                <div><label className="text-xs font-medium text-gray-600 block mb-1">Total Quantity *</label>
-                  <Input type="number" min="1" max="200" value={totalQty}
-                    onChange={(e) => setTotalQty(e.target.value)} placeholder="e.g. 10" /></div>
-              </div>
-            </CardContent>
-          </Card>
+          <PurchaseStepBar steps={PURCHASE_STEPS} step={purchaseStep}
+            onJump={(s) => { if (s === 'variants' && totalN <= 0) return; setPurchaseStep(s); }} />
 
-          {totalN > 0 && (
+          {purchaseStep === 'meta' && (
+            <Card ref={metaStepRef}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Step 1 — Purchase Details</CardTitle></CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Supplier</label>
+                    <SupplierSelector value={supplierId} onChange={(id, name) => { setSupplierId(id); setSupplierName(name); }} onKeyDown={metaStepEnterNav} autoFocus />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Purchase Date</label>
+                    <Input type="datetime-local" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} onKeyDown={metaStepEnterNav} />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Note</label>
+                    <Input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional note" onKeyDown={metaStepEnterNav} />
+                  </div>
+                </div>
+                <div className="flex justify-end mt-4 pt-3 border-t">
+                  <Button size="sm" onClick={goNextPurchaseStep} data-enter-submit>
+                    Next: Product Details <ChevronRight size={14} className="ml-1" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {purchaseStep === 'product' && (
+            <Card ref={productStepRef}>
+              <CardHeader className="pb-2"><CardTitle className="text-sm">Step 2 — Product Details</CardTitle></CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">Product Name *</label>
+                    <Input value={prodName} onChange={(e) => setProdName(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. Cotton T-Shirt" autoFocus /></div>
+                  <CategoryFields
+                    catalog={categoryCatalog}
+                    category={prodCategory}
+                    subCategory={prodSubCategory}
+                    onCategoryChange={setProdCategory}
+                    onSubCategoryChange={setProdSubCategory}
+                    onKeyDown={productStepEnterNav}
+                    labelClass="text-xs font-medium text-gray-600 block mb-1"
+                  />
+                </div>
+                <div className="grid grid-cols-4 gap-4">
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">Cost Price (₹)</label>
+                    <Input type="number" min="0" step="0.01" value={prodCostPrice} onChange={(e) => setProdCostPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="0.00" /></div>
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">MRP (₹) *</label>
+                    <Input type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="0.00" /></div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-600 block mb-1">Discount Price (₹) <span className="text-[10px] text-gray-400 font-normal">strikes original on label</span></label>
+                    <Input type="number" min="0" step="0.01" value={prodDiscountPrice}
+                      onChange={(e) => setProdDiscountPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="Leave blank for none"
+                      className={dErrGlobal ? 'border-red-400' : ''} />
+                    {dErrGlobal && <p className="text-xs text-red-500 mt-0.5">{dErrGlobal}</p>}
+                  </div>
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">Total Quantity *</label>
+                    <Input type="number" min="1" max="200" value={totalQty}
+                      onChange={(e) => setTotalQty(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 10" /></div>
+                </div>
+                <div className="flex justify-between items-center pt-3 border-t">
+                  <Button size="sm" variant="ghost" onClick={() => setPurchaseStep('meta')}>Back</Button>
+                  <Button size="sm" onClick={goNextPurchaseStep} data-enter-submit>
+                    Next: Assign Variant &amp; Size <ChevronRight size={14} className="ml-1" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {purchaseStep === 'variants' && totalN <= 0 && (
             <Card>
+              <CardContent className="py-8 text-center text-sm text-gray-500">
+                Set a Total Quantity in Step 2 before assigning variants.
+                <div className="mt-3">
+                  <Button size="sm" variant="outline" onClick={() => setPurchaseStep('product')}>Back to Product Details</Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {purchaseStep === 'variants' && totalN > 0 && (
+            <Card ref={variantsStepRef}>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <CardTitle className="text-sm">Step 2 — Assign Variant &amp; Size</CardTitle>
+                    <CardTitle className="text-sm">Step 3 — Assign Variant &amp; Size</CardTitle>
                     <p className="text-xs text-gray-500 mt-0.5">
                       {assignedQty} of {totalN} assigned
                       {overAssigned && <span className="ml-1 text-red-600 font-semibold">· {assignedQty - totalN} over</span>}
@@ -579,7 +805,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     <thead className="bg-gray-50 border-b">
                       <tr>
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-8">#</th>
-                        <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Variant</th>
+                        {variantSelectorEnabled && <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Variant</th>}
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Size</th>
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-20">Qty</th>
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">
@@ -599,30 +825,38 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                       {variantRows.map((row, idx) => (
                         <tr key={idx} className="bg-white">
                           <td className="px-3 py-2 text-gray-400 text-xs">{idx + 1}</td>
-                          <td className="px-3 py-2">
-                            <ManagedSelect options={variantOptions} value={row.color}
-                              onChange={(v) => updateVariant(idx, 'color', v)}
-                              placeholder="Variant" newPlaceholder="New variant" inputClass="h-8 text-sm w-28" />
-                          </td>
+                          {variantSelectorEnabled && (
+                            <td className="px-3 py-2">
+                              <ManagedSelect options={variantOptions} value={row.color}
+                                onChange={(v) => updateVariant(idx, 'color', v)}
+                                onKeyDown={variantsStepEnterNav}
+                                placeholder="Variant" inputClass="h-8 text-sm w-28" />
+                            </td>
+                          )}
                           <td className="px-3 py-2">
                             <ManagedSelect options={sizeOptions} value={row.size}
                               onChange={(v) => updateVariant(idx, 'size', v)}
-                              placeholder="Size" newPlaceholder="New size" inputClass="h-8 text-sm w-28" />
+                              onKeyDown={variantsStepEnterNav}
+                              placeholder="Size" inputClass="h-8 text-sm w-28" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="1" value={row.qty}
                               onChange={(e) => handleQtyChange(idx, e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
                               placeholder="0"
                               className={`h-8 text-sm w-16 ${overAssigned ? 'border-red-400' : ''}`} />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="0" step="0.01" value={row.costPrice}
+                              data-row-field={`row-${idx}-cost`}
                               onChange={(e) => updateVariant(idx, 'costPrice', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
                               placeholder={prodCostPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="0" step="0.01" value={row.price}
                               onChange={(e) => updateVariant(idx, 'price', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
                               placeholder={prodPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
@@ -635,6 +869,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                                 <div>
                                   <Input type="number" min="0" step="0.01" value={row.discountPrice}
                                     onChange={(e) => updateVariant(idx, 'discountPrice', e.target.value)}
+                                    onKeyDown={variantsStepEnterNav}
                                     placeholder={prodDiscountPrice || 'None'}
                                     className={`h-8 text-sm w-24 ${dpErr ? 'border-red-400' : ''}`} />
                                   {dpErr && <div className="text-[10px] text-red-500 mt-0.5">{dpErr}</div>}
@@ -665,35 +900,43 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                       {slotDrafts.map((draft, di) => (
                         <tr key={`draft-${di}`} className="bg-gray-50/40">
                           <td className="px-3 py-2 text-gray-400 text-xs">{variantRows.length + di + 1}</td>
-                          <td className="px-3 py-2">
-                            <ManagedSelect options={variantOptions} value={draft.color}
-                              onChange={(v) => updateDraft(di, 'color', v)}
-                              placeholder="Variant" newPlaceholder="New variant" inputClass="h-8 text-sm w-28" />
-                          </td>
+                          {variantSelectorEnabled && (
+                            <td className="px-3 py-2">
+                              <ManagedSelect options={variantOptions} value={draft.color}
+                                onChange={(v) => updateDraft(di, 'color', v)}
+                                onKeyDown={variantsStepEnterNav}
+                                placeholder="Variant" inputClass="h-8 text-sm w-28" />
+                            </td>
+                          )}
                           <td className="px-3 py-2">
                             <ManagedSelect options={sizeOptions} value={draft.size}
                               onChange={(v) => updateDraft(di, 'size', v)}
-                              placeholder="Size" newPlaceholder="New size" inputClass="h-8 text-sm w-28" />
+                              onKeyDown={variantsStepEnterNav}
+                              placeholder="Size" inputClass="h-8 text-sm w-28" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="1" value={draft.qty || ''}
-                              onChange={(e) => handleDraftQtyChange(di, e.target.value)}
+                              onChange={(e) => updateDraft(di, 'qty', e.target.value)}
+                              onKeyDown={handleDraftQtyKeyDown(di)}
                               placeholder="Qty"
                               className="h-8 text-sm w-16" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="0" step="0.01" value={draft.costPrice}
                               onChange={(e) => updateDraft(di, 'costPrice', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
                               placeholder={prodCostPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="0" step="0.01" value={draft.price}
                               onChange={(e) => updateDraft(di, 'price', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
                               placeholder={prodPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
                             <Input type="number" min="0" step="0.01" value={draft.discountPrice}
                               onChange={(e) => updateDraft(di, 'discountPrice', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
                               placeholder={prodDiscountPrice || 'None'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
@@ -706,7 +949,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     </tbody>
                     <tfoot className="bg-gray-50 border-t">
                       <tr>
-                        <td colSpan={3} className="px-3 py-2 text-xs font-semibold text-gray-600">
+                        <td colSpan={variantSelectorEnabled ? 3 : 2} className="px-3 py-2 text-xs font-semibold text-gray-600">
                           {assignedQty} of {totalN} units assigned
                         </td>
                         <td className="px-3 py-2 text-xs font-bold text-gray-800">{assignedQty}</td>
@@ -719,11 +962,18 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                 <p className="text-xs text-gray-400 mt-2">
                   Each unit gets its own unique barcode. Leave Cost/Sell Price blank to use defaults from Step 1.
                 </p>
+                <div className="flex justify-between items-center mt-4 pt-3 border-t">
+                  <Button size="sm" variant="ghost" onClick={() => setPurchaseStep('product')}>Back</Button>
+                  <Button size="sm" onClick={handleSubmit} disabled={saving} data-enter-submit>
+                    {saving ? <Spinner size="sm" className="mr-2" /> : <ShoppingBag size={14} className="mr-2" />}
+                    Save Purchase
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           )}
 
-          {printableVariants.length > 0 && (
+          {purchaseStep === 'variants' && printableVariants.length > 0 && (
             <Card>
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
@@ -745,10 +995,12 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
             </Card>
           )}
 
-          <div className="flex items-center justify-between bg-white border rounded-lg px-5 py-3">
-            <span className="text-sm text-gray-600">Total Cost</span>
-            <span className="text-lg font-bold text-blue-700">₹{totalCost.toFixed(2)}</span>
-          </div>
+          {purchaseStep === 'variants' && (
+            <div className="flex items-center justify-between bg-white border rounded-lg px-5 py-3">
+              <span className="text-sm text-gray-600">Total Cost</span>
+              <span className="text-lg font-bold text-blue-700">₹{totalCost.toFixed(2)}</span>
+            </div>
+          )}
         </>
       )}
 
@@ -772,7 +1024,6 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
               const name = firstOv.name ?? firstItem.name;
               const category = firstOv.category ?? firstItem.category ?? '';
               const subCategory = firstOv.subCategory ?? firstItem.subCategory ?? '';
-              const description = firstOv.description ?? firstItem.description ?? '';
               const setAllField = (field, val) =>
                 grp.indices.forEach((i) => setItemOverrides((prev) => ({ ...prev, [i]: { ...prev[i], [field]: val } })));
               const soldCount = grp.indices.filter((i) => existingPurchase.items[i].isSold).length;
@@ -786,15 +1037,14 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     <CardContent className="space-y-4">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                         <div><label className="text-xs font-medium text-gray-600 block mb-1">Product Name *</label>
-                          <Input value={name} onChange={(e) => setAllField('name', e.target.value)} /></div>
+                          <Input value={name} onChange={(e) => setAllField('name', e.target.value)} onKeyDown={enterNav} /></div>
                         <CategoryFields
                           catalog={categoryCatalog} category={category} subCategory={subCategory}
                           onCategoryChange={(v) => setAllField('category', v)}
                           onSubCategoryChange={(v) => setAllField('subCategory', v)}
+                          onKeyDown={enterNav}
                           labelClass="text-xs font-medium text-gray-600 block mb-1"
                         />
-                        <div><label className="text-xs font-medium text-gray-600 block mb-1">Description</label>
-                          <Input value={description} onChange={(e) => setAllField('description', e.target.value)} /></div>
                       </div>
                       <div className="flex gap-4 text-xs text-gray-500">
                         <span>Total units: <strong className="text-gray-700">{grp.indices.length}</strong></span>
@@ -814,7 +1064,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                             <tr>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-8">#</th>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Barcode</th>
-                              <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Variant</th>
+                              {variantSelectorEnabled && <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Variant</th>}
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Size</th>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">Cost (₹)</th>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">Sell (₹)</th>
@@ -849,31 +1099,35 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                                         </span>
                                       : <span className="text-xs text-gray-300">—</span>}
                                   </td>
-                                  <td className="px-3 py-2">
-                                    {sold
-                                      ? <span className="text-xs text-gray-500">{color || '—'}</span>
-                                      : <ManagedSelect options={variantOptions} value={color}
-                                          onChange={(v) => setOv('color', v)}
-                                          placeholder="Variant" newPlaceholder="New variant" inputClass="h-8 text-sm w-28" />}
-                                  </td>
+                                  {variantSelectorEnabled && (
+                                    <td className="px-3 py-2">
+                                      {sold
+                                        ? <span className="text-xs text-gray-500">{color || '—'}</span>
+                                        : <ManagedSelect options={variantOptions} value={color}
+                                            onChange={(v) => setOv('color', v)}
+                                            onKeyDown={enterNav}
+                                            placeholder="Variant" inputClass="h-8 text-sm w-28" />}
+                                    </td>
+                                  )}
                                   <td className="px-3 py-2">
                                     {sold
                                       ? <span className="text-xs text-gray-500">{size || '—'}</span>
                                       : <ManagedSelect options={sizeOptions} value={size}
                                           onChange={(v) => setOv('size', v)}
-                                          placeholder="Size" newPlaceholder="New size" inputClass="h-8 text-sm w-28" />}
+                                          onKeyDown={enterNav}
+                                          placeholder="Size" inputClass="h-8 text-sm w-28" />}
                                   </td>
                                   <td className="px-3 py-2">
                                     {sold
                                       ? <span className="text-xs text-gray-500">₹{Number(costPrice).toFixed(2)}</span>
                                       : <Input type="number" min="0" step="0.01" value={costPrice}
-                                          onChange={(e) => setOv('costPrice', e.target.value)} className="h-8 text-sm w-24" />}
+                                          onChange={(e) => setOv('costPrice', e.target.value)} onKeyDown={enterNav} className="h-8 text-sm w-24" />}
                                   </td>
                                   <td className="px-3 py-2">
                                     {sold
                                       ? <span className="text-xs text-gray-500">₹{Number(price).toFixed(2)}</span>
                                       : <Input type="number" min="0" step="0.01" value={price}
-                                          onChange={(e) => setOv('price', e.target.value)} className="h-8 text-sm w-24" />}
+                                          onChange={(e) => setOv('price', e.target.value)} onKeyDown={enterNav} className="h-8 text-sm w-24" />}
                                   </td>
                                   <td className="px-3 py-2">
                                     {sold
@@ -881,6 +1135,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                                       : <div>
                                           <Input type="number" min="0" step="0.01" value={dp}
                                             onChange={(e) => setOv('discountPrice', e.target.value)}
+                                            onKeyDown={enterNav}
                                             placeholder="None" className={`h-8 text-sm w-24 ${dErr ? 'border-red-400' : ''}`} />
                                           {dErr && <div className="text-[10px] text-red-500 mt-0.5">{dErr}</div>}
                                         </div>}
@@ -896,7 +1151,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                           </tbody>
                           <tfoot className="bg-gray-50 border-t">
                             <tr>
-                              <td colSpan={8} className="px-3 py-2 text-xs text-gray-500">
+                              <td colSpan={variantSelectorEnabled ? 8 : 7} className="px-3 py-2 text-xs text-gray-500">
                                 {grp.indices.length} units · {soldCount} sold · {unsoldCount} in stock
                               </td>
                             </tr>
@@ -948,6 +1203,14 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
         </>
       )}
 
+      {showPostSaveConfirm && (
+        <PostSavePrintPrompt
+          unitCount={printableVariants.length}
+          onPrint={() => { setShowPostSaveConfirm(false); setPrintingAfterSave(true); setShowPrintModal(true); }}
+          onSkip={() => { setShowPostSaveConfirm(false); onSaved(); }}
+        />
+      )}
+
       {showPrintModal && (
         <BulkBarcodeDialog
           items={(isEdit ? editPrintItems : printableVariants)
@@ -962,7 +1225,11 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
             })
             .filter((it) => !printOnlyBarcode || it.barcode === printOnlyBarcode)}
           businessName={businessName}
-          onClose={() => { setShowPrintModal(false); setPrintOnlyBarcode(null); }}
+          onClose={() => {
+            setShowPrintModal(false);
+            setPrintOnlyBarcode(null);
+            if (printingAfterSave) { setPrintingAfterSave(false); onSaved(); }
+          }}
         />
       )}
       {showDelete && existingPurchase && (
