@@ -201,12 +201,14 @@ export const LABEL_SIZES = [
 export const PX_PER_MM = 3.7795;
 
 // Derive all sizing from real mm dimensions.
-// contentScale → text/font size only
-// codeScale    → barcode strip height, QR square size, bar thickness only
-// printerDpi   → CommonCart-only; target physical printer resolution. Does NOT
-//                change any on-page layout size, only how many real bitmap
-//                pixels barcodeDataURL/qrDataURL render per CSS px.
-export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, printerDpi = DEFAULT_PRINTER_DPI) => {
+// contentScale    → text/font size only
+// codeScale       → barcode strip height, QR square size, bar thickness
+// barcodeDarkness → barcode bar thickness ONLY (not height, not QR) — a
+//                   distinct "make it darker" control from "make it bigger"
+// printerDpi      → CommonCart-only; target physical printer resolution. Does
+//                   NOT change any on-page layout size, only how many real
+//                   bitmap pixels barcodeDataURL/qrDataURL render per CSS px.
+export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, printerDpi = DEFAULT_PRINTER_DPI, barcodeDarkness = 1.0) => {
   const wPx  = entry.widthMm  * PX_PER_MM;
   const hPx  = entry.heightMm ? entry.heightMm * PX_PER_MM : null;
   const isA4 = entry.key === 'a4';
@@ -237,7 +239,7 @@ export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, prin
     qrSize:        qrPx,
     fontSize:      baseFontPx,
     smallFontSize: smallFontPx,
-    barWidth:      Math.max(1, (innerW / 100) * codeScale), // bar thickness
+    barWidth:      Math.max(1, (innerW / 100) * codeScale) * (Number(barcodeDarkness) || 1), // bar thickness
     printerDpi:    Number(printerDpi) || DEFAULT_PRINTER_DPI,
     pixelRatio:    pixelRatioForDpi(printerDpi),
   };
@@ -294,6 +296,18 @@ export const DEFAULT_BARCODE_LABEL = {
   columns: 1,
   contentScale: 1.0,
   codeScale: 1.0,
+  // Thickens the barcode's bars only (not its height/width footprint) — the
+  // one lever a web page has over how dark a barcode prints on a thermal
+  // printer. 1.0 = normal (JsBarcode's default bar width); higher = bolder/
+  // darker bars, useful when a print head hasn't fully warmed up yet (labels
+  // print lighter at the start of a long run, darker toward the end).
+  barcodeDarkness: 1.0,
+  // Enlarge only the price NUMBER (not caption or ₹) — MRP and Sale Price
+  // independently. 1.0 = no change. A per-field override
+  // (fieldStyles.showMrp.numberScale / fieldStyles.showSalePrice.numberScale,
+  // set in the zone editor) wins over these shop-wide defaults when > 0.
+  mrpScale: 1.0,
+  salePriceScale: 1.0,
   fieldOrder: [],               // ordered list of ALL_LABEL_FIELDS keys (derived from `zones`)
   fieldStyles: {},              // { [fieldKey]: { size, color } }
   fieldLabels: {},              // { [fieldKey]: customPrefixText }

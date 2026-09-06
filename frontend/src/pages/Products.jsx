@@ -81,7 +81,6 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
     quantity: product?.quantity || 0,
     supplier: product?.supplier || '',
     location: product?.location || '',
-    lowStockThreshold: product?.lowStockThreshold || 10,
     // New products are hidden from the web store by default; editing keeps the saved value
     isWebVisible: product ? product.isWebVisible === true : false,
     // Optional existing barcode (create only) — blank auto-generates one
@@ -154,10 +153,6 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-1">Initial Quantity</label>
           <Input type="number" value={form.quantity} onChange={set('quantity')} min="0" />
-        </div>
-        <div>
-          <label className="text-sm font-medium text-gray-700 block mb-1">Low Stock Threshold</label>
-          <Input type="number" value={form.lowStockThreshold} onChange={set('lowStockThreshold')} min="0" />
         </div>
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-1">Supplier</label>
@@ -399,9 +394,10 @@ export default function Products() {
     // Deactivated products are leftovers from a deleted purchase whose unit
     // was already sold — kept only for invoice history, not real stock.
     if (p.isActive === false) return <Badge variant="secondary">Deactivated</Badge>;
+    // No "Low Stock" state — every unit is its own qty:1 product, so a
+    // product is simply in stock or sold out, never "running low".
     const avail = p.quantity - p.reservedQty;
     if (avail <= 0) return <Badge variant="destructive">Out of Stock</Badge>;
-    if (avail <= p.lowStockThreshold) return <Badge variant="warning">Low Stock</Badge>;
     return <Badge variant="success">In Stock</Badge>;
   };
 

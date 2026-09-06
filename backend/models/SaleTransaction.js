@@ -44,9 +44,16 @@ const saleTransactionSchema = new mongoose.Schema(
     ],
     status: {
       type: String,
-      enum: ['COMPLETED', 'REFUNDED', 'PENDING'],
+      enum: ['COMPLETED', 'REFUNDED', 'PENDING', 'VOIDED'],
       default: 'COMPLETED',
     },
+    // Set only when an admin voids this bill (see voidSale) — the document is
+    // kept for GST/audit continuity (invoice numbers must never have gaps),
+    // just marked cancelled. Stock, loyalty points, and coupon usage are
+    // reversed at void time; see voidSale in salesController.js.
+    voidedAt: { type: Date, default: null },
+    voidedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
+    voidReason: { type: String, default: '' },
     soldBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     customerId: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', default: null },
     customerPhone: { type: String, default: '' },

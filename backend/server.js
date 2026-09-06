@@ -22,6 +22,7 @@ const saleReturnRoutes = require('./routes/saleReturns');
 const purchaseReturnRoutes = require('./routes/purchaseReturns');
 const staffRoutes = require('./routes/staff');
 const reportsRoutes = require('./routes/reports');
+const backupRoutes = require('./routes/backup');
 
 const app = express();
 const server = http.createServer(app);
@@ -65,6 +66,7 @@ app.use('/api/sale-returns', saleReturnRoutes);
 app.use('/api/purchase-returns', purchaseReturnRoutes);
 app.use('/api/staff', staffRoutes);
 app.use('/api/reports', reportsRoutes);
+app.use('/api/backup', backupRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', phase: 2 }));
 

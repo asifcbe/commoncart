@@ -62,7 +62,14 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
     // invisible dither on direct-thermal printers, and per-field/global color
     // pickers were a source of accidentally-grey labels. No override exists
     // anymore; every field renders #000000 regardless of saved config.
-    return { fontSize: baseFs * scale, color: '#000000', textAlign: s.align || zoneAlign };
+    // `bold` (opt-in, off by default) lays down extra ink per character —
+    // helps a field stay legible on a thermal head that hasn't fully warmed
+    // up yet (the light-then-dark fade across a long print run). Omitted
+    // entirely (not set to a falsy fontWeight) when off, so it never
+    // overrides a field's own hardcoded default weight (e.g. Item Name's 700)
+    // when spread after it — `{...st}` with `fontWeight: undefined` would
+    // otherwise wipe that default out.
+    return { fontSize: baseFs * scale, color: '#000000', textAlign: s.align || zoneAlign, ...(s.bold ? { fontWeight: 800 } : {}) };
   };
   const fLabel = (k) => {
     const labels = lbl?.fieldLabels || {};
@@ -166,6 +173,19 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
       const spSt = fStyle('showSalePrice', fontSize);
       const mrpPrefix = fLabel('showMrp');
       const spPrefix = fLabel('showSalePrice');
+      // MRP and Sale Price each scale their NUMBER independently:
+      //  - shop-wide default: lbl.mrpScale / lbl.salePriceScale (Settings sliders)
+      //  - per-field override: fieldStyles.showMrp.numberScale /
+      //    fieldStyles.showSalePrice.numberScale (zone editor), wins when > 0
+      // Captions ("MRP", "Sale Price:") and the ₹ symbol always stay at base size.
+      const numScale = (fieldKey, shopDefault) => {
+        const over = Number(fieldStyles?.[fieldKey]?.numberScale);
+        if (over > 0) return over;
+        const def = Number(shopDefault);
+        return def > 0 ? def : 1;
+      };
+      const mrpNumScale = numScale('showMrp', lbl?.mrpScale);
+      const spNumScale = numScale('showSalePrice', lbl?.salePriceScale);
       // Solid black + solid strike line, no opacity — a faded (opacity 0.5)
       // grey prints as an invisible dither on direct-thermal printers.
       const mrpColor = mrpSt.color || '#000000';
@@ -175,20 +195,28 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
         <div key={key} style={{ display: 'flex', alignItems: 'baseline', flexWrap: 'wrap', gap: 2, margin: '1px 0 0', justifyContent: priceJustify, width: '100%' }}>
           {drawMrp && (
             <span style={{
-              fontSize: mrpSt.fontSize,
               color: mrpColor,
               textDecoration: 'line-through',
               textDecorationColor: mrpColor,
               textDecorationThickness: 'from-font',
+              display: 'inline-flex', alignItems: 'baseline', gap: 1,
             }}>
-              {mrpPrefix != null ? (mrpPrefix ? `${mrpPrefix} ` : '') : 'MRP '}₹{Number(item.mrp).toLocaleString('en-IN')}
+              <span style={{ fontSize: mrpSt.fontSize }}>
+                {mrpPrefix != null ? (mrpPrefix ? `${mrpPrefix} ` : '') : 'MRP '}₹
+              </span>
+              <span style={{ fontSize: mrpSt.fontSize * mrpNumScale }}>{Number(item.mrp).toLocaleString('en-IN')}</span>
             </span>
           )}
-          {drawSp && (
-            <span style={{ fontWeight: 800, letterSpacing: '0.02em', fontSize: drawMrp ? spSt.fontSize * 1.05 : spSt.fontSize, color: spSt.color }}>
-              {spPrefix != null ? (spPrefix ? `${spPrefix} ` : '') : ''}₹{Number(item.salePrice).toLocaleString('en-IN')}
-            </span>
-          )}
+          {drawSp && (() => {
+            const amountFs = drawMrp ? spSt.fontSize * 1.05 : spSt.fontSize;
+            const prefixText = spPrefix != null ? (spPrefix ? `${spPrefix} ` : '') : '';
+            return (
+              <span style={{ fontWeight: 800, letterSpacing: '0.02em', color: spSt.color, display: 'inline-flex', alignItems: 'baseline', gap: 1 }}>
+                <span style={{ fontSize: amountFs }}>{prefixText}₹</span>
+                <span style={{ fontSize: amountFs * spNumScale }}>{Number(item.salePrice).toLocaleString('en-IN')}</span>
+              </span>
+            );
+          })()}
         </div>
       );
     }

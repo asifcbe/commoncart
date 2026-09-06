@@ -251,6 +251,32 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
             className="h-8 text-xs mb-1"
           />
           <p className="text-[0.65rem] text-gray-400 mb-2">Leave blank to hide label prefix</p>
+
+          {(expandedField === 'showMrp' || expandedField === 'showSalePrice') && (
+            <>
+              <p className="text-xs font-semibold text-gray-600 mb-1">Number Size</p>
+              <p className="text-[0.62rem] text-gray-400 mb-1">
+                Enlarges only this price's number (not its caption or the ₹ symbol). Blank/100% uses the shop-wide
+                {expandedField === 'showMrp' ? ' “MRP Number Size”' : ' “Sale Price Number Size”'} from Settings.
+              </p>
+              <div className="flex items-center gap-2 mb-2">
+                <input
+                  type="range" min="1" max="4" step="0.1"
+                  value={Number(fst.numberScale) > 0 ? Number(fst.numberScale) : 1}
+                  onChange={(e) => setFieldStyle(expandedField, 'numberScale', Number(e.target.value))}
+                  className="flex-1 cursor-pointer" style={{ accentColor: ACCENT }}
+                />
+                <span className="text-[0.62rem] font-bold w-9 text-right" style={{ color: ACCENT }}>
+                  {Math.round((Number(fst.numberScale) > 0 ? Number(fst.numberScale) : 1) * 100)}%
+                </span>
+                {Number(fst.numberScale) > 0 && (
+                  <button type="button" onClick={() => setFieldStyle(expandedField, 'numberScale', 0)}
+                    className="text-[0.6rem] text-gray-400 hover:text-gray-600 underline">reset</button>
+                )}
+              </div>
+            </>
+          )}
+
           <p className="text-xs font-semibold text-gray-600 mb-1">Size</p>
           <div className="flex gap-1 flex-wrap mb-2">
             {[['xs', 'XS'], ['sm', 'S'], ['md', 'M'], ['lg', 'L'], ['xl', 'XL'], ['2xl', '2XL']].map(([sz, label]) => {
@@ -264,6 +290,29 @@ export default function ZoneLayoutEditor({ lbl, setLbl, zones, setZones }) {
                   style={{
                     border: `1px solid ${active ? ACCENT : '#e5e7eb'}`,
                     fontWeight: active ? 700 : 400,
+                    background: active ? 'rgba(13,148,136,0.12)' : 'transparent',
+                    color: active ? ACCENT : '#6b7280',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="text-xs font-semibold text-gray-600 mb-1 mt-2">Weight</p>
+          <p className="text-[0.62rem] text-gray-400 mb-1">Bolder text lays down more ink — helps a field stay dark on thermal printers, especially early in a long print run before the head warms up.</p>
+          <div className="flex gap-1 flex-wrap mb-2">
+            {[[false, 'Normal'], [true, 'Bold']].map(([val, label]) => {
+              const active = !!fst.bold === val;
+              return (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setFieldStyle(expandedField, 'bold', val)}
+                  className="flex-1 text-center py-1 px-1 rounded text-[0.62rem]"
+                  style={{
+                    border: `1px solid ${active ? ACCENT : '#e5e7eb'}`,
+                    fontWeight: val ? 800 : 400,
                     background: active ? 'rgba(13,148,136,0.12)' : 'transparent',
                     color: active ? ACCENT : '#6b7280',
                   }}

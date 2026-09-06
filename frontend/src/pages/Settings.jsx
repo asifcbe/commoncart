@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Plus, Trash2, Edit2, UserCog, AlertTriangle, ShieldAlert, Eye, EyeOff, Star, Clock, Zap,
   Building2, FolderTree, PackageX, X, Printer, Palette, User, Hash, Receipt,
-  ChevronRight, Menu, Wallet,
+  ChevronRight, Menu, Wallet, DownloadCloud,
 } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 import { useToast } from '../components/ui/Toast';
@@ -293,6 +293,8 @@ export default function Settings() {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [creditConfig, setCreditConfig] = useState({ pointsPerAmount: 1, perRupees: 1000, pointValue: 1 });
   const [savingCredit, setSavingCredit] = useState(false);
+  const [backupSummary, setBackupSummary] = useState(null);
+  const [downloadingBackup, setDownloadingBackup] = useState(false);
 
   const DEFAULT_STEPS = [
     { days: 30,  label: 'Fresh (30 days)',           percent: 0  },
@@ -406,6 +408,33 @@ export default function Settings() {
     api.get('/settings/barcode-config').then(({ data }) => { setBarcodeConfig(data.config); setBarcodeNextVal(data.nextBarcode); }).catch(() => {});
     api.get('/settings/doc-numbering-config').then(({ data }) => setDocNumbering((c) => ({ ...c, ...data.config }))).catch(() => {});
   }, []);
+
+  // Only fetched when the Backup tab is actually opened — a full collection
+  // scan (estimatedDocumentCount per collection) isn't worth doing on every
+  // Settings page load.
+  useEffect(() => {
+    if (tab === 'backup' && !backupSummary) {
+      api.get('/backup/summary').then(({ data }) => setBackupSummary(data)).catch(() => {});
+    }
+  }, [tab, backupSummary]);
+
+  const handleDownloadBackup = async () => {
+    setDownloadingBackup(true);
+    try {
+      const { data } = await api.get('/backup/download', { responseType: 'blob' });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `commoncart-backup-${stamp}.ndjson.gz`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast({ message: 'Backup downloaded', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Failed to create backup', type: 'error' });
+    } finally {
+      setDownloadingBackup(false);
+    }
+  };
 
   // ─── Variants & sizes handlers ───
   const addToList = (list, setList, value, setValue) => {
@@ -701,6 +730,12 @@ export default function Settings() {
       items: [
         { id: 'aging', label: 'Price Aging', icon: Clock },
         { id: 'autodelete', label: 'Auto-Delete', icon: PackageX },
+      ],
+    }] : []),
+    ...(isAdmin ? [{
+      label: 'Data',
+      items: [
+        { id: 'backup', label: 'Backup', icon: DownloadCloud },
       ],
     }] : []),
     ...(isAdmin ? [{
@@ -1260,7 +1295,7 @@ export default function Settings() {
                     <div className="flex justify-center border border-gray-200 rounded-lg p-4" style={{ background: '#f8f8f8' }}>
                       <BarcodeLabel
                         item={SAMPLE_LABEL_ITEM}
-                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale, labelPrint.printerDpi), width: 'auto', height: 'auto' }}
+                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale, labelPrint.printerDpi, labelPrint.barcodeDarkness), width: 'auto', height: 'auto' }}
                         lbl={labelPrint}
                       />
                     </div>
@@ -1318,6 +1353,45 @@ export default function Settings() {
                     <input type="range" min="0.3" max="3.0" step="0.05" value={labelPrint.codeScale ?? 1}
                       onChange={(e) => setLabelPrint((c) => ({ ...c, codeScale: Number(e.target.value) }))}
                       className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">Barcode Darkness</label>
+                      <span className="text-xs font-bold text-teal-600">{Math.round((labelPrint.barcodeDarkness ?? 1) * 100)}%</span>
+                    </div>
+                    <input type="range" min="1.0" max="2.5" step="0.1" value={labelPrint.barcodeDarkness ?? 1}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, barcodeDarkness: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                    <p className="text-[0.65rem] text-gray-400 mt-1">
+                      Thickens the barcode's bars (not its overall size) so it prints darker and more consistently —
+                      raise this if labels come out light, especially early in a long print run before the printer
+                      head warms up. Doesn't affect QR codes.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">MRP Number Size</label>
+                      <span className="text-xs font-bold text-teal-600">{Math.round((labelPrint.mrpScale ?? 1) * 100)}%</span>
+                    </div>
+                    <input type="range" min="1.0" max="4.0" step="0.1"
+                      value={labelPrint.mrpScale ?? 1}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, mrpScale: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">Sale Price Number Size</label>
+                      <span className="text-xs font-bold text-teal-600">{Math.round((labelPrint.salePriceScale ?? 1) * 100)}%</span>
+                    </div>
+                    <input type="range" min="1.0" max="4.0" step="0.1"
+                      value={labelPrint.salePriceScale ?? 1}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, salePriceScale: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                    <p className="text-[0.65rem] text-gray-400 mt-1">
+                      Enlarges only the price number (not the caption or the ₹ symbol) so it stands out. MRP and Sale
+                      Price scale independently. 100% = same size as the label's normal text. Each price's chip in the
+                      layout editor above can override this individually.
+                    </p>
                   </div>
 
                   <div className="flex justify-end pt-2 border-t">
@@ -1790,6 +1864,46 @@ export default function Settings() {
                   <span className="text-xs text-gray-400">Apply Now immediately sets discount prices on all products that match any aging step.</span>
                 </div>
               </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'backup' && (
+        <div className="max-w-2xl">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <DownloadCloud size={16} className="text-blue-500" /> Backup Data
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-gray-500">
+                Downloads a complete, read-only snapshot of every collection in the database (products, sales,
+                purchases, customers, settings, and more) as a single compressed file. Nothing is changed on the
+                server — this only reads data.
+              </p>
+              {backupSummary && (
+                <div className="text-xs text-gray-500 border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
+                  <p className="font-semibold text-gray-600 mb-1">Included ({backupSummary.collections.length} collections):</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                    {backupSummary.collections.map((c) => (
+                      <div key={c.name} className="flex justify-between">
+                        <span>{c.name}</span>
+                        <span className="font-mono text-gray-400">{c.count.toLocaleString('en-IN')}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Button onClick={handleDownloadBackup} disabled={downloadingBackup}>
+                {downloadingBackup ? <Spinner size="sm" className="mr-2" /> : <DownloadCloud size={16} className="mr-2" />}
+                {downloadingBackup ? 'Preparing backup…' : 'Download Backup'}
+              </Button>
+              <p className="text-[0.65rem] text-gray-400">
+                Keep downloaded backups somewhere safe — the file contains all customer, sales, and account data.
+                There is no restore option in the app yet; restoring a backup requires a database administrator.
+              </p>
             </CardContent>
           </Card>
         </div>

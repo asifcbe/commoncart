@@ -61,6 +61,13 @@ const DEFAULT_LABEL_PRINT = {
   columns: 1,
   contentScale: 1.0,
   codeScale: 1.0,
+  // Thickens only the barcode's bars (not its footprint) so it prints darker
+  // on thermal printers. 1.0 = normal; higher = bolder bars.
+  barcodeDarkness: 1.0,
+  // Enlarge only the price number (not caption or ₹) — MRP and Sale Price
+  // independently. 1.0 = no change. Per-field overrides live in fieldStyles.
+  mrpScale: 1.0,
+  salePriceScale: 1.0,
   // CommonCart-only. Target printer resolution in dpi (152/200/203/300/600 —
   // see frontend PRINTER_DPI_OPTIONS). Barcode/QR images render at this
   // resolution instead of the browser's fixed 96dpi default so they print
@@ -588,10 +595,6 @@ exports.getLabelPrintConfig = async (_req, res) => {
   }
 };
 
-// Free-form passthrough (Mixed in AppSettings) — the label builder's field
-// list/order/styles evolve on the frontend without needing a backend
-// migration each time, same as DigitZebra's local-only config store. Basic
-// size/type clamping only, no fixed key whitelist.
 exports.updateLabelPrintConfig = async (req, res) => {
   try {
     const b = req.body || {};
@@ -603,6 +606,9 @@ exports.updateLabelPrintConfig = async (req, res) => {
       columns: Math.max(1, Math.min(8, Number(b.columns) || DEFAULT_LABEL_PRINT.columns)),
       contentScale: Math.max(0.3, Math.min(3, Number(b.contentScale) || DEFAULT_LABEL_PRINT.contentScale)),
       codeScale: Math.max(0.3, Math.min(3, Number(b.codeScale) || DEFAULT_LABEL_PRINT.codeScale)),
+      barcodeDarkness: Math.max(1, Math.min(4, Number(b.barcodeDarkness) || DEFAULT_LABEL_PRINT.barcodeDarkness)),
+      mrpScale: Math.max(1, Math.min(5, Number(b.mrpScale) || DEFAULT_LABEL_PRINT.mrpScale)),
+      salePriceScale: Math.max(1, Math.min(5, Number(b.salePriceScale) || DEFAULT_LABEL_PRINT.salePriceScale)),
       printerDpi: Number(b.printerDpi) || DEFAULT_LABEL_PRINT.printerDpi,
       fieldOrder: Array.isArray(b.fieldOrder) ? b.fieldOrder.slice(0, 40) : DEFAULT_LABEL_PRINT.fieldOrder,
       fieldStyles: (b.fieldStyles && typeof b.fieldStyles === 'object') ? b.fieldStyles : {},

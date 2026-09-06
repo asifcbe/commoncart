@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Package, ShoppingCart, TrendingUp, AlertTriangle, ArrowRight } from 'lucide-react';
+import { Package, ShoppingCart, TrendingUp, ArrowRight } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import { Link } from 'react-router-dom';
 import api from '../utils/api';
@@ -8,7 +8,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import Badge from '../components/ui/Badge';
 import Spinner from '../components/ui/Spinner';
 
-const COLORS = ['#22c55e', '#f59e0b', '#ef4444'];
+const COLORS = ['#22c55e', '#ef4444'];
 
 function StatCard({ title, value, sub, icon: Icon, color = 'blue' }) {
   const colors = {
@@ -59,9 +59,11 @@ export default function Dashboard() {
     <div className="text-center text-gray-500 py-20">Failed to load dashboard data.</div>
   );
 
+  // Low Stock isn't shown — every unit is its own qty:1 product, so a
+  // "running low" threshold doesn't mean anything here; a product is simply
+  // in stock or sold out.
   const pieData = [
-    { name: 'In Stock', value: stats.stockHealth.inStock },
-    { name: 'Low Stock', value: stats.stockHealth.lowStock },
+    { name: 'In Stock', value: stats.stockHealth.inStock + stats.stockHealth.lowStock },
     { name: 'Out of Stock', value: stats.stockHealth.outOfStock },
   ];
 
@@ -73,7 +75,7 @@ export default function Dashboard() {
       </div>
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <StatCard title="Total Products" value={stats.totalProducts} icon={Package} color="blue" />
         <StatCard
           title="Today's Sales"
@@ -92,13 +94,6 @@ export default function Dashboard() {
           }
           icon={TrendingUp}
           color="blue"
-        />
-        <StatCard
-          title="Low Stock Alerts"
-          value={stats.lowStockCount}
-          sub="items need restocking"
-          icon={AlertTriangle}
-          color="yellow"
         />
       </div>
 
@@ -165,26 +160,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
-
-      {/* Low Stock Alert */}
-      {stats.lowStockCount > 0 && (
-        <Card className="border-yellow-200 bg-yellow-50">
-          <CardContent className="pt-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <AlertTriangle size={20} className="text-yellow-600" />
-                <div>
-                  <p className="font-medium text-yellow-800">{stats.lowStockCount} items are running low on stock</p>
-                  <p className="text-xs text-yellow-600">Check inventory and restock soon</p>
-                </div>
-              </div>
-              <Link to="/inventory" className="text-sm text-yellow-700 font-medium underline">
-                View low stock
-              </Link>
-            </div>
-          </CardContent>
-        </Card>
-      )}
     </div>
   );
 }

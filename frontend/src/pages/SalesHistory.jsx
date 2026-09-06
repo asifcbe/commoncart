@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
   ChevronLeft, ChevronRight, Eye, Printer,
   RefreshCw, Minus, Plus, Search,
-  Edit2, CheckCircle, MessageCircle, ScanLine, FileText, Wrench, Archive, Camera,
+  Edit2, CheckCircle, MessageCircle, ScanLine, FileText, Wrench, Archive, Camera, Trash2,
 } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
@@ -107,8 +107,10 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   const toast = useToast();
   const navigate = useNavigate();
   const allowManage = canManage(useAuthStore.getState().user);
+  const isAdmin = useAuthStore.getState().user?.role === 'ADMIN';
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [voiding, setVoiding] = useState(false);
 
   // Edit mode — metadata only (payment method, note, customer). Item/price
   // edits are never allowed here — use Return / Exchange instead.
@@ -198,6 +200,24 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to update sale', type: 'error' });
     } finally { setSavingEdit(false); }
+  };
+
+  // Void — admin only. Keeps the bill (never hard-deleted, so invoice
+  // numbering stays gap-free for GST/audit), reverses stock + loyalty points
+  // + coupon usage server-side. Refused by the backend if a Return/Exchange/
+  // Replace session already exists against this bill.
+  const handleVoidSale = async () => {
+    if (!window.confirm(`Void bill ${sale.transactionId}? This restores its stock and reverses any loyalty points / coupon usage. The bill stays on record, marked Voided.`)) return;
+    const reason = window.prompt('Reason for voiding this bill (optional):', '') || '';
+    setVoiding(true);
+    try {
+      const { data: res } = await api.post(`/sales/${saleId}/void`, { reason });
+      toast({ message: `Bill ${sale.transactionId} voided`, type: 'success' });
+      setData((d) => ({ ...d, sale: { ...d.sale, ...res.sale } }));
+      onDeleted?.();
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Failed to void sale', type: 'error' });
+    } finally { setVoiding(false); }
   };
 
   // ── Return/Exchange session ──
@@ -296,7 +316,10 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
             ) : (
               <>
                 <div><span className="text-gray-500">Staff:</span> {sale.soldBy?.name || '—'}</div>
-                <div><span className="text-gray-500">Status:</span> <Badge variant={sale.status === 'COMPLETED' ? 'success' : 'warning'}>{sale.status}</Badge></div>
+                <div><span className="text-gray-500">Status:</span> <Badge variant={sale.status === 'COMPLETED' ? 'success' : sale.status === 'VOIDED' ? 'destructive' : 'warning'}>{sale.status}</Badge></div>
+                {sale.status === 'VOIDED' && sale.voidReason && (
+                  <div className="col-span-2 text-xs text-red-600">Void reason: {sale.voidReason}</div>
+                )}
                 <div>
                   <span className="text-gray-500">Customer:</span>{' '}
                   {sale.customer?.name
@@ -563,9 +586,14 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
 
           <div className="flex justify-between items-center pt-2 border-t">
             <div className="flex gap-2">
-              {!isOrder && !editing && allowManage && (
+              {!isOrder && !editing && allowManage && sale.status !== 'VOIDED' && (
                 <Button variant="outline" size="sm" onClick={startEdit} className="text-blue-600 border-blue-300 hover:bg-blue-50">
                   <Edit2 size={13} className="mr-1.5" /> Edit Details
+                </Button>
+              )}
+              {!isOrder && !editing && isAdmin && sale.status !== 'VOIDED' && (
+                <Button variant="outline" size="sm" onClick={handleVoidSale} disabled={voiding} className="text-red-600 border-red-300 hover:bg-red-50">
+                  {voiding ? <Spinner size="sm" className="mr-1.5" /> : <Trash2 size={13} className="mr-1.5" />} Void Bill
                 </Button>
               )}
               {!editing && (() => {
@@ -1188,7 +1216,7 @@ export default function SalesHistory() {
                               <Badge variant={s.paymentStatus === 'PAID' ? 'success' : 'warning'} className="text-xs">{s.paymentStatus}</Badge>
                             </div>
                           ) : (
-                            <Badge variant={s.status === 'COMPLETED' ? 'success' : 'warning'}>{s.status}</Badge>
+                            <Badge variant={s.status === 'COMPLETED' ? 'success' : s.status === 'VOIDED' ? 'destructive' : 'warning'}>{s.status}</Badge>
                           )}
                         </td>
                         <td className="px-4 py-3">

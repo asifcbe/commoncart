@@ -568,7 +568,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     if (!dp && dp !== 0) return null;
     const d = Number(dp), p = Number(price);
     if (d <= 0) return null;
-    if (p > 0 && d >= p) return 'Must be less than selling price';
+    if (p > 0 && d >= p) return 'Must be less than MRP';
     return null;
   };
 
@@ -765,8 +765,6 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     <Input type="number" min="0" max="100" step="0.01" value={prodGstPercent} onChange={(e) => setProdGstPercent(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 12" /></div>
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">Cost Price (₹)</label>
                     <Input type="number" min="0" step="0.01" value={prodCostPrice} onChange={(e) => setProdCostPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="0.00" /></div>
-                  <div><label className="text-xs font-medium text-gray-600 block mb-1">MRP (₹) *</label>
-                    <Input type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="0.00" /></div>
                   <div>
                     <label className="text-xs font-medium text-gray-600 block mb-1">Discount Price (₹) <span className="text-[10px] text-gray-400 font-normal">strikes original on label</span></label>
                     <Input type="number" min="0" step="0.01" value={prodDiscountPrice}
@@ -774,6 +772,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                       className={dErrGlobal ? 'border-red-400' : ''} />
                     {dErrGlobal && <p className="text-xs text-red-500 mt-0.5">{dErrGlobal}</p>}
                   </div>
+                  <div><label className="text-xs font-medium text-gray-600 block mb-1">MRP (₹) *</label>
+                    <Input type="number" min="0" step="0.01" value={prodPrice} onChange={(e) => setProdPrice(e.target.value)} onKeyDown={productStepEnterNav} placeholder="0.00" /></div>
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">Total Quantity *</label>
                     <Input type="number" min="1" max="200" value={totalQty}
                       onChange={(e) => setTotalQty(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 10" /></div>
@@ -829,10 +829,10 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                           Cost (₹) <span className="block font-normal text-gray-400 text-[10px]">blank = default</span>
                         </th>
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">
-                          Sell (₹) <span className="block font-normal text-gray-400 text-[10px]">blank = default</span>
+                          Discount (₹) <span className="block font-normal text-gray-400 text-[10px]">blank = default</span>
                         </th>
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">
-                          Discount (₹) <span className="block font-normal text-gray-400 text-[10px]">blank = default</span>
+                          MRP (₹) <span className="block font-normal text-gray-400 text-[10px]">blank = default</span>
                         </th>
                         <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Barcodes</th>
                       </tr>
@@ -871,17 +871,11 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                               placeholder={prodCostPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
-                            <Input type="number" min="0" step="0.01" value={row.price}
-                              onChange={(e) => updateVariant(idx, 'price', e.target.value)}
-                              onKeyDown={variantsStepEnterNav}
-                              placeholder={prodPrice || '0.00'} className="h-8 text-sm w-24" />
-                          </td>
-                          <td className="px-3 py-2">
                             {(() => {
                               const dp = row.discountPrice;
                               const effectiveSell = row.price !== '' ? Number(row.price) : (Number(prodPrice) || 0);
                               const dpNum = dp !== '' ? Number(dp) : null;
-                              const dpErr = dpNum != null && dpNum > 0 && effectiveSell > 0 && dpNum >= effectiveSell ? 'Must be < sell price' : null;
+                              const dpErr = dpNum != null && dpNum > 0 && effectiveSell > 0 && dpNum >= effectiveSell ? 'Must be < MRP' : null;
                               return (
                                 <div>
                                   <Input type="number" min="0" step="0.01" value={row.discountPrice}
@@ -893,6 +887,12 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                                 </div>
                               );
                             })()}
+                          </td>
+                          <td className="px-3 py-2">
+                            <Input type="number" min="0" step="0.01" value={row.price}
+                              onChange={(e) => updateVariant(idx, 'price', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
+                              placeholder={prodPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
                             {loadingRowIdx === idx
@@ -945,16 +945,16 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                               placeholder={prodCostPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
-                            <Input type="number" min="0" step="0.01" value={draft.price}
-                              onChange={(e) => updateDraft(di, 'price', e.target.value)}
-                              onKeyDown={variantsStepEnterNav}
-                              placeholder={prodPrice || '0.00'} className="h-8 text-sm w-24" />
-                          </td>
-                          <td className="px-3 py-2">
                             <Input type="number" min="0" step="0.01" value={draft.discountPrice}
                               onChange={(e) => updateDraft(di, 'discountPrice', e.target.value)}
                               onKeyDown={variantsStepEnterNav}
                               placeholder={prodDiscountPrice || 'None'} className="h-8 text-sm w-24" />
+                          </td>
+                          <td className="px-3 py-2">
+                            <Input type="number" min="0" step="0.01" value={draft.price}
+                              onChange={(e) => updateDraft(di, 'price', e.target.value)}
+                              onKeyDown={variantsStepEnterNav}
+                              placeholder={prodPrice || '0.00'} className="h-8 text-sm w-24" />
                           </td>
                           <td className="px-3 py-2">
                             {loadingDraftIdx === di
@@ -977,7 +977,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                   </table>
                 </div>
                 <p className="text-xs text-gray-400 mt-2">
-                  Each unit gets its own unique barcode. Leave Cost/Sell Price blank to use defaults from Step 1.
+                  Each unit gets its own unique barcode. Leave Cost/MRP blank to use defaults from Step 1.
                 </p>
                 <div className="flex justify-between items-center mt-4 pt-3 border-t">
                   <Button size="sm" variant="ghost" onClick={() => setPurchaseStep('product')}>Back</Button>
@@ -1092,8 +1092,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                               {variantSelectorEnabled && <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Variant</th>}
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left">Size</th>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">Cost (₹)</th>
-                              <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">Sell (₹)</th>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">Discount (₹)</th>
+                              <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-28">MRP (₹)</th>
                               <th className="px-3 py-2 text-xs font-semibold text-gray-500 text-left w-20">Status</th>
                             </tr>
                           </thead>
@@ -1150,12 +1150,6 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                                   </td>
                                   <td className="px-3 py-2">
                                     {sold
-                                      ? <span className="text-xs text-gray-500">₹{Number(price).toFixed(2)}</span>
-                                      : <Input type="number" min="0" step="0.01" value={price}
-                                          onChange={(e) => setOv('price', e.target.value)} onKeyDown={enterNav} className="h-8 text-sm w-24" />}
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    {sold
                                       ? <span className="text-xs text-gray-500">{dp ? `₹${Number(dp).toFixed(2)}` : '—'}</span>
                                       : <div>
                                           <Input type="number" min="0" step="0.01" value={dp}
@@ -1164,6 +1158,12 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                                             placeholder="None" className={`h-8 text-sm w-24 ${dErr ? 'border-red-400' : ''}`} />
                                           {dErr && <div className="text-[10px] text-red-500 mt-0.5">{dErr}</div>}
                                         </div>}
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    {sold
+                                      ? <span className="text-xs text-gray-500">₹{Number(price).toFixed(2)}</span>
+                                      : <Input type="number" min="0" step="0.01" value={price}
+                                          onChange={(e) => setOv('price', e.target.value)} onKeyDown={enterNav} className="h-8 text-sm w-24" />}
                                   </td>
                                   <td className="px-3 py-2">
                                     {sold
@@ -1374,8 +1374,8 @@ function PurchaseDetailModal({ purchaseId, onClose }) {
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Size</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Qty</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Cost/Unit</th>
-                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Sell Price</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Discount</th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">MRP</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Subtotal</th>
                   <th className="px-3 py-2 text-left text-xs font-semibold text-gray-500">Action</th>
                 </tr>
@@ -1393,8 +1393,8 @@ function PurchaseDetailModal({ purchaseId, onClose }) {
                       <td className="px-3 py-2.5 text-gray-500">{item.size || '—'}</td>
                       <td className="px-3 py-2.5">{item.qty}</td>
                       <td className="px-3 py-2.5">₹{item.costPrice.toFixed(2)}</td>
-                      <td className="px-3 py-2.5">{item.price != null ? `₹${item.price.toFixed(2)}` : '—'}</td>
                       <td className="px-3 py-2.5">{item.discountPrice != null ? <span className="text-red-600 font-semibold">₹{item.discountPrice.toFixed(2)}</span> : <span className="text-gray-300">—</span>}</td>
+                      <td className="px-3 py-2.5">{item.price != null ? `₹${item.price.toFixed(2)}` : '—'}</td>
                       <td className="px-3 py-2.5 font-medium">₹{(item.costPrice * item.qty).toFixed(2)}</td>
                       <td className="px-3 py-2.5">
                         {activeReturnIdx === i ? (

@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Minus, History, Search, Package, Layers, IndianRupee } from 'lucide-react';
-import useProductStore from '../store/useProductStore';
+import { AlertTriangle, Plus, Minus, History, Search, Package, IndianRupee } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 import { canViewCostPrice } from '../config/permissions';
 import { useToast } from '../components/ui/Toast';
@@ -14,6 +13,27 @@ import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card'
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import { formatDateTime } from '../utils/date';
+
+// Inventory needs every active product in memory at once (it does its own
+// client-side totals/grouping/out-of-stock filtering) — unlike Products.jsx,
+// which intentionally paginates. A single capped fetchProducts({ limit: N })
+// silently truncated the dataset once the catalog passed N products (this was
+// the "Inventory shows fewer/wrong products than Products" bug). This walks
+// every page the backend reports (via `pages`) using the largest page size
+// the API accepts in one call, so it always has the true full set regardless
+// of catalog size.
+const FETCH_PAGE_SIZE = 1000;
+async function fetchAllActiveProducts() {
+  const first = await api.get('/products', { params: { limit: FETCH_PAGE_SIZE, page: 1, isActive: true } });
+  let all = first.data.products;
+  const pages = first.data.pages || 1;
+  for (let page = 2; page <= pages; page++) {
+    // eslint-disable-next-line no-await-in-loop
+    const { data } = await api.get('/products', { params: { limit: FETCH_PAGE_SIZE, page, isActive: true } });
+    all = all.concat(data.products);
+  }
+  return all;
+}
 
 function RestockForm({ product, onDone, onClose }) {
   const [qty, setQty] = useState('');
@@ -119,12 +139,18 @@ function AdjustForm({ product, onDone, onClose }) {
 
 export default function Inventory() {
   const toast = useToast();
-  const { products, fetchProducts, loading } = useProductStore();
   const { user } = useAuthStore();
   const showCost = canViewCostPrice(user);
+  // Inventory keeps its own local copy of the full active-product set rather
+  // than sharing Products.jsx's paginated useProductStore — Inventory needs
+  // ALL products at once (for its own client-side totals/grouping), while
+  // Products.jsx deliberately paginates; sharing one store's `products` array
+  // between the two would make each page stomp on the other's data.
+  const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [movements, setMovements] = useState([]);
   const [movLoading, setMovLoading] = useState(false);
-  const [tab, setTab] = useState(showCost ? 'overview' : 'low-stock');
+  const [tab, setTab] = useState(showCost ? 'overview' : 'out-of-stock');
   const [restockProduct, setRestockProduct] = useState(null);
   const [adjustProduct, setAdjustProduct] = useState(null);
   const [search, setSearch] = useState('');
@@ -136,7 +162,21 @@ export default function Inventory() {
   const [ovStockStatus, setOvStockStatus] = useState(''); // '', 'in', 'low', 'out'
   const [ovSplitVariant, setOvSplitVariant] = useState(false); // show Variant/Size columns
 
-  useEffect(() => { fetchProducts({ limit: 200 }); }, []);
+  // isActive: true matches Products.jsx's default — without it, deactivated
+  // Product docs (kept only for invoice history after a purchase is deleted
+  // post-sale) leaked into every Inventory total/breakdown/out-of-stock count,
+  // which is why Inventory and Products disagreed. fetchAllActiveProducts
+  // pages through the full catalog instead of a hardcoded limit — with 1600+
+  // products, a single capped fetch was silently truncating the dataset.
+  const loadProducts = () => {
+    setLoading(true);
+    fetchAllActiveProducts()
+      .then(setProducts)
+      .catch(() => toast({ message: 'Failed to load products', type: 'error' }))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadProducts(); }, []);
 
   const loadMovements = () => {
     api.get('/inventory/movements', { params: { limit: 100, type: typeFilter || undefined } })
@@ -152,25 +192,24 @@ export default function Inventory() {
   const invBusy = !!(restockProduct || adjustProduct);
   useAutoRefresh(() => {
     if (invBusy) return;
-    fetchProducts({ limit: 200 });
+    loadProducts();
     if (tab === 'movements') loadMovements();
   }, 30000, [tab, typeFilter, invBusy]);
 
-  const lowStockProducts = products.filter((p) => {
-    const avail = p.quantity - p.reservedQty;
-    return avail <= p.lowStockThreshold;
-  });
+  // No "low stock" — every unit is its own qty:1 product, so a product is
+  // simply in stock or sold out; this tab surfaces the ones that need restocking.
+  const outOfStockProducts = products.filter((p) => (p.quantity - p.reservedQty) <= 0);
 
   const allProducts = products.filter((p) =>
     !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.SKU?.includes(search)
   );
 
   // ─── Overview: cost valuation of pending (on-hand) stock ───
+  // No "low" status — every unit is its own qty:1 product, so it's simply
+  // in stock or sold out, never "running low".
   const stockStatusOf = (p) => {
     const avail = p.quantity - p.reservedQty;
-    if (avail <= 0) return 'out';
-    if (avail <= p.lowStockThreshold) return 'low';
-    return 'in';
+    return avail <= 0 ? 'out' : 'in';
   };
 
   // Category list (only active products) and the sub-categories of the picked category
@@ -237,7 +276,7 @@ export default function Inventory() {
   const handleDone = () => {
     setRestockProduct(null);
     setAdjustProduct(null);
-    fetchProducts({ limit: 200 });
+    loadProducts();
     if (tab === 'movements') {
       setMovLoading(true);
       api.get('/inventory/movements', { params: { limit: 100 } })
@@ -249,7 +288,7 @@ export default function Inventory() {
 
   const tabs = [
     ...(showCost ? [{ id: 'overview', label: 'Overview' }] : []),
-    { id: 'low-stock', label: `Low Stock (${lowStockProducts.length})` },
+    { id: 'out-of-stock', label: `Out of Stock (${outOfStockProducts.length})` },
     { id: 'all', label: 'All Products' },
     { id: 'movements', label: 'Stock Movements' },
   ];
@@ -307,7 +346,6 @@ export default function Inventory() {
                   <Select value={ovStockStatus} onChange={(e) => setOvStockStatus(e.target.value)} className="w-44 h-9 text-sm">
                     <option value="">All</option>
                     <option value="in">In Stock</option>
-                    <option value="low">Low Stock</option>
                     <option value="out">Out of Stock</option>
                   </Select>
                 </div>
@@ -326,7 +364,7 @@ export default function Inventory() {
           </Card>
 
           {/* Summary cards */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <Card><CardContent className="pt-4">
               <div className="flex items-center gap-3">
                 <div className="h-10 w-10 rounded-lg bg-blue-50 flex items-center justify-center"><IndianRupee size={18} className="text-blue-600" /></div>
@@ -342,15 +380,6 @@ export default function Inventory() {
                 <div>
                   <div className="text-xs text-gray-500">Units Pending in Stock</div>
                   <div className="text-xl font-bold text-gray-900">{ovTotals.units.toLocaleString('en-IN')}</div>
-                </div>
-              </div>
-            </CardContent></Card>
-            <Card><CardContent className="pt-4">
-              <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-lg bg-indigo-50 flex items-center justify-center"><Layers size={18} className="text-indigo-600" /></div>
-                <div>
-                  <div className="text-xs text-gray-500">Distinct Products (SKUs)</div>
-                  <div className="text-xl font-bold text-gray-900">{ovTotals.skus.toLocaleString('en-IN')}</div>
                 </div>
               </div>
             </CardContent></Card>
@@ -436,44 +465,35 @@ export default function Inventory() {
         </div>
       )}
 
-      {tab === 'low-stock' && (
+      {tab === 'out-of-stock' && (
         <div className="space-y-4">
-          {lowStockProducts.length === 0 ? (
-            <Card><CardContent className="text-center py-12 text-gray-400">All products have healthy stock levels</CardContent></Card>
+          {outOfStockProducts.length === 0 ? (
+            <Card><CardContent className="text-center py-12 text-gray-400">Everything is in stock</CardContent></Card>
           ) : (
-            lowStockProducts.map((p) => {
-              const avail = p.quantity - p.reservedQty;
-              return (
-                <Card key={p._id} className="border-yellow-200">
-                  <CardContent className="pt-4">
-                    <div className="flex items-center justify-between flex-wrap gap-4">
-                      <div className="flex items-center gap-3">
-                        <AlertTriangle size={18} className={avail <= 0 ? 'text-red-500' : 'text-yellow-500'} />
-                        <div>
-                          <div className="font-medium">{p.name}</div>
-                          <div className="text-xs text-gray-500">SKU: {p.SKU} | Threshold: {p.lowStockThreshold}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-center">
-                          <div className={`text-xl font-bold ${avail <= 0 ? 'text-red-600' : 'text-yellow-600'}`}>{avail}</div>
-                          <div className="text-xs text-gray-400">available</div>
-                        </div>
-                        <Badge variant={avail <= 0 ? 'destructive' : 'warning'}>
-                          {avail <= 0 ? 'Out of Stock' : 'Low Stock'}
-                        </Badge>
-                        <Button size="sm" variant="success" onClick={() => setRestockProduct(p)}>
-                          <Plus size={14} className="mr-1" /> Restock
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => setAdjustProduct(p)}>
-                          Adjust
-                        </Button>
+            outOfStockProducts.map((p) => (
+              <Card key={p._id} className="border-red-200">
+                <CardContent className="pt-4">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <div className="flex items-center gap-3">
+                      <AlertTriangle size={18} className="text-red-500" />
+                      <div>
+                        <div className="font-medium">{p.name}</div>
+                        <div className="text-xs text-gray-500">SKU: {p.SKU}</div>
                       </div>
                     </div>
-                  </CardContent>
-                </Card>
-              );
-            })
+                    <div className="flex items-center gap-4">
+                      <Badge variant="destructive">Out of Stock</Badge>
+                      <Button size="sm" variant="success" onClick={() => setRestockProduct(p)}>
+                        <Plus size={14} className="mr-1" /> Restock
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setAdjustProduct(p)}>
+                        Adjust
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            ))
           )}
         </div>
       )}
@@ -490,14 +510,14 @@ export default function Inventory() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">
                 <tr>
-                  {['Product', 'SKU', 'Total Qty', 'Reserved', 'Available', 'Threshold', 'Actions'].map((h) => (
+                  {['Product', 'SKU', 'Total Qty', 'Reserved', 'Available', 'Actions'].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody className="divide-y">
                 {loading ? (
-                  <tr><td colSpan={7} className="py-8 text-center"><Spinner /></td></tr>
+                  <tr><td colSpan={6} className="py-8 text-center"><Spinner /></td></tr>
                 ) : allProducts.map((p) => {
                   const avail = p.quantity - p.reservedQty;
                   return (
@@ -507,11 +527,10 @@ export default function Inventory() {
                       <td className="px-4 py-3">{p.quantity}</td>
                       <td className="px-4 py-3 text-yellow-600">{p.reservedQty}</td>
                       <td className="px-4 py-3">
-                        <span className={avail <= 0 ? 'text-red-600 font-bold' : avail <= p.lowStockThreshold ? 'text-yellow-600 font-bold' : 'text-green-600 font-bold'}>
+                        <span className={avail <= 0 ? 'text-red-600 font-bold' : 'text-green-600 font-bold'}>
                           {avail}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-500">{p.lowStockThreshold}</td>
                       <td className="px-4 py-3">
                         <div className="flex gap-2">
                           <Button size="sm" variant="success" onClick={() => setRestockProduct(p)}>

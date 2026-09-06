@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const { withUniqueDocNumber } = require('../utils/invoiceNumber');
 const { getGstSnapshot } = require('../utils/gstSnapshot');
 const { getConsumedQtyByProduct } = require('./returnSessionController');
@@ -8,6 +9,9 @@ const StockMovement = require('../models/StockMovement');
 const Customer = require('../models/Customer');
 const AppSettings = require('../models/AppSettings');
 const Settlement = require('../models/Settlement');
+const CreditNote = require('../models/CreditNote');
+const ReplacementNote = require('../models/ReplacementNote');
+const Coupon = require('../models/Coupon');
 const { validateAndGetCoupon } = require('./couponController');
 
 const DEFAULT_CREDIT = { rupeesPerPoint: 1000, pointValue: 1 };
@@ -150,54 +154,82 @@ exports.processStoreSale = async (req, res) => {
       if (staff) soldByUser = staff._id;
     }
 
-    // withUniqueDocNumber retries with a fresh transactionId if the INV
-    // counter has drifted behind an existing document (self-heals instead of
-    // failing checkout on a stale counter).
-    const transaction = await withUniqueDocNumber('INV', (transactionId) => SaleTransaction.create({
-      transactionId,
-      channel: 'STORE',
-      items: resolvedItems,
-      totalAmount: finalAmount,
-      paymentMethod: (resolvedSplitPayments?.length ? resolvedSplitPayments[0].method : paymentMethod) || 'CASH',
-      splitPayments: resolvedSplitPayments?.length ? resolvedSplitPayments : undefined,
-      status: 'COMPLETED',
-      soldBy: soldByUser,
-      customerId: customer?._id || null,
-      customerPhone: customerPhone || '',
-      customerName: customer?.name || (customerName || '').trim(),
-      couponCode: appliedCouponCode,
-      discountAmount,
-      roundOffAmount: roundOffAdj,
-      creditPointsEarned: pointsEarned,
-      creditPointsRedeemed: pointsRedeemed,
-      note: note || '',
-      gst,
-      carriedSettlement: carriedAmount
-        ? { amount: carriedAmount, sourceLabel: carryForward?.sourceLabel || '', settlementId: carryForward?.settlementId || null }
-        : undefined,
-    }));
-    const transactionId = transaction.transactionId;
+    // Stock is reserved-and-committed atomically inside a transaction, gated
+    // on a per-item conditional update (quantity - reservedQty >= item.qty)
+    // done in the SAME operation as the decrement. This closes the race where
+    // two concurrent checkouts both pass the earlier plain read-check (lines
+    // above) for the same unit-product (qty always 1) before either commits —
+    // previously the decrement happened via a separate later find+save with
+    // no re-check, so both requests could create a SaleTransaction for the
+    // same barcode. If any item was already sold by a concurrent request,
+    // this throws and the whole transaction (including the SaleTransaction
+    // document) rolls back instead of leaving a bill with unbacked stock.
+    const mongoSession = await mongoose.startSession();
+    let transaction;
+    const stockUpdates = [];
+    try {
+      await mongoSession.withTransaction(async () => {
+        stockUpdates.length = 0; // withTransaction may retry this callback — don't double-emit a discarded attempt's events
+        // withUniqueDocNumber retries with a fresh transactionId if the INV
+        // counter has drifted behind an existing document (self-heals instead
+        // of failing checkout on a stale counter).
+        transaction = await withUniqueDocNumber('INV', (transactionId) => SaleTransaction.create([{
+          transactionId,
+          channel: 'STORE',
+          items: resolvedItems,
+          totalAmount: finalAmount,
+          paymentMethod: (resolvedSplitPayments?.length ? resolvedSplitPayments[0].method : paymentMethod) || 'CASH',
+          splitPayments: resolvedSplitPayments?.length ? resolvedSplitPayments : undefined,
+          status: 'COMPLETED',
+          soldBy: soldByUser,
+          customerId: customer?._id || null,
+          customerPhone: customerPhone || '',
+          customerName: customer?.name || (customerName || '').trim(),
+          couponCode: appliedCouponCode,
+          discountAmount,
+          roundOffAmount: roundOffAdj,
+          creditPointsEarned: pointsEarned,
+          creditPointsRedeemed: pointsRedeemed,
+          note: note || '',
+          gst,
+          carriedSettlement: carriedAmount
+            ? { amount: carriedAmount, sourceLabel: carryForward?.sourceLabel || '', settlementId: carryForward?.settlementId || null }
+            : undefined,
+        }], { session: mongoSession }).then(([doc]) => doc));
+        const transactionId = transaction.transactionId;
 
-    for (const item of resolvedItems) {
-      const product = await Product.findById(item.productId);
-      const previousQty = product.quantity;
-      product.quantity -= item.qty;
-      await product.save();
+        for (const item of resolvedItems) {
+          const updated = await Product.findOneAndUpdate(
+            { _id: item.productId, $expr: { $gte: [{ $subtract: ['$quantity', '$reservedQty'] }, item.qty] } },
+            { $inc: { quantity: -item.qty } },
+            { session: mongoSession },
+          );
+          if (!updated) {
+            throw Object.assign(new Error(`${item.name} (barcode ${item.barcode}) was just sold in another sale — please rescan`), { status: 409 });
+          }
+          const previousQty = updated.quantity;
+          const newQty = previousQty - item.qty;
 
-      await StockMovement.create({
-        productId: item.productId,
-        type: 'SALE',
-        channel: 'STORE',
-        quantityChanged: -item.qty,
-        previousQty,
-        newQty: product.quantity,
-        note: `POS Sale ${transactionId}`,
-        performedBy: req.user._id,
-        transactionId,
+          await StockMovement.create([{
+            productId: item.productId,
+            type: 'SALE',
+            channel: 'STORE',
+            quantityChanged: -item.qty,
+            previousQty,
+            newQty,
+            note: `POS Sale ${transactionId}`,
+            performedBy: req.user._id,
+            transactionId,
+          }], { session: mongoSession });
+
+          stockUpdates.push({ productId: item.productId.toString(), quantity: newQty, reservedQty: updated.reservedQty });
+        }
       });
-
-      req.io.emit('stock:updated', { productId: item.productId.toString(), quantity: product.quantity, reservedQty: product.reservedQty });
+    } finally {
+      await mongoSession.endSession();
     }
+    const transactionId = transaction.transactionId;
+    stockUpdates.forEach((u) => req.io.emit('stock:updated', u));
 
     // Apply loyalty points changes to the balance:
     //  - subtract only points actually redeemed FROM the balance (not
@@ -236,7 +268,7 @@ exports.processStoreSale = async (req, res) => {
         : (transaction.customerName ? { name: transaction.customerName, phone: '', creditPoints: null } : null),
     });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.status || 500).json({ message: err.message, conflict: err.status === 409 || undefined });
   }
 };
 
@@ -440,6 +472,93 @@ exports.updateSale = async (req, res) => {
     res.json({ sale: obj });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+// Void a STORE sale (admin only). The SaleTransaction document is kept —
+// never hard-deleted — so invoice numbering stays gap-free for GST/audit
+// purposes; it's just marked VOIDED. Reverses everything the original sale
+// did: restores each line item's stock, undoes loyalty points earned/redeemed,
+// and undoes coupon usage. Refused if any Return/Exchange/Replace session was
+// ever run against this sale (a CreditNote/ReplacementNote referencing it
+// already independently reversed part of it — voiding on top would
+// double-reverse stock/points); that case must be handled manually.
+exports.voidSale = async (req, res) => {
+  const { reason } = req.body;
+  const mongoSession = await mongoose.startSession();
+  try {
+    let sale;
+    await mongoSession.withTransaction(async () => {
+      sale = await SaleTransaction.findById(req.params.id).session(mongoSession);
+      if (!sale) throw Object.assign(new Error('Sale not found'), { status: 404 });
+      if (sale.channel !== 'STORE') throw Object.assign(new Error('Only in-store sales can be voided here'), { status: 400 });
+      if (sale.status === 'VOIDED') throw Object.assign(new Error('This sale is already voided'), { status: 400 });
+
+      const [creditNoteCount, replacementNoteCount] = await Promise.all([
+        CreditNote.countDocuments({ originalSaleId: sale._id }).session(mongoSession),
+        ReplacementNote.countDocuments({ originalSaleId: sale._id }).session(mongoSession),
+      ]);
+      if (creditNoteCount > 0 || replacementNoteCount > 0) {
+        throw Object.assign(new Error('This bill has a Return/Exchange/Replace session against it and cannot be voided automatically — reverse those first, or handle this bill manually.'), { status: 409 });
+      }
+
+      // Restore stock for every line item.
+      for (const item of sale.items) {
+        const product = await Product.findById(item.productId).session(mongoSession);
+        if (!product) continue; // product may have been hard-deleted since (never-sold units only — this one WAS sold, so this shouldn't happen, but don't crash the void over it)
+        const previousQty = product.quantity;
+        product.quantity += item.qty;
+        await product.save({ session: mongoSession });
+
+        await StockMovement.create([{
+          productId: item.productId,
+          type: 'ADJUSTMENT',
+          channel: 'STORE',
+          quantityChanged: item.qty,
+          previousQty,
+          newQty: product.quantity,
+          note: `Voided sale ${sale.transactionId}${reason ? ` — ${reason}` : ''}`,
+          performedBy: req.user._id,
+          transactionId: sale.transactionId,
+        }], { session: mongoSession });
+      }
+
+      // Undo loyalty points: claw back what was earned (if not already spent
+      // elsewhere — best-effort, floored at 0), and refund what was redeemed.
+      if (sale.customerId) {
+        const customer = await Customer.findById(sale.customerId).session(mongoSession);
+        if (customer) {
+          customer.creditPoints = Math.max(0, customer.creditPoints - (sale.creditPointsEarned || 0)) + (sale.creditPointsRedeemed || 0);
+          await customer.save({ session: mongoSession });
+        }
+      }
+
+      // Undo coupon usage.
+      if (sale.couponCode) {
+        await Coupon.findOneAndUpdate(
+          { code: sale.couponCode },
+          { $inc: { usedCount: -1 } },
+          { session: mongoSession },
+        );
+      }
+
+      sale.status = 'VOIDED';
+      sale.voidedAt = new Date();
+      sale.voidedBy = req.user._id;
+      sale.voidReason = reason || '';
+      await sale.save({ session: mongoSession });
+    });
+
+    sale.items.forEach((item) => {
+      req.io.emit('stock:updated', { productId: item.productId.toString() });
+    });
+    req.io.emit('sale:voided', { transactionId: sale.transactionId });
+
+    res.json({ sale });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  } finally {
+    await mongoSession.endSession();
   }
 };
 
