@@ -43,3 +43,26 @@ export function toLocalDateTimeInput(date) {
   if (Number.isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
+
+// Converts a `<input type="datetime-local">` value (a bare local wall-clock
+// string like "2026-09-06T14:30", NO timezone) into a full ISO instant
+// (`...Z`) representing that exact local moment in the USER's timezone.
+//
+// Why this matters: sending the bare string and letting the backend do
+// `new Date(str)` parses it in the SERVER's timezone (usually UTC in
+// production), so a user in IST picking 2:30 PM gets it stored as 2:30 PM UTC
+// (= 8:00 PM IST). Building the Date from the parsed parts here uses the
+// browser's own timezone, so `.toISOString()` yields the right absolute time
+// no matter where the server runs. Returns undefined for empty/invalid input
+// (so callers can omit the field and let the backend default to "now").
+export function localDateTimeInputToISO(value) {
+  if (!value) return undefined;
+  const m = String(value).match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/);
+  if (!m) {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+  }
+  const [, y, mo, da, h, mi, s] = m;
+  const d = new Date(Number(y), Number(mo) - 1, Number(da), Number(h), Number(mi), Number(s || 0));
+  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
+}

@@ -20,7 +20,7 @@ import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import useAuthStore from '../store/useAuthStore';
 import { canManage } from '../config/permissions';
-import { formatDateTime, toLocalDateTimeInput } from '../utils/date';
+import { formatDateTime, toLocalDateTimeInput, localDateTimeInputToISO } from '../utils/date';
 import { makeEnterNav, focusFirstInContainer } from '../utils/focusNav';
 
 // Live SVG barcode previews are expensive (one JsBarcode render + DOM node each) —
@@ -608,7 +608,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     if (isEdit) {
       setSaving(true);
       try {
-        await api.put(`/purchases/${purchaseId}`, { supplierId: supplierId || undefined, supplier: supplierName, note, purchaseDate, itemOverrides });
+        await api.put(`/purchases/${purchaseId}`, { supplierId: supplierId || undefined, supplier: supplierName, note, purchaseDate: localDateTimeInputToISO(purchaseDate), itemOverrides });
         toast({ message: 'Purchase updated', type: 'success' });
         onSaved();
       } catch (err) {
@@ -638,7 +638,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
 
     setSaving(true);
     try {
-      await api.post('/purchases', { supplierId: supplierId || undefined, supplier: supplierName, items, note, purchaseDate });
+      await api.post('/purchases', { supplierId: supplierId || undefined, supplier: supplierName, items, note, purchaseDate: localDateTimeInputToISO(purchaseDate) });
       toast({ message: 'Purchase recorded — products created / stock updated', type: 'success' });
       // Offer to print labels before handing off to the list (onSaved) — the
       // barcodes are only available from this local form state, not after.
