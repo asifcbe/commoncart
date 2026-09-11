@@ -23,7 +23,10 @@ export default function Layout() {
   }
 
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    // h-screen + overflow-hidden pins the shell to exactly the viewport so the
+    // sidebar (and its account / Sign out footer) never scroll out of view —
+    // only <main> scrolls, internally.
+    <div className="flex h-screen overflow-hidden bg-gray-50">
       {!locked && <Sidebar />}
       <main className="flex-1 overflow-auto">
         <div className="max-w-screen-2xl mx-auto p-6">

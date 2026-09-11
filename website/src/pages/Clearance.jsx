@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Tag, Flame, Package } from 'lucide-react';
 import api from '../utils/api';
 import useCartStore from '../store/useCartStore';
+import Img from '../components/ui/Img';
 
 function DiscountBadge({ percent }) {
   return (
@@ -27,13 +28,8 @@ function ProductCard({ product }) {
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow group relative">
       <DiscountBadge percent={percent} />
       <Link to={`/products/${product._id}`} className="block aspect-square bg-gray-50 overflow-hidden">
-        {image ? (
-          <img src={image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-200">
-            <Package size={48} />
-          </div>
-        )}
+        <Img src={image} alt={product.name} iconSize={48} className="w-full h-full"
+          imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
       </Link>
       <div className="p-3">
         <p className="text-xs text-gray-400 mb-0.5">{product.category}</p>

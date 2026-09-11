@@ -26,12 +26,46 @@ exports.processStoreSale = async (req, res) => {
     const resolvedItems = [];
     let totalAmount = 0;
 
+    let autoLineSeq = 0;
+    const fallbackLineId = () => `L${Date.now().toString(36)}s${(++autoLineSeq).toString(36)}`;
+
     for (const item of items) {
+      const qty = Math.max(1, Number(item.qty) || 1);
+      // Every line gets a stable lineId so a later Return/Exchange/Replace can
+      // address it — trust the client's when present, else mint one.
+      const lineId = (item.lineId && String(item.lineId).trim()) || fallbackLineId();
+
+      // Custom line item — sold at POS with no catalogued product / barcode.
+      // No stock lookup or decrement; still taxed and still earns points.
+      if (item.custom || !item.productId) {
+        const name = (item.name || '').trim();
+        const price = Number(item.price);
+        if (!name) return res.status(400).json({ message: 'Custom item needs a name' });
+        if (!(price >= 0)) return res.status(400).json({ message: `Custom item "${name}" needs a valid price` });
+
+        resolvedItems.push({
+          productId: null,
+          custom: true,
+          lineId,
+          barcode: '',
+          name,
+          qty,
+          price,
+          mrp: price,
+          isDiscounted: false,
+          noExchange: false,
+          hsnCode: (item.hsnCode || '').trim(),
+          gstPercent: item.gstPercent == null || item.gstPercent === '' ? null : Number(item.gstPercent),
+        });
+        totalAmount += price * qty;
+        continue;
+      }
+
       const product = await Product.findById(item.productId);
       if (!product) return res.status(404).json({ message: `Product ${item.productId} not found` });
 
       const available = product.quantity - product.reservedQty;
-      if (available < item.qty) {
+      if (available < qty) {
         return res.status(409).json({
           message: `Insufficient stock for ${product.name}`,
           conflict: true,
@@ -40,19 +74,32 @@ exports.processStoreSale = async (req, res) => {
       }
 
       const effectivePrice = product.discountPrice != null ? product.discountPrice : product.price;
+      // The price this product was pricing at BEFORE aging kicked in — its
+      // manual/shop discount price if it had one, otherwise the MRP. This is
+      // the "before" figure the bill's Clearance Discount line reduces from
+      // (the aging engine ages down from exactly this base too).
+      const preAgingPrice = (product.manualDiscountPrice != null && product.manualDiscountPrice > 0)
+        ? product.manualDiscountPrice
+        : product.price;
       resolvedItems.push({
         productId: product._id,
+        custom: false,
+        lineId,
         barcode: product.barcode,
         name: product.name,
-        qty: item.qty,
+        qty,
         price: effectivePrice,
+        // Pre-aging price (manual discount price, else MRP), snapshotted so the
+        // bill can show it with the aged reduction as a "Clearance discount".
+        mrp: preAgingPrice,
         // isDiscounted here means "aged" → blocks return/exchange. Manual discounts stay exchangeable.
         isDiscounted: !!product.isAged,
+        noExchange: product.exchangeable === false,
         hsnCode: product.hsnCode || '',
         gstPercent: product.gstPercent,
       });
 
-      totalAmount += effectivePrice * item.qty;
+      totalAmount += effectivePrice * qty;
     }
 
     // --- Loyalty & coupon logic ---
@@ -106,7 +153,16 @@ exports.processStoreSale = async (req, res) => {
     // the qualifying amount. Round-off/carry-forward don't (they're not goods
     // value). Computed before the redeem-now discount below, which is itself
     // derived from pointsEarned — including it here would be circular.
-    const pointsEarned = Math.floor(Math.max(0, totalAmount - discountAmount) / creditConfig.rupeesPerPoint);
+    //
+    // CLEARANCE (aged) items earn NO loyalty points — their full line value is
+    // excluded from the qualifying amount, so a bill mixing clearance + normal
+    // items only accrues points on the normal items.
+    const clearanceGoods = resolvedItems.reduce(
+      (s, it) => s + (it.isDiscounted ? it.price * it.qty : 0),
+      0
+    );
+    const pointQualifyingAmount = Math.max(0, totalAmount - clearanceGoods - discountAmount);
+    const pointsEarned = Math.floor(pointQualifyingAmount / creditConfig.rupeesPerPoint);
     // Opt-in: spend those just-earned points on this same bill instead of banking
     // them to the customer's balance for a future visit. They never touch
     // customer.creditPoints in this case — earned and spent in the same transaction.
@@ -199,6 +255,8 @@ exports.processStoreSale = async (req, res) => {
         const transactionId = transaction.transactionId;
 
         for (const item of resolvedItems) {
+          // Custom line items have no backing product — nothing to decrement.
+          if (item.custom || !item.productId) continue;
           const updated = await Product.findOneAndUpdate(
             { _id: item.productId, $expr: { $gte: [{ $subtract: ['$quantity', '$reservedQty'] }, item.qty] } },
             { $inc: { quantity: -item.qty } },
@@ -284,10 +342,13 @@ exports.listSales = async (req, res) => {
     const dateFilter = {};
     if (startDate || endDate) {
       dateFilter.createdAt = {};
+      // The client sends full ISO instants for the day boundaries (computed in
+      // the user's timezone). Fall back to widening a bare YYYY-MM-DD end date
+      // to the end of that UTC day for older/other callers.
       if (startDate) dateFilter.createdAt.$gte = new Date(startDate);
       if (endDate) {
         const end = new Date(endDate);
-        end.setHours(23, 59, 59, 999);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(String(endDate))) end.setHours(23, 59, 59, 999);
         dateFilter.createdAt.$lte = end;
       }
     }
@@ -504,6 +565,7 @@ exports.voidSale = async (req, res) => {
 
       // Restore stock for every line item.
       for (const item of sale.items) {
+        if (item.custom || !item.productId) continue; // custom line — no stock was ever tracked for it
         const product = await Product.findById(item.productId).session(mongoSession);
         if (!product) continue; // product may have been hard-deleted since (never-sold units only — this one WAS sold, so this shouldn't happen, but don't crash the void over it)
         const previousQty = product.quantity;
@@ -550,7 +612,7 @@ exports.voidSale = async (req, res) => {
     });
 
     sale.items.forEach((item) => {
-      req.io.emit('stock:updated', { productId: item.productId.toString() });
+      if (item.productId) req.io.emit('stock:updated', { productId: item.productId.toString() });
     });
     req.io.emit('sale:voided', { transactionId: sale.transactionId });
 

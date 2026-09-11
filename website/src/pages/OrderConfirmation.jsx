@@ -89,7 +89,12 @@ export default function OrderConfirmation() {
           <div className="space-y-2">
             {order.items.map((item, i) => (
               <div key={i} className="flex justify-between text-sm">
-                <span className="text-gray-700">{item.name} <span className="text-gray-400">×{item.qty}</span></span>
+                <span className="text-gray-700">
+                  {item.name} <span className="text-gray-400">×{item.qty}</span>
+                  {item.isDiscounted && item.mrp > item.price && (
+                    <span className="text-xs text-gray-400 line-through ml-1.5">{formatPrice(item.mrp)}</span>
+                  )}
+                </span>
                 <span className="font-medium">{formatPrice(item.price * item.qty)}</span>
               </div>
             ))}

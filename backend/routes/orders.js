@@ -3,13 +3,14 @@ const router = express.Router();
 const {
   placeOrder, confirmOrder, cancelOrder, updateFulfillment,
   myOrders, myOrderDetail, adminListOrders, adminGetOrder,
-  updatePaymentStatus, publicProducts, publicProductDetail,
+  updatePaymentStatus, publicProducts, publicProductDetail, publicCategoryTree,
 } = require('../controllers/orderController');
 const { protectCustomer } = require('../middleware/customerAuth');
 const { protect, adminOnly } = require('../middleware/auth');
 
 // Public product browsing (no auth)
 router.get('/products/public', publicProducts);
+router.get('/categories/public', publicCategoryTree);
 router.get('/products/public/:id', publicProductDetail);
 
 // Customer order routes

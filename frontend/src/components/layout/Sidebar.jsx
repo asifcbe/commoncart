@@ -31,7 +31,7 @@ export default function Sidebar() {
   const { user, logout } = useAuthStore();
 
   return (
-    <aside className="flex flex-col w-64 min-h-screen bg-gray-900 text-white">
+    <aside className="flex flex-col w-64 h-full shrink-0 bg-gray-900 text-white">
       <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-700">
         <Store size={24} className="text-blue-400" />
         <div>

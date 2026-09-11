@@ -40,6 +40,13 @@ const STEPS = [
 function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) {
   if (!transaction) return null;
   const hasDiscountedItems = transaction.items.some((i) => i.isDiscounted);
+  // Clearance (aging) discount: list price on the line minus what was charged,
+  // summed over aged lines — shown as its own totals line, GST unchanged.
+  const rcptLineMrp = (it) => (it.mrp != null && it.mrp > it.price ? it.mrp : it.price);
+  const clearanceDiscount = transaction.items.reduce(
+    (s, it) => s + (it.isDiscounted ? (rcptLineMrp(it) - it.price) * it.qty : 0),
+    0
+  );
   const customerPhone = saleData?.customer?.phone;
   const customerName = saleData?.customer?.name;
   // transaction.totalAmount has round-off baked into it at checkout (see
@@ -76,19 +83,27 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
           {customerName && <div className="text-xs text-black mt-0.5">Customer: {customerName}</div>}
         </div>
         <div className="space-y-1 py-2">
-          {transaction.items.map((item, i) => (
-            <div key={i} className="flex justify-between text-xs text-black font-semibold">
-              <span>
-                {i + 1}. {item.name}{item.isDiscounted && <span className="text-black ml-1">(Discounted)</span>} x{item.qty}
-              </span>
-              <span>₹{(item.price * item.qty).toFixed(2)}</span>
-            </div>
-          ))}
+          {transaction.items.map((item, i) => {
+            const rate = item.isDiscounted ? rcptLineMrp(item) : item.price;
+            return (
+              <div key={i} className="flex justify-between text-xs text-black font-semibold">
+                <span>
+                  {i + 1}. {item.name}{item.isDiscounted && <span className="text-black ml-1">(Clearance)</span>} x{item.qty}
+                </span>
+                <span>₹{(rate * item.qty).toFixed(2)}</span>
+              </div>
+            );
+          })}
         </div>
         <div className="border-t-2 border-black pt-2 space-y-1 text-black">
-          {saleData?.discountAmount > 0 && (
+          {(saleData?.discountAmount > 0 || clearanceDiscount > 0.005) && (
             <div className="flex justify-between text-xs font-bold">
-              <span>Bill Value</span><span>₹{(goodsAmount + saleData.discountAmount).toFixed(2)}</span>
+              <span>Bill Value</span><span>₹{(goodsAmount + (saleData?.discountAmount || 0) + clearanceDiscount).toFixed(2)}</span>
+            </div>
+          )}
+          {clearanceDiscount > 0.005 && (
+            <div className="flex justify-between text-xs font-bold text-black">
+              <span>Clearance Discount</span><span>-₹{clearanceDiscount.toFixed(2)}</span>
             </div>
           )}
           {saleData?.discountAmount > 0 && (
@@ -174,7 +189,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
         </div>
         {hasDiscountedItems && (
           <div className="text-xs text-black font-semibold border border-black rounded px-2 py-1.5 mt-1">
-            * Discounted items cannot be replaced or exchanged.
+            * Clearance items cannot be replaced or exchanged.
           </div>
         )}
         <div className="text-center text-xs text-black pt-2 border-t border-black whitespace-pre-line">{business?.footerNote || 'Thank you for shopping!'}</div>
@@ -200,7 +215,7 @@ function ReceiptModal({ transaction, saleData, business, billConfig, onClose }) 
 // Re-verifies the current user's own password (via POST /auth/verify-password)
 // before lifting the kiosk lock — not a destructive action, so no separate
 // confirm step is needed beyond getting the password right.
-function UnlockModal({ onUnlock, onClose }) {
+function UnlockModal({ onUnlock, onClose, user }) {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [verifying, setVerifying] = useState(false);
@@ -226,11 +241,26 @@ function UnlockModal({ onUnlock, onClose }) {
         <div className="flex gap-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
           <Lock size={20} className="text-blue-600 shrink-0 mt-0.5" />
           <p className="text-sm text-blue-800">
-            This terminal is locked to the Point of Sale screen. Enter your account password to unlock and exit fullscreen.
+            This terminal is locked to the Point of Sale screen. Enter the password for the account below to unlock and exit fullscreen.
           </p>
         </div>
+        {user && (
+          <div className="flex items-center gap-3 p-3 border border-gray-200 rounded-lg bg-gray-50">
+            <div className="h-9 w-9 rounded-full bg-blue-500 text-white flex items-center justify-center text-sm font-bold shrink-0">
+              {(user.name || user.email || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-semibold truncate">{user.name || user.email}</div>
+              <div className="text-xs text-gray-500 truncate">
+                {user.email}{user.role ? ` · ${user.role}` : ''}
+              </div>
+            </div>
+          </div>
+        )}
         <div>
-          <label className="text-sm font-medium block mb-1">Password</label>
+          <label className="text-sm font-medium block mb-1">
+            Password{user?.name ? ` for ${user.name}` : ''}
+          </label>
           <div className="relative">
             <Input
               type={showPassword ? 'text' : 'password'}
@@ -257,6 +287,88 @@ function UnlockModal({ onUnlock, onClose }) {
           Unlock
         </Button>
       </form>
+    </Modal>
+  );
+}
+
+// Add a line item that has no barcode / catalogued product — name + price
+// (+ optional HSN/GST). No stock is tracked for it; it's still taxed and
+// still earns loyalty points like any other line. Keyboard-first: Enter moves
+// field → field and submits from the last one, matching the rest of POS.
+function CustomItemModal({ onAdd, onClose }) {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [hsnCode, setHsnCode] = useState('');
+  const [gstPercent, setGstPercent] = useState('');
+  const firstRef = useRef(null);
+
+  useEffect(() => {
+    const t = requestAnimationFrame(() => firstRef.current?.focus());
+    return () => cancelAnimationFrame(t);
+  }, []);
+
+  useEffect(() => {
+    api.get('/settings/business-config').then(({ data }) => {
+      if (data.config?.defaultHsnCode) setHsnCode(data.config.defaultHsnCode);
+      if (data.config?.gstPercent != null) setGstPercent(String(data.config.gstPercent));
+    }).catch(() => {});
+  }, []);
+
+  const canAdd = name.trim() && Number(price) >= 0 && price !== '';
+
+  const submit = () => {
+    if (!canAdd) return;
+    onAdd({
+      name: name.trim(),
+      price: Number(price),
+      qty: 1,
+      hsnCode: hsnCode.trim(),
+      gstPercent: gstPercent === '' ? null : Number(gstPercent),
+    });
+    onClose();
+  };
+
+  const onFieldKeyDown = (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const form = e.currentTarget.closest('[data-custom-item-form]');
+    const fields = [...form.querySelectorAll('input')];
+    const idx = fields.indexOf(e.currentTarget);
+    const next = fields[idx + 1];
+    if (next) next.focus();
+    else submit();
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Add Item Without Barcode" size="sm">
+      <div className="space-y-3" data-custom-item-form>
+        <div>
+          <label className="text-sm text-gray-600 block mb-1">Item name *</label>
+          <Input ref={firstRef} value={name} onChange={(e) => setName(e.target.value)} onKeyDown={onFieldKeyDown} placeholder="e.g. Gift wrap" />
+        </div>
+        <div>
+          <label className="text-sm text-gray-600 block mb-1">Price (₹) *</label>
+          <Input type="number" min="0" step="0.01" value={price} onChange={(e) => setPrice(e.target.value)} onKeyDown={onFieldKeyDown} placeholder="0.00" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-sm text-gray-600 block mb-1">HSN Code <span className="text-xs text-gray-400">optional</span></label>
+            <Input value={hsnCode} onChange={(e) => setHsnCode(e.target.value)} onKeyDown={onFieldKeyDown} placeholder="e.g. 4819" />
+          </div>
+          <div>
+            <label className="text-sm text-gray-600 block mb-1">GST % <span className="text-xs text-gray-400">optional</span></label>
+            <Input type="number" min="0" max="100" step="0.01" value={gstPercent} onChange={(e) => setGstPercent(e.target.value)} onKeyDown={onFieldKeyDown} placeholder="shop default" />
+          </div>
+        </div>
+        <p className="text-xs text-gray-400">
+          No stock is tracked for a no-barcode item. It's taxed and earns points like any other line, but can't be
+          returned or exchanged later.
+        </p>
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={submit} disabled={!canAdd}>Add to Cart</Button>
+        </div>
+      </div>
     </Modal>
   );
 }
@@ -536,7 +648,7 @@ export default function POS() {
   const navigate = useNavigate();
   const {
     bills, activeBillId, patchBill, addBillTab, switchBillTab, closeBillTab, resetBillTab,
-    addToCart, updateQty, removeFromCart, clearCart, checkout, processing,
+    addToCart, addCustomItem, updateQty, removeFromCart, clearCart, checkout, processing,
   } = usePOSStore();
   const { user } = useAuthStore();
 
@@ -553,6 +665,7 @@ export default function POS() {
   // A "3*"/"3x" prefix before the code adds that many units in one shot.
   const [scanInput, setScanInput] = useState('');
   const [showCameraScanner, setShowCameraScanner] = useState(false);
+  const [showCustomItem, setShowCustomItem] = useState(false);
   const [conflict, setConflict] = useState(null);
   const [showReceipt, setShowReceipt] = useState(false);
   const [receipt, setReceipt] = useState(null);
@@ -800,8 +913,10 @@ export default function POS() {
   // Points this bill qualifies for — based on what the customer actually pays
   // (cart total minus points-from-balance/manual discounts), mirroring
   // the backend calc. Excludes the redeem-now discount itself (circular).
+  // CLEARANCE (aged) items earn NO points — their full line value is excluded.
+  const clearanceGoods = cart.reduce((sum, i) => sum + (i.isDiscounted ? i.price * i.qty : 0), 0);
   const preEarnDiscount = pointsDiscount + manualDiscount;
-  const pointsEarnedThisBill = Math.floor(Math.max(0, cartTotal - preEarnDiscount) / (creditConfig.rupeesPerPoint || 1000));
+  const pointsEarnedThisBill = Math.floor(Math.max(0, cartTotal - clearanceGoods - preEarnDiscount) / (creditConfig.rupeesPerPoint || 1000));
   const earnedNowDiscount = (loyaltyCustomer && redeemEarnedNow) ? pointsEarnedThisBill * (creditConfig.pointValue || 1) : 0;
   const totalDiscount = pointsDiscount + manualDiscount + earnedNowDiscount;
   const preRound = Math.max(0, cartTotal - totalDiscount);
@@ -892,6 +1007,13 @@ export default function POS() {
           </Button>
           {locked ? (
             <>
+              {user && (
+                <span className="flex items-center gap-1.5 text-xs text-gray-500" title="Account this terminal is locked under">
+                  <UserCircle size={14} className="text-gray-400" />
+                  <span className="font-medium text-gray-700">{user.name || user.email}</span>
+                  {user.role && <span className="text-gray-400">· {user.role}</span>}
+                </span>
+              )}
               {!isFullscreen && (
                 <Button type="button" variant="outline" size="sm" onClick={() => document.documentElement.requestFullscreen().catch(() => {})}>
                   <Maximize size={13} className="mr-1.5" /> Re-enter Fullscreen
@@ -994,6 +1116,15 @@ export default function POS() {
                 >
                   <Camera size={20} />
                 </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowCustomItem(true)}
+                  title="Add an item that has no barcode"
+                  className="h-14 px-4"
+                >
+                  <Plus size={18} className="mr-1.5" /> No barcode
+                </Button>
               </div>
               <div className="flex justify-between items-center mt-3">
                 <Button size="sm" variant="ghost" onClick={() => setStep('customer')}>Back</Button>
@@ -1028,9 +1159,20 @@ export default function POS() {
                       <div className="flex-1 min-w-0">
                         <div className="text-lg font-medium truncate">
                           {i + 1}. {item.name}
-                          {item.isDiscounted && <span className="ml-1 text-base text-red-500">(Discounted)</span>}
+                          {item.isDiscounted && <span className="ml-1 text-base text-red-500">(Clearance)</span>}
+                          {item.custom && <span className="ml-1.5 text-xs font-normal text-amber-600 border border-amber-300 rounded px-1 py-0.5 align-middle">no barcode</span>}
                         </div>
-                        <div className="text-base text-gray-500 font-mono">{item.barcode} · ₹{item.price.toFixed(2)} each</div>
+                        <div className="text-base text-gray-500 font-mono">
+                          {item.barcode ? `${item.barcode} · ` : ''}
+                          {item.isDiscounted && item.originalPrice > item.price ? (
+                            <>
+                              <span className="line-through">₹{item.originalPrice.toFixed(2)}</span>{' '}
+                              <span className="text-red-600">₹{item.price.toFixed(2)}</span> each
+                            </>
+                          ) : (
+                            <>₹{item.price.toFixed(2)} each</>
+                          )}
+                        </div>
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         <button onClick={() => updateQty(item.productId, item.qty - 1)} className="h-9 w-9 rounded border flex items-center justify-center hover:bg-gray-100">
@@ -1095,6 +1237,7 @@ export default function POS() {
                 <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   <div className="text-base text-amber-800">
                     Earns <strong>{pointsEarnedThisBill} pts</strong> on this bill
+                    {clearanceGoods > 0 && <span className="text-amber-600 text-sm"> (clearance items excluded)</span>}
                     {redeemEarnedNow && <span className="text-green-600"> · redeeming now = -₹{earnedNowDiscount.toFixed(2)}</span>}
                   </div>
                   <label className="flex items-center gap-1.5 text-base text-amber-800 cursor-pointer whitespace-nowrap">
@@ -1415,7 +1558,13 @@ export default function POS() {
         </Card>
       </div>
 
-      {showUnlock && <UnlockModal onUnlock={handleUnlock} onClose={() => { setShowUnlock(false); focusScan(); }} />}
+      {showUnlock && <UnlockModal user={user} onUnlock={handleUnlock} onClose={() => { setShowUnlock(false); focusScan(); }} />}
+      {showCustomItem && (
+        <CustomItemModal
+          onAdd={(payload) => { addCustomItem(payload); toast({ message: `Added: ${payload.name}`, type: 'success' }); }}
+          onClose={() => { setShowCustomItem(false); focusScan(); }}
+        />
+      )}
       {conflict && <ConflictModal conflict={conflict} onClose={() => { setConflict(null); focusScan(); }} />}
       {showReceipt && <ReceiptModal transaction={receipt} saleData={saleData} business={business} billConfig={billConfig} onClose={() => { setShowReceipt(false); setReceipt(null); setSaleData(null); setStep('customer'); focusScan(); }} />}
       {showCameraScanner && (

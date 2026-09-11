@@ -1,10 +1,16 @@
 /**
- * Seed script — populates the database with realistic dummy data for testing.
- * Run: node seed.js
- * Safe to re-run: clears existing data first (except admin account if already exists).
+ * Seed script — wipes and repopulates the database with realistic data for
+ * a KIDS CLOTHING shop (Tom & Jerry Kids Wear).
+ *
+ *   node seed.js
+ *
+ * Connects to process.env.MONGODB_URI (the dev DB). Refuses to run against
+ * MONGODB_URIprod. Every product gets a generated sample photo.
  */
 
 require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const { v4: uuidv4 } = require('uuid');
@@ -19,469 +25,543 @@ const Customer = require('./models/Customer');
 const Order = require('./models/Order');
 const Coupon = require('./models/Coupon');
 const AppSettings = require('./models/AppSettings');
+const { makeProductPhoto } = require('./scripts/kidsPhotos');
+const { makeCategoryPhoto } = require('./scripts/categoryPhotos');
 
-// ── Helpers ──────────────────────────────────────────────────
+// ── helpers ──────────────────────────────────────────────────
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const pick = (arr) => arr[rand(0, arr.length - 1)];
-const id = () => uuidv4().slice(0, 6).toUpperCase();
+const chance = (p) => Math.random() < p;
+const id6 = () => uuidv4().slice(0, 6).toUpperCase();
+const DAY = 86400000;
+let barcodeSeq = 4200000;
+const nextBarcode = () => String(++barcodeSeq).padStart(7, '0');
+let skuByCat = {};
+const nextSku = (catCode, nameCode) => {
+  const k = `${catCode}${nameCode}`;
+  skuByCat[k] = (skuByCat[k] || 0) + 1;
+  return `${k}-${String(skuByCat[k]).padStart(4, '0')}`;
+};
+const catCode = (c) => c.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
+const nameCode = (n) => n.replace(/[^A-Za-z]/g, '').slice(0, 3).toUpperCase();
 
-function barcode7() {
-  return String(Math.floor(1000000 + Math.random() * 9000000));
-}
+// ── managed catalog ──────────────────────────────────────────
+// Categories = age bands (how a kids-wear shop is browsed), sub-categories = garment types.
+const CATEGORY_CATALOG = [
+  { name: 'Newborn (0–3M)',   subCategories: ['Bodysuits', 'Sleepsuits', 'Mittens & Booties', 'Wrap Sets'] },
+  { name: 'Infant (3–12M)',   subCategories: ['Rompers', 'T-Shirts', 'Leggings', 'Frocks', 'Jackets'] },
+  { name: 'Toddler (1–3Y)',   subCategories: ['T-Shirts', 'Shorts', 'Dresses', 'Dungarees', 'Co-ord Sets', 'Hoodies'] },
+  { name: 'Kids (3–8Y)',      subCategories: ['T-Shirts', 'Shirts', 'Jeans', 'Frocks', 'Track Pants', 'Jackets', 'Ethnic Wear'] },
+  { name: 'Pre-Teen (8–14Y)', subCategories: ['T-Shirts', 'Shirts', 'Jeans', 'Kurtis', 'Sweatshirts', 'Joggers'] },
+  { name: 'Accessories',      subCategories: ['Caps', 'Socks', 'Bibs', 'Booties'] },
+];
 
-function sku(category, name) {
-  const prefix = (category.slice(0, 3) + name.slice(0, 3)).toUpperCase().replace(/[^A-Z0-9]/g, '');
-  return `${prefix}-${String(rand(10000, 99999))}`;
-}
+const KID_COLORS = [
+  'Sky Blue', 'Baby Pink', 'Mint', 'Yellow', 'Peach', 'Lavender', 'White', 'Red',
+  'Navy', 'Sea Green', 'Coral', 'Mustard', 'Cream', 'Aqua', 'Denim', 'Charcoal',
+];
+const KID_SIZES = [
+  '0–3M', '3–6M', '6–9M', '9–12M', '12–18M', '18–24M',
+  '2Y', '3Y', '4Y', '5Y', '6Y', '7Y', '8Y', '10Y', '12Y', '14Y', 'Free Size',
+];
 
-// ── Data definitions ─────────────────────────────────────────
-const CATEGORIES = ['Clothing', 'Footwear', 'Accessories', 'Electronics', 'Home & Kitchen'];
+// ── product lines ────────────────────────────────────────────
+// shape = silhouette for the generated photo · sizes = which size band applies
+const NEWBORN_SIZES = ['0–3M', '3–6M', '6–9M'];
+const INFANT_SIZES = ['3–6M', '6–9M', '9–12M', '12–18M'];
+const TODDLER_SIZES = ['12–18M', '18–24M', '2Y', '3Y'];
+const KIDS_SIZES = ['3Y', '4Y', '5Y', '6Y', '7Y', '8Y'];
+const PRETEEN_SIZES = ['8Y', '10Y', '12Y', '14Y'];
 
-const PRODUCT_DEFS = [
-  // Clothing
-  { name: 'Cotton T-Shirt', category: 'Clothing', costPrice: 250, price: 499, variants: [['Red','S'],['Red','M'],['Red','L'],['Blue','S'],['Blue','M'],['Blue','L'],['White','M'],['White','L']] },
-  { name: 'Denim Jeans', category: 'Clothing', costPrice: 800, price: 1499, variants: [['Dark Blue','30'],['Dark Blue','32'],['Dark Blue','34'],['Black','30'],['Black','32'],['Black','34']] },
-  { name: 'Polo Shirt', category: 'Clothing', costPrice: 350, price: 699, variants: [['Navy','S'],['Navy','M'],['Navy','L'],['Olive','M'],['Olive','L'],['Olive','XL']] },
-  { name: 'Formal Shirt', category: 'Clothing', costPrice: 450, price: 899, variants: [['White','38'],['White','40'],['Blue','38'],['Blue','40'],['Blue','42']] },
-  { name: 'Cargo Pants', category: 'Clothing', costPrice: 600, price: 1199, variants: [['Khaki','30'],['Khaki','32'],['Khaki','34'],['Olive','32'],['Olive','34']] },
-  // Footwear
-  { name: 'Running Shoes', category: 'Footwear', costPrice: 1200, price: 2499, variants: [['Black','7'],['Black','8'],['Black','9'],['White','8'],['White','9'],['White','10']] },
-  { name: 'Casual Sneakers', category: 'Footwear', costPrice: 900, price: 1899, variants: [['White','7'],['White','8'],['White','9'],['Grey','8'],['Grey','9']] },
-  { name: 'Leather Loafers', category: 'Footwear', costPrice: 1500, price: 2999, variants: [['Brown','8'],['Brown','9'],['Brown','10'],['Black','8'],['Black','9']] },
+const PRODUCT_LINES = [
+  // Newborn
+  { name: 'Organic Cotton Bodysuit',   category: 'Newborn (0–3M)', subCategory: 'Bodysuits',        shape: 'onesie', cost: 120, price: 299, sizes: NEWBORN_SIZES, colors: ['White', 'Baby Pink', 'Sky Blue', 'Mint'], hsn: '6111' },
+  { name: 'Full-Sleeve Sleepsuit',     category: 'Newborn (0–3M)', subCategory: 'Sleepsuits',       shape: 'onesie', cost: 210, price: 499, sizes: NEWBORN_SIZES, colors: ['Sky Blue', 'Peach', 'Lavender', 'Yellow'], hsn: '6111' },
+  { name: 'Newborn Wrap Gift Set',     category: 'Newborn (0–3M)', subCategory: 'Wrap Sets',        shape: 'set',    cost: 380, price: 899, sizes: ['0–3M', '3–6M'], colors: ['Cream', 'Baby Pink', 'Sky Blue'], hsn: '6209' },
+  { name: 'Soft Mittens & Booties',    category: 'Newborn (0–3M)', subCategory: 'Mittens & Booties', shape: 'socks',  cost: 70,  price: 179, sizes: ['0–3M', '3–6M'], colors: ['White', 'Mint', 'Peach'], hsn: '6111' },
+  // Infant
+  { name: 'Half-Sleeve Cotton Romper', category: 'Infant (3–12M)', subCategory: 'Rompers',          shape: 'onesie', cost: 160, price: 399, sizes: INFANT_SIZES, colors: ['Yellow', 'Aqua', 'Coral', 'Sky Blue', 'Mint'], hsn: '6111' },
+  { name: 'Printed Infant T-Shirt',    category: 'Infant (3–12M)', subCategory: 'T-Shirts',         shape: 'tee',    cost: 90,  price: 249, sizes: INFANT_SIZES, colors: ['Red', 'Navy', 'Mint', 'Mustard', 'White'], hsn: '6109' },
+  { name: 'Ribbed Baby Leggings',      category: 'Infant (3–12M)', subCategory: 'Leggings',         shape: 'pants',  cost: 85,  price: 229, sizes: INFANT_SIZES, colors: ['Charcoal', 'Navy', 'Baby Pink', 'Sea Green'], hsn: '6111' },
+  { name: 'Floral Infant Frock',       category: 'Infant (3–12M)', subCategory: 'Frocks',           shape: 'dress',  cost: 230, price: 549, sizes: INFANT_SIZES, colors: ['Baby Pink', 'Lavender', 'Yellow', 'Peach'], hsn: '6111' },
+  { name: 'Fleece Infant Jacket',      category: 'Infant (3–12M)', subCategory: 'Jackets',          shape: 'jacket', cost: 280, price: 699, sizes: INFANT_SIZES, colors: ['Navy', 'Coral', 'Mint', 'Charcoal'], hsn: '6110' },
+  // Toddler
+  { name: 'Graphic Toddler T-Shirt',   category: 'Toddler (1–3Y)', subCategory: 'T-Shirts',         shape: 'tee',    cost: 110, price: 299, sizes: TODDLER_SIZES, colors: ['Red', 'Sky Blue', 'Yellow', 'Sea Green', 'White'], hsn: '6109' },
+  { name: 'Cotton Play Shorts',        category: 'Toddler (1–3Y)', subCategory: 'Shorts',           shape: 'shorts', cost: 95,  price: 249, sizes: TODDLER_SIZES, colors: ['Navy', 'Mustard', 'Aqua', 'Charcoal'], hsn: '6203' },
+  { name: 'Frill Sleeve Toddler Dress',category: 'Toddler (1–3Y)', subCategory: 'Dresses',          shape: 'dress',  cost: 260, price: 599, sizes: TODDLER_SIZES, colors: ['Baby Pink', 'Coral', 'Lavender', 'Cream'], hsn: '6104' },
+  { name: 'Denim Dungarees',           category: 'Toddler (1–3Y)', subCategory: 'Dungarees',        shape: 'set',    cost: 340, price: 799, sizes: TODDLER_SIZES, colors: ['Denim', 'Sky Blue'], hsn: '6203' },
+  { name: 'Cotton Co-ord Set',         category: 'Toddler (1–3Y)', subCategory: 'Co-ord Sets',      shape: 'set',    cost: 300, price: 749, sizes: TODDLER_SIZES, colors: ['Mint', 'Peach', 'Yellow', 'Sky Blue'], hsn: '6209' },
+  { name: 'Zip Hoodie',                category: 'Toddler (1–3Y)', subCategory: 'Hoodies',          shape: 'hoodie', cost: 320, price: 799, sizes: TODDLER_SIZES, colors: ['Charcoal', 'Navy', 'Coral', 'Aqua'], hsn: '6110' },
+  // Kids
+  { name: 'Boys Half-Sleeve T-Shirt',  category: 'Kids (3–8Y)',    subCategory: 'T-Shirts',         shape: 'tee',    cost: 140, price: 349, sizes: KIDS_SIZES, colors: ['Navy', 'Red', 'White', 'Sea Green', 'Mustard'], hsn: '6109' },
+  { name: 'Checked Casual Shirt',      category: 'Kids (3–8Y)',    subCategory: 'Shirts',           shape: 'jacket', cost: 220, price: 549, sizes: KIDS_SIZES, colors: ['Sky Blue', 'Red', 'Charcoal'], hsn: '6205' },
+  { name: 'Slim-Fit Kids Jeans',       category: 'Kids (3–8Y)',    subCategory: 'Jeans',            shape: 'pants',  cost: 300, price: 749, sizes: KIDS_SIZES, colors: ['Denim', 'Charcoal', 'Sky Blue'], hsn: '6203' },
+  { name: 'Girls Party Frock',         category: 'Kids (3–8Y)',    subCategory: 'Frocks',           shape: 'dress',  cost: 420, price: 999, sizes: KIDS_SIZES, colors: ['Baby Pink', 'Lavender', 'Coral', 'Cream'], hsn: '6104' },
+  { name: 'Kids Track Pants',          category: 'Kids (3–8Y)',    subCategory: 'Track Pants',      shape: 'pants',  cost: 180, price: 449, sizes: KIDS_SIZES, colors: ['Charcoal', 'Navy', 'Sea Green', 'Coral'], hsn: '6211' },
+  { name: 'Puffer Jacket',             category: 'Kids (3–8Y)',    subCategory: 'Jackets',          shape: 'jacket', cost: 480, price: 1199, sizes: KIDS_SIZES, colors: ['Navy', 'Coral', 'Charcoal', 'Mustard'], hsn: '6201' },
+  { name: 'Festive Kurta Pyjama Set',  category: 'Kids (3–8Y)',    subCategory: 'Ethnic Wear',      shape: 'set',    cost: 520, price: 1299, sizes: KIDS_SIZES, colors: ['Cream', 'Mustard', 'Sea Green'], hsn: '6203' },
+  // Pre-Teen
+  { name: 'Oversized Graphic Tee',     category: 'Pre-Teen (8–14Y)', subCategory: 'T-Shirts',       shape: 'tee',    cost: 190, price: 499, sizes: PRETEEN_SIZES, colors: ['White', 'Charcoal', 'Sea Green', 'Coral'], hsn: '6109' },
+  { name: 'Cotton Casual Shirt',       category: 'Pre-Teen (8–14Y)', subCategory: 'Shirts',         shape: 'jacket', cost: 280, price: 699, sizes: PRETEEN_SIZES, colors: ['Sky Blue', 'White', 'Navy'], hsn: '6205' },
+  { name: 'Stretch Denim Jeans',       category: 'Pre-Teen (8–14Y)', subCategory: 'Jeans',          shape: 'pants',  cost: 360, price: 899, sizes: PRETEEN_SIZES, colors: ['Denim', 'Charcoal'], hsn: '6203' },
+  { name: 'Girls Printed Kurti',       category: 'Pre-Teen (8–14Y)', subCategory: 'Kurtis',         shape: 'dress',  cost: 300, price: 749, sizes: PRETEEN_SIZES, colors: ['Baby Pink', 'Mustard', 'Sea Green', 'Lavender'], hsn: '6106' },
+  { name: 'Fleece Sweatshirt',         category: 'Pre-Teen (8–14Y)', subCategory: 'Sweatshirts',    shape: 'hoodie', cost: 340, price: 849, sizes: PRETEEN_SIZES, colors: ['Charcoal', 'Navy', 'Coral', 'Mint'], hsn: '6110' },
+  { name: 'Tapered Joggers',           category: 'Pre-Teen (8–14Y)', subCategory: 'Joggers',        shape: 'pants',  cost: 240, price: 599, sizes: PRETEEN_SIZES, colors: ['Charcoal', 'Navy', 'Sea Green'], hsn: '6211' },
   // Accessories
-  { name: 'Canvas Belt', category: 'Accessories', costPrice: 120, price: 249, variants: [['Black','M'],['Black','L'],['Brown','M'],['Brown','L']] },
-  { name: 'Leather Wallet', category: 'Accessories', costPrice: 300, price: 599, variants: [['Black','One Size'],['Brown','One Size'],['Tan','One Size']] },
-  { name: 'Sunglasses', category: 'Accessories', costPrice: 400, price: 799, variants: [['Black','One Size'],['Tortoise','One Size'],['Blue','One Size']] },
-  // Electronics
-  { name: 'USB-C Cable', category: 'Electronics', costPrice: 80, price: 199, variants: [['Black','1m'],['Black','2m'],['White','1m'],['White','2m']] },
-  { name: 'Wireless Earbuds', category: 'Electronics', costPrice: 1200, price: 2499, variants: [['Black','One Size'],['White','One Size']] },
-  { name: 'Phone Case 6.1"', category: 'Electronics', costPrice: 150, price: 349, variants: [['Clear','One Size'],['Black','One Size'],['Navy','One Size'],['Red','One Size']] },
-  // Home & Kitchen
-  { name: 'Stainless Steel Bottle', category: 'Home & Kitchen', costPrice: 250, price: 499, variants: [['Black','500ml'],['Silver','500ml'],['Black','1L'],['Silver','1L']] },
-  { name: 'Cotton Tote Bag', category: 'Home & Kitchen', costPrice: 100, price: 199, variants: [['Natural','One Size'],['Black','One Size'],['Blue','One Size']] },
+  { name: 'Kids Cotton Cap',           category: 'Accessories', subCategory: 'Caps',    shape: 'cap',   cost: 60,  price: 179, sizes: ['Free Size'], colors: ['Red', 'Navy', 'Yellow', 'Mint'], hsn: '6505' },
+  { name: 'Pack of 3 Ankle Socks',     category: 'Accessories', subCategory: 'Socks',   shape: 'socks', cost: 70,  price: 199, sizes: ['Free Size'], colors: ['White', 'Charcoal', 'Sky Blue'], hsn: '6115' },
+  { name: 'Waterproof Feeding Bib',    category: 'Accessories', subCategory: 'Bibs',    shape: 'tee',   cost: 45,  price: 149, sizes: ['Free Size'], colors: ['Yellow', 'Mint', 'Coral', 'Sky Blue'], hsn: '6209' },
+  { name: 'Anti-Slip Baby Booties',    category: 'Accessories', subCategory: 'Booties', shape: 'socks', cost: 80,  price: 229, sizes: ['0–3M', '3–6M', '6–9M'], colors: ['Baby Pink', 'Sky Blue', 'Cream'], hsn: '6111' },
 ];
 
 const SUPPLIER_DEFS = [
-  { name: 'Mumbai Textile Mills', contactPerson: 'Rajesh Sharma', phone: '9821034567', email: 'rajesh@mumbaitextile.com', gstin: '27AABCU9603R1ZX', address: '42, Cotton Street, Mumbai - 400001' },
-  { name: 'Delhi Footwear House', contactPerson: 'Priya Kapoor', phone: '9811234567', email: 'priya@delhifootwear.com', gstin: '07AAJCK2197H1Z9', address: '18, Leather Lane, Karol Bagh, New Delhi - 110005' },
-  { name: 'TechGadgets India', contactPerson: 'Amit Verma', phone: '9900112233', email: 'amit@techgadgets.in', gstin: '29AABCT5432R1ZV', address: '7, Electronics Complex, Bengaluru - 560001' },
-  { name: 'Chennai Accessories Co.', contactPerson: 'Sundar Rajan', phone: '9444012345', email: 'sundar@chennaiacc.com', gstin: '33AACCC1329A1ZT', address: '55, Anna Salai, Chennai - 600002' },
-  { name: 'Home Essentials Ltd.', contactPerson: 'Meera Nair', phone: '9567890123', email: 'meera@homeessentials.co.in', gstin: '32AABCH9231R1ZM', address: '22, Industrial Estate, Kochi - 682021' },
+  { name: 'Tirupur Kids Knitwear', contactPerson: 'S. Karthik', phone: '9842011223', email: 'karthik@tirupurkids.in', gstin: '33AAACT1234K1Z5', address: '14, Knit City, Tirupur - 641604' },
+  { name: 'Little Threads Mfg. Co.', contactPerson: 'Neha Bansal', phone: '9811044556', email: 'neha@littlethreads.in', gstin: '07AABCL9876M1Z3', address: '9, Garment Block, Gandhi Nagar, Delhi - 110031' },
+  { name: 'Ludhiana Winterwear',  contactPerson: 'Harpreet Singh', phone: '9878012345', email: 'harpreet@ldhwinter.in', gstin: '03AACCL4567P1ZQ', address: '22, Woollen Market, Ludhiana - 141008' },
+  { name: 'Jaipur Ethnic Kids',   contactPerson: 'Pooja Rathore', phone: '9829033445', email: 'pooja@jaipurethnickids.in', gstin: '08AAECJ7654R1ZL', address: '5, Bapu Bazaar, Jaipur - 302003' },
+  { name: 'BabyCare Essentials',  contactPerson: 'Manish Gupta', phone: '9900022110', email: 'manish@babycareess.in', gstin: '29AAFCB3210T1ZK', address: '31, MG Road, Bengaluru - 560001' },
 ];
 
 const CUSTOMER_DEFS = [
-  { name: 'Arjun Mehta', email: 'arjun.mehta@gmail.com', phone: '9876543210' },
-  { name: 'Sneha Reddy', email: 'sneha.reddy@gmail.com', phone: '9765432109' },
-  { name: 'Kiran Patel', email: 'kiran.patel@yahoo.com', phone: '9654321098' },
-  { name: 'Divya Singh', email: 'divya.singh@outlook.com', phone: '9543210987' },
-  { name: 'Rohan Joshi', email: 'rohan.joshi@gmail.com', phone: '9432109876' },
-  { name: 'Ananya Iyer', email: 'ananya.iyer@gmail.com', phone: '9321098765' },
-  { name: 'Vikram Nair', email: 'vikram.nair@gmail.com', phone: '9210987654' },
-  { name: 'Pooja Sharma', email: 'pooja.sharma@hotmail.com', phone: '9109876543' },
+  { name: 'Aisha Khan',      email: 'aisha.khan@gmail.com',   phone: '9876500011' },
+  { name: 'Rahul Verma',     email: 'rahul.verma@gmail.com',  phone: '9876500022' },
+  { name: 'Meera Nair',      email: 'meera.nair@gmail.com',   phone: '9876500033' },
+  { name: 'Sana Sheikh',     email: 'sana.sheikh@yahoo.com',  phone: '9876500044' },
+  { name: 'Karan Malhotra',  email: 'karan.m@outlook.com',    phone: '9876500055' },
+  { name: 'Divya Menon',     email: 'divya.menon@gmail.com',  phone: '9876500066' },
+  { name: 'Farhan Ali',      email: 'farhan.ali@gmail.com',   phone: '9876500077' },
+  { name: 'Priyanka Rao',    email: 'priyanka.rao@gmail.com', phone: '9876500088' },
+  { name: 'Nikhil Joshi',    email: 'nikhil.joshi@gmail.com', phone: '9876500099' },
+  { name: 'Ritika Sharma',   email: 'ritika.sharma@gmail.com',phone: '9876500100' },
 ];
 
+const AGING_STEPS = [
+  { days: 30,  label: 'Fresh (30 days)',           percent: 0  },
+  { days: 60,  label: 'Slow-moving (60 days)',      percent: 5  },
+  { days: 90,  label: 'Clearance (90 days)',        percent: 10 },
+  { days: 120, label: 'Heavy Discount (120 days)',  percent: 15 },
+  { days: 180, label: 'Half-Year Sale (180 days)',  percent: 20 },
+  { days: 365, label: 'Annual Clearance (1 Year)',  percent: 30 },
+  { days: 730, label: 'Deep Clearance (2+ Years)',  percent: 50 },
+];
+// Age (days) each purchase batch is backdated to, so aging buckets are covered.
+const PURCHASE_AGE_BUCKETS = [8, 20, 45, 75, 100, 140, 183, 260, 400, 800];
+
 async function seed() {
-  console.log('Connecting to MongoDB…');
-  await mongoose.connect(process.env.MONGODB_URI);
-  console.log('Connected.\n');
+  const uri = process.env.MONGODB_URI;
+  if (!uri) { console.error('MONGODB_URI not set'); process.exit(1); }
+  if (process.env.MONGODB_URIprod && uri === process.env.MONGODB_URIprod) {
+    console.error('Refusing to run against the production URI.'); process.exit(1);
+  }
 
-  // ── Clear existing data ─────────────────────────────────────
-  console.log('Clearing existing data…');
-  await Promise.all([
-    Product.deleteMany({}),
-    Supplier.deleteMany({}),
-    Purchase.deleteMany({}),
-    SaleTransaction.deleteMany({}),
-    StockMovement.deleteMany({}),
-    Customer.deleteMany({}),
-    Order.deleteMany({}),
-    Coupon.deleteMany({}),
-    AppSettings.deleteMany({}),
-    // Keep Users — we'll upsert
-  ]);
-  console.log('Cleared.\n');
+  console.log('Connecting…');
+  await mongoose.connect(uri);
+  console.log(`Connected (${uri.replace(/\/\/[^@]*@/, '//<credentials>@')})\n`);
 
-  // ── Users (upsert + always reset password so logins are predictable) ──
-  console.log('Creating users…');
-  const pwHash = await bcrypt.hash('Admin@123', 12);
+  // ── wipe ──────────────────────────────────────────────────
+  console.log('Clearing data…');
+  const collections = ['products', 'suppliers', 'purchases', 'saletransactions', 'stockmovements',
+    'customers', 'orders', 'coupons', 'appsettings', 'creditnotes', 'replacementnotes', 'settlements',
+    'salereturns', 'exchanges', 'purchasereturns', 'salarypayments', 'attendances', 'counters'];
+  for (const c of collections) {
+    try { await mongoose.connection.db.collection(c).deleteMany({}); } catch { /* may not exist */ }
+  }
+  // Wipe old product + category photos on disk
+  for (const sub of ['products', 'categories']) {
+    const dir = path.join(__dirname, 'uploads', sub);
+    for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+      if (f !== '.gitkeep') { try { fs.unlinkSync(path.join(dir, f)); } catch { /* ignore */ } }
+    }
+  }
+  console.log('Cleared (data + product & category photos).\n');
+
+  // ── users ─────────────────────────────────────────────────
+  const adminHash = await bcrypt.hash('Admin@123', 12);
   const staffHash = await bcrypt.hash('Staff@123', 12);
-
-  let admin = await User.findOneAndUpdate(
+  const admin = await User.findOneAndUpdate(
     { email: 'admin@commoncart.com' },
-    { name: 'Admin User', passwordHash: pwHash, role: 'ADMIN' },
+    { name: 'Store Admin', passwordHash: adminHash, role: 'ADMIN', isActive: true },
     { new: true, upsert: true }
   );
-  let staff = await User.findOneAndUpdate(
+  const staff = await User.findOneAndUpdate(
     { email: 'staff@commoncart.com' },
-    { name: 'Staff Member', passwordHash: staffHash, role: 'STAFF' },
+    {
+      name: 'Shop Staff', passwordHash: staffHash, role: 'STAFF', isActive: true,
+      permissions: {
+        sections: ['dashboard', 'pos', 'products', 'purchases', 'suppliers', 'inventory', 'sales', 'web-orders', 'customers'],
+        viewCostPrice: false, canManage: true,
+      },
+    },
     { new: true, upsert: true }
   );
-  console.log('  admin@commoncart.com  / Admin@123  (ADMIN)');
-  console.log('  staff@commoncart.com  / Staff@123  (STAFF)');
+  console.log('Users:  admin@commoncart.com / Admin@123   ·   staff@commoncart.com / Staff@123');
 
-  // ── App Settings ────────────────────────────────────────────
-  console.log('\nCreating app settings…');
-  await AppSettings.set('CREDIT_CONFIG', { rupeesPerPoint: 500, pointValue: 1 });
-  await AppSettings.set('PRICE_AGING_CONFIG', {
-    enabled: true,
-    steps: [
-      { days: 30,  label: 'Fresh (30 days)',           percent: 0  },
-      { days: 60,  label: 'Slow-moving (60 days)',      percent: 5  },
-      { days: 90,  label: 'Clearance (90 days)',        percent: 10 },
-      { days: 120, label: 'Heavy Discount (120 days)',  percent: 15 },
-      { days: 180, label: 'Half-Year Sale (180 days)',  percent: 20 },
-      { days: 365, label: 'Annual Clearance (1 Year)',  percent: 30 },
-      { days: 730, label: 'Deep Clearance (2+ Years)',  percent: 50 },
-    ],
+  // ── settings ──────────────────────────────────────────────
+  console.log('\nSettings…');
+  await AppSettings.set('BUSINESS_CONFIG', {
+    businessName: 'Tom & Jerry Kids Wear',
+    addressLine: 'Shop 4, Little Steps Plaza, MG Road',
+    phone: '+91 90000 00000',
+    email: 'hello@tomandjerry.in',
+    gstin: '29ABCDE1234F1Z5',
+    gstEnabled: true,
+    gstPercent: 5,           // most kids garments in India: 5% GST
+    gstInclusive: true,
+    defaultHsnCode: '6111',  // babies' garments, knitted
+    stateName: 'Karnataka',
+    footerNote: 'Thank you — dress up those little smiles! · tomandjerry.in',
   });
+  // Generate a sample illustrative image for every category + sub-category.
+  const categoryCatalog = [];
+  for (const c of CATEGORY_CATALOG) {
+    const image = await makeCategoryPhoto({ name: c.name, kind: 'category' });
+    const subImages = {};
+    for (const sub of c.subCategories) subImages[sub] = await makeCategoryPhoto({ name: sub, kind: 'sub' });
+    categoryCatalog.push({ name: c.name, image, subCategories: c.subCategories, subImages });
+  }
+  await AppSettings.set('CATEGORY_CONFIG', { categories: categoryCatalog });
+  await AppSettings.set('VARIANT_CONFIG', { variants: KID_COLORS, sizes: KID_SIZES, variantSelectorEnabled: true });
+  await AppSettings.set('CREDIT_CONFIG', { pointsPerAmount: 1, perRupees: 200, rupeesPerPoint: 200, pointValue: 1 }); // earn 1 pt / ₹200, 1 pt = ₹1
+  await AppSettings.set('PRICE_AGING_CONFIG', { enabled: true, steps: AGING_STEPS });
+  await AppSettings.set('AUTO_DELETE_CONFIG', { enabled: false, days: 30 });
+  await AppSettings.set('PAYMENT_MODES_CONFIG', {
+    modes: [{ key: 'CASH', label: 'Cash' }, { key: 'CARD', label: 'Card' }, { key: 'UPI', label: 'UPI' }, { key: 'OTHER', label: 'Other' }],
+  });
+  await AppSettings.set('DISPLAY_CONFIG', { dateFormat: 'DD/MM/YYYY' });
+  console.log(`  business (GST 5% incl), categories (${categoryCatalog.length} age bands, with images), colors/sizes, credit, aging (on), payment modes`);
 
-  // ── Suppliers ───────────────────────────────────────────────
-  console.log('\nCreating suppliers…');
+  // ── suppliers ─────────────────────────────────────────────
   const suppliers = await Supplier.insertMany(SUPPLIER_DEFS.map((s) => ({ ...s, balance: 0, isActive: true })));
-  console.log(`  ${suppliers.length} suppliers created`);
-
-  // ── Products + Purchases ────────────────────────────────────
-  console.log('\nCreating products and purchases…');
-  const allProducts = [];
-  const allPurchases = [];
-
-  // Group product defs by supplier
+  console.log(`\nSuppliers: ${suppliers.length}`);
   const supplierForCategory = {
-    'Clothing': suppliers[0],
-    'Footwear': suppliers[1],
-    'Electronics': suppliers[2],
-    'Accessories': suppliers[3],
-    'Home & Kitchen': suppliers[4],
+    'Newborn (0–3M)': suppliers[4],
+    'Infant (3–12M)': suppliers[0],
+    'Toddler (1–3Y)': suppliers[0],
+    'Kids (3–8Y)': suppliers[1],
+    'Pre-Teen (8–14Y)': suppliers[1],
+    'Accessories': suppliers[4],
   };
+  const winterSupplier = suppliers[2];   // jackets / sweatshirts
+  const ethnicSupplier = suppliers[3];   // ethnic wear
 
-  for (const def of PRODUCT_DEFS) {
-    const supplier = supplierForCategory[def.category];
+  // ── products + purchases + photos ────────────────────────
+  console.log('\nProducts, purchases & photos…');
+  const allUnitProducts = [];   // every qty:1 unit-product doc
+  let purchaseCount = 0;
+  let photoCount = 0;
+  const nowTs = Date.now();
+
+  for (const line of PRODUCT_LINES) {
+    let supplier = supplierForCategory[line.category];
+    if (line.subCategory === 'Jackets' || line.subCategory === 'Sweatshirts') supplier = winterSupplier;
+    if (line.subCategory === 'Ethnic Wear') supplier = ethnicSupplier;
+
+    // Each product line lands in ONE age bucket (one purchase batch), so
+    // aging bucket coverage is deterministic across the catalogue.
+    const ageDays = PURCHASE_AGE_BUCKETS[purchaseCount % PURCHASE_AGE_BUCKETS.length];
+    const purchaseDate = new Date(nowTs - ageDays * DAY);
+    // ~45% of lines opt into Price Aging.
+    const agingEnabled = chance(0.45);
+
+    // Generate ONE photo per (line, colour) — shared across its size variants.
+    const photoByColor = {};
+    for (const color of line.colors) {
+      photoByColor[color] = await makeProductPhoto({ name: line.name, shape: line.shape, colorName: color, variant: 0 });
+      photoCount++;
+    }
+
+    const unitDocs = [];
     const purchaseItems = [];
-
-    for (const [color, size] of def.variants) {
-      const qty = rand(5, 25);
-      const bcode = barcode7();
-      const skuVal = sku(def.category, def.name);
-      const product = await Product.create({
-        name: def.name,
-        category: def.category,
-        description: `High quality ${def.name.toLowerCase()} — comfortable and durable.`,
-        SKU: skuVal,
-        barcode: bcode,
-        price: def.price,
-        costPrice: def.costPrice,
-        quantity: qty,
-        reservedQty: 0,
-        supplier: supplier.name,
-        lowStockThreshold: 3,
-        isActive: true,
-        isWebVisible: true,
-        color,
-        size,
-      });
-      allProducts.push(product);
-      purchaseItems.push({ productId: product._id, name: product.name, category: product.category, qty, costPrice: def.costPrice, price: def.price, color, size });
+    for (const color of line.colors) {
+      for (const size of line.sizes) {
+        const units = rand(3, 12); // this many physical pieces of this variant
+        const cc = catCode(line.category);
+        const nc = nameCode(line.name);
+        for (let u = 0; u < units; u++) {
+          unitDocs.push({
+            name: line.name,
+            description: `${line.name} — soft, breathable ${line.category.split(' ')[0].toLowerCase()} wear. Easy wash, tag-free comfort.`,
+            category: line.category,
+            subCategory: line.subCategory,
+            hsnCode: line.hsn,
+            gstPercent: null, // use shop default (5%)
+            SKU: nextSku(cc, nc),
+            barcode: nextBarcode(),
+            price: line.price,
+            costPrice: line.cost,
+            quantity: 1,
+            reservedQty: 0,
+            images: [photoByColor[color]],
+            supplier: supplier.name,
+            lowStockThreshold: 2,
+            isActive: true,
+            isWebVisible: true,
+            color,
+            size,
+            discountPrice: null,
+            manualDiscountPrice: null,
+            agingEnabled,
+            agingBaseDate: purchaseDate,
+          });
+        }
+      }
     }
 
-    const totalCost = purchaseItems.reduce((s, i) => s + i.qty * i.costPrice, 0);
-    const purchaseId = `PUR-${Date.now()}-${id()}`;
-    const purchase = await Purchase.create({
-      purchaseId,
-      supplierId: supplier._id,
-      supplier: supplier.name,
-      purchaseDate: new Date(Date.now() - rand(1, 60) * 86400000),
-      items: purchaseItems,
-      totalCost,
-      note: `Initial stock purchase for ${def.name}`,
-      purchasedBy: admin._id,
+    const created = await Product.insertMany(unitDocs);
+    // Force createdAt to the purchase date too (insertMany stamps "now").
+    await Product.collection.updateMany(
+      { _id: { $in: created.map((c) => c._id) } },
+      { $set: { createdAt: purchaseDate } }
+    );
+    allUnitProducts.push(...created);
+
+    // Roll up into purchase line items (one per variant, qty = units).
+    const byVariant = {};
+    for (const c of created) {
+      const k = `${c.color}|${c.size}`;
+      if (!byVariant[k]) byVariant[k] = { productIds: [], color: c.color, size: c.size };
+      byVariant[k].productIds.push(c._id);
+    }
+    for (const v of Object.values(byVariant)) {
+      purchaseItems.push({
+        productId: v.productIds[0],
+        name: line.name, category: line.category, subCategory: line.subCategory,
+        hsnCode: line.hsn, gstPercent: null,
+        description: '', qty: v.productIds.length,
+        costPrice: line.cost, price: line.price, color: v.color, size: v.size,
+        discountPrice: null, barcode: '',
+      });
+    }
+    const totalCost = purchaseItems.reduce((s, it) => s + it.qty * it.costPrice, 0);
+    const purchaseId = `PUR-${String(purchaseDate.getFullYear()).slice(2)}${String(purchaseDate.getMonth() + 1).padStart(2, '0')}-${String(++purchaseCount).padStart(4, '0')}`;
+    await Purchase.create({
+      purchaseId, supplierId: supplier._id, supplier: supplier.name,
+      purchaseDate, items: purchaseItems, totalCost,
+      note: `Stock intake — ${line.name}`, purchasedBy: admin._id,
+      createdAt: purchaseDate, updatedAt: purchaseDate,
     });
-    allPurchases.push(purchase);
-
-    // Update supplier balance
     await Supplier.findByIdAndUpdate(supplier._id, { $inc: { balance: totalCost } });
-
-    // Add stock movements
-    for (const item of purchaseItems) {
+    for (const it of purchaseItems) {
       await StockMovement.create({
-        productId: item.productId,
-        type: 'RESTOCK',
-        channel: 'SYSTEM',
-        quantityChanged: item.qty,
-        previousQty: 0,
-        newQty: item.qty,
-        note: `Purchase ${purchaseId}`,
-        performedBy: admin._id,
-        transactionId: purchaseId,
+        productId: it.productId, type: 'RESTOCK', channel: 'SYSTEM',
+        quantityChanged: it.qty, previousQty: 0, newQty: it.qty,
+        note: `Purchase ${purchaseId}`, performedBy: admin._id, transactionId: purchaseId,
+        createdAt: purchaseDate,
       });
     }
-
     process.stdout.write('.');
   }
-  console.log(`\n  ${allProducts.length} products, ${allPurchases.length} purchases`);
+  console.log(`\n  ${allUnitProducts.length} unit-products across ${PRODUCT_LINES.length} lines · ${purchaseCount} purchases · ${photoCount} photos generated`);
 
-  // ── Backdate some products into aging buckets (for clearance testing) ──
-  // Aging keys off product.createdAt — spread a portion across age ranges.
-  console.log('\nBackdating some products into aging buckets…');
-  const ageBuckets = [10, 45, 75, 100, 150, 250, 400, 800]; // days old
-  let aged = 0;
-  for (const product of allProducts) {
-    // ~45% of products get an older createdAt so the Aged Products / Clearance pages have data
-    if (Math.random() < 0.45) {
-      const daysOld = pick(ageBuckets);
-      const createdAt = new Date(Date.now() - daysOld * 86400000);
-      // Bypass Mongoose timestamps plugin with a raw collection update
-      await Product.collection.updateOne({ _id: product._id }, { $set: { createdAt } });
-      aged++;
+  // ── manual promo discounts on a few product lines (shop-set, NOT aging) ──
+  // Set the manual discount first so the aging pass below can age down FROM it.
+  console.log('\nApplying discounts…');
+  const promoNames = new Set();
+  {
+    const pool = await Product.find({ isActive: true }).select('_id name price costPrice').lean();
+    for (const p of pool) {
+      if (promoNames.size < 4 && chance(0.01)) promoNames.add(p.name);
     }
   }
-  console.log(`  ${aged} products backdated`);
-
-  // Apply aging discounts now so Clearance / aged-item flows are testable immediately.
-  // Aging-discounted products are marked isAged:true → NOT exchangeable.
-  console.log('\nApplying aging discounts (isAged = true)…');
-  const agingCfg = await AppSettings.get('PRICE_AGING_CONFIG');
-  const sortedSteps = [...agingCfg.steps].sort((a, b) => b.days - a.days);
-  const nowTs = new Date();
-  let discounted = 0;
-  const freshProducts = await Product.find({ isActive: true, isWebVisible: true });
-  for (const p of freshProducts) {
-    const ageDays = (nowTs - new Date(p.createdAt)) / 86400000;
-    const step = sortedSteps.find((s) => ageDays >= s.days && s.percent > 0);
-    if (!step) continue;
-    const base = p.price;
-    const discountedPrice = Math.max(p.costPrice || 0, base * (1 - step.percent / 100));
-    const rounded = Math.round(discountedPrice * 100) / 100;
-    if (rounded < base) {
-      await Product.findByIdAndUpdate(p._id, { discountPrice: rounded, isAged: true });
-      discounted++;
-    }
-  }
-  console.log(`  ${discounted} aged products on clearance (not exchangeable)`);
-
-  // Give a handful of FRESH products a manual promotional discount (isAged stays false).
-  // These should display a discounted price but REMAIN exchangeable.
-  console.log('\nApplying manual promo discounts (isAged = false, still exchangeable)…');
-  const manualPool = await Product.find({ isAged: false, discountPrice: null, isActive: true }).limit(40);
-  let manualDiscounted = 0;
-  for (const p of manualPool) {
-    if (Math.random() < 0.2 && manualDiscounted < 6) {
-      const promo = Math.max(p.costPrice || 0, Math.round(p.price * 0.9 * 100) / 100); // 10% off
+  let promoCount = 0;
+  for (const name of promoNames) {
+    const rows = await Product.find({ name, isActive: true }).select('_id price costPrice');
+    for (const p of rows) {
+      const promo = Math.round(Math.max(p.costPrice, p.price * 0.85) * 100) / 100; // 15% festive off
       if (promo < p.price) {
-        await Product.findByIdAndUpdate(p._id, { discountPrice: promo }); // isAged untouched (false)
-        manualDiscounted++;
+        await Product.updateOne({ _id: p._id }, { $set: { discountPrice: promo, manualDiscountPrice: promo } });
+        promoCount++;
       }
     }
   }
-  console.log(`  ${manualDiscounted} products with manual promo price (exchangeable)`);
+  console.log(`  ${promoCount} unit-products on manual festive promo (${[...promoNames].join(', ') || 'none'})`);
 
-  // Add some payments to suppliers
+  // ── aging discounts — only agingEnabled, measured from agingBaseDate,
+  //    aged DOWN FROM the manual discount when there is one, else from MRP.
+  //    Not gated by web visibility.
+  const sorted = [...AGING_STEPS].sort((a, b) => b.days - a.days);
+  let agedApplied = 0;
+  const agingProducts = await Product.find({ isActive: true, agingEnabled: true });
+  for (const p of agingProducts) {
+    const ageDays = (nowTs - new Date(p.agingBaseDate || p.createdAt)) / DAY;
+    const step = sorted.find((s) => ageDays >= s.days && s.percent > 0);
+    if (!step) continue;
+    const base = (p.manualDiscountPrice != null && p.manualDiscountPrice > 0) ? p.manualDiscountPrice : p.price;
+    // Step % applied exactly — not floored at cost (mirrors applyAgingNow).
+    const rounded = Math.max(0, Math.round(base * (1 - step.percent / 100) * 100) / 100);
+    if (rounded < base) {
+      await Product.updateOne({ _id: p._id }, { $set: { discountPrice: rounded, isAged: true } });
+      agedApplied++;
+    }
+  }
+  console.log(`  ${agedApplied} unit-products auto-discounted by age`);
+
+  // supplier part-payments
   for (const sup of suppliers) {
-    const totalOwed = (await Supplier.findById(sup._id)).balance;
-    const paid = Math.floor(totalOwed * 0.6);
+    const owed = (await Supplier.findById(sup._id)).balance;
+    const paid = Math.floor(owed * (0.4 + Math.random() * 0.3));
     if (paid > 0) {
       await Supplier.findByIdAndUpdate(sup._id, {
         $inc: { balance: -paid },
-        $push: {
-          payments: {
-            amount: paid,
-            method: pick(['CASH', 'BANK_TRANSFER', 'UPI']),
-            reference: `REF-${id()}`,
-            note: 'Partial payment',
-            recordedBy: admin._id,
-            createdAt: new Date(Date.now() - rand(1, 10) * 86400000),
-            updatedAt: new Date(),
-          },
-        },
+        $push: { payments: {
+          amount: paid, method: pick(['CASH', 'BANK_TRANSFER', 'UPI']),
+          reference: `REF-${id6()}`, note: 'Part payment against stock',
+          recordedBy: admin._id, createdAt: new Date(nowTs - rand(1, 20) * DAY), updatedAt: new Date(),
+        } },
       });
     }
   }
 
-  // ── Customers ───────────────────────────────────────────────
-  console.log('\nCreating customers…');
-  const custPwHash = await bcrypt.hash('Customer@123', 10);
-  const customers = await Customer.insertMany(
-    CUSTOMER_DEFS.map((c) => ({
-      ...c,
-      passwordHash: custPwHash,
-      creditPoints: rand(0, 200),
-      isActive: true,
+  // ── customers ─────────────────────────────────────────────
+  console.log('\nCustomers…');
+  const custHash = await bcrypt.hash('Customer@123', 10);
+  const CITIES = [['Bengaluru', 'Karnataka'], ['Mumbai', 'Maharashtra'], ['Chennai', 'Tamil Nadu'], ['Hyderabad', 'Telangana'], ['Pune', 'Maharashtra'], ['Kochi', 'Kerala']];
+  const customers = await Customer.insertMany(CUSTOMER_DEFS.map((c) => {
+    const [city, state] = pick(CITIES);
+    return {
+      ...c, passwordHash: custHash, creditPoints: rand(0, 120), isActive: true,
       addresses: [{
-        fullName: c.name,
-        phone: c.phone,
-        line1: `${rand(1, 999)}, Main Street`,
-        city: pick(['Mumbai', 'Delhi', 'Bengaluru', 'Chennai', 'Hyderabad', 'Pune']),
-        state: pick(['Maharashtra', 'Karnataka', 'Tamil Nadu', 'Telangana']),
-        zip: String(rand(400001, 600099)),
-        country: 'IN',
-        isDefault: true,
+        fullName: c.name, phone: c.phone,
+        line1: `${rand(1, 240)}, ${pick(['Rose', 'Lake View', 'Green Park', 'MG', 'Church'])} Street`,
+        line2: pick(['', 'Near City Mall', 'Opp. Play School', '2nd Floor']),
+        city, state, zip: String(rand(500001, 682099)), country: 'IN', isDefault: true,
       }],
-    }))
-  );
-  console.log(`  ${customers.length} customers created (password: Customer@123)`);
+    };
+  }));
+  console.log(`  ${customers.length} customers (password: Customer@123)`);
 
-  // ── POS Sale Transactions (STORE) ───────────────────────────
-  console.log('\nCreating POS sale transactions…');
-  const payMethods = ['CASH', 'CARD', 'MOBILE', 'OTHER'];
+  // ── POS sales (last 21 days) ─────────────────────────────
+  console.log('\nPOS sales…');
+  const shopGst = { enabled: true, percent: 5, inclusive: true, cgstPercent: 2.5, sgstPercent: 2.5, igstPercent: 0, gstin: '29ABCDE1234F1Z5', stateName: 'Karnataka' };
   let saleCount = 0;
-
-  for (let d = 14; d >= 0; d--) {
-    const salesThisDay = rand(3, 8);
-    for (let s = 0; s < salesThisDay; s++) {
-      const numItems = rand(1, 4);
-      const chosenProducts = [];
-      const used = new Set();
-      for (let i = 0; i < numItems; i++) {
-        let p;
-        let tries = 0;
-        do { p = pick(allProducts); tries++; } while ((used.has(p._id.toString()) || p.quantity < 1) && tries < 20);
-        if (tries < 20) { used.add(p._id.toString()); chosenProducts.push(p); }
+  let saleLineSeq = 0;
+  for (let d = 21; d >= 0; d--) {
+    for (let s = 0, n = rand(2, 7); s < n; s++) {
+      // Pull DISTINCT in-stock unit-products
+      const inStock = allUnitProducts.filter((p) => p.quantity > 0);
+      if (!inStock.length) break;
+      const lines = [];
+      const usedIds = new Set();
+      for (let i = 0, want = rand(1, 3); i < want; i++) {
+        const p = pick(inStock);
+        if (usedIds.has(String(p._id))) continue;
+        usedIds.add(String(p._id));
+        const fresh = await Product.findById(p._id).lean();
+        if (!fresh || fresh.quantity < 1) continue;
+        const unit = fresh.discountPrice ?? fresh.price;
+        lines.push({
+          productId: fresh._id, custom: false, lineId: `Lseed${++saleLineSeq}`,
+          barcode: fresh.barcode, name: `${fresh.name} (${fresh.color}/${fresh.size})`,
+          qty: 1, price: unit, isDiscounted: fresh.discountPrice != null,
+          hsnCode: fresh.hsnCode || '6111', gstPercent: null,
+        });
+        p.quantity = 0; // local bookkeeping so we don't pick it again this run
       }
-      if (!chosenProducts.length) continue;
+      if (!lines.length) continue;
 
-      const items = chosenProducts.map((p) => ({
-        productId: p._id,
-        barcode: p.barcode,
-        name: `${p.name} (${p.color}/${p.size})`,
-        qty: 1,
-        price: p.discountPrice ?? p.price,
-        isDiscounted: p.discountPrice != null,
-      }));
-      const totalAmount = items.reduce((s, i) => s + i.price * i.qty, 0);
-      const txnId = `TXN-${Date.now()}-${id()}`;
-      const customer = Math.random() > 0.5 ? pick(customers) : null;
-
-      const txnDate = new Date();
-      txnDate.setDate(txnDate.getDate() - d);
-      txnDate.setHours(rand(9, 20), rand(0, 59));
+      const goods = lines.reduce((sum, l) => sum + l.price * l.qty, 0);
+      const txnDate = new Date(); txnDate.setDate(txnDate.getDate() - d); txnDate.setHours(rand(10, 20), rand(0, 59), 0, 0);
+      const cust = chance(0.55) ? pick(customers) : null;
+      const txnId = `INV-${String(txnDate.getFullYear()).slice(2)}${String(txnDate.getMonth() + 1).padStart(2, '0')}${String(++saleCount).padStart(4, '0')}`;
 
       await SaleTransaction.create({
-        transactionId: txnId,
-        channel: 'STORE',
-        items,
-        totalAmount,
-        paymentMethod: pick(payMethods),
-        status: 'COMPLETED',
-        soldBy: Math.random() > 0.3 ? admin._id : staff._id,
-        customerId: customer?._id || null,
-        customerPhone: customer?.phone || '',
-        couponCode: '',
-        discountAmount: 0,
-        creditPointsEarned: Math.floor(totalAmount / 500),
-        creditPointsRedeemed: 0,
-        note: '',
-        createdAt: txnDate,
-        updatedAt: txnDate,
+        transactionId: txnId, channel: 'STORE', items: lines, totalAmount: goods,
+        paymentMethod: pick(['CASH', 'CARD', 'UPI', 'UPI', 'CASH']), status: 'COMPLETED',
+        soldBy: chance(0.6) ? staff._id : admin._id,
+        customerId: cust?._id || null, customerPhone: cust?.phone || '', customerName: cust?.name || '',
+        couponCode: '', discountAmount: 0, roundOffAmount: 0,
+        creditPointsEarned: Math.floor(goods / 200), creditPointsRedeemed: 0,
+        note: '', gst: shopGst, createdAt: txnDate, updatedAt: txnDate,
       });
-
-      // Deduct stock + movement
-      for (const item of items) {
-        await Product.findByIdAndUpdate(item.productId, { $inc: { quantity: -item.qty } });
+      for (const l of lines) {
+        await Product.updateOne({ _id: l.productId }, { $inc: { quantity: -l.qty } });
         await StockMovement.create({
-          productId: item.productId,
-          type: 'SALE',
-          channel: 'STORE',
-          quantityChanged: -item.qty,
-          previousQty: 0, // approximate
-          newQty: 0,
-          note: `POS Sale ${txnId}`,
-          performedBy: admin._id,
-          transactionId: txnId,
-          createdAt: txnDate,
+          productId: l.productId, type: 'SALE', channel: 'STORE', quantityChanged: -l.qty,
+          previousQty: 1, newQty: 0, note: `POS Sale ${txnId}`, performedBy: staff._id,
+          transactionId: txnId, createdAt: txnDate,
         });
       }
-      saleCount++;
+      if (cust) await Customer.updateOne({ _id: cust._id }, { $inc: { creditPoints: Math.floor(goods / 200) } });
+      saleCount === 0; // no-op
     }
   }
-  console.log(`  ${saleCount} store sales created`);
+  console.log(`  ${saleCount} store sales`);
 
-  // ── Web Orders ──────────────────────────────────────────────
-  console.log('\nCreating web orders…');
-  const fulfillmentStatuses = ['DELIVERED', 'DELIVERED', 'DELIVERED', 'SHIPPED', 'PROCESSING', 'PENDING', 'CANCELLED'];
+  // ── web orders (last 21 days) ────────────────────────────
+  console.log('\nWeb orders…');
+  const fulfil = ['DELIVERED', 'DELIVERED', 'DELIVERED', 'SHIPPED', 'PROCESSING', 'PENDING', 'CANCELLED'];
   let orderCount = 0;
-
-  for (let d = 14; d >= 0; d--) {
-    const ordersThisDay = rand(1, 4);
-    for (let o = 0; o < ordersThisDay; o++) {
-      const customer = pick(customers);
-      const numItems = rand(1, 3);
-      const chosen = [];
-      const used = new Set();
-      for (let i = 0; i < numItems; i++) {
-        let p;
-        let tries = 0;
-        do { p = pick(allProducts); tries++; } while ((used.has(p._id.toString()) || p.quantity < 1) && tries < 20);
-        if (tries < 20) { used.add(p._id.toString()); chosen.push(p); }
+  for (let d = 21; d >= 0; d--) {
+    for (let o = 0, n = rand(1, 3); o < n; o++) {
+      const cust = pick(customers);
+      const pool = allUnitProducts.filter((p) => p.quantity > 0 || true); // web orders may reserve; keep it simple
+      const picks = [];
+      const seen = new Set();
+      for (let i = 0, want = rand(1, 3); i < want; i++) {
+        const p = pick(pool);
+        if (seen.has(p.name + p.color)) continue;
+        seen.add(p.name + p.color);
+        const fresh = await Product.findById(p._id).lean();
+        if (!fresh) continue;
+        const unit = fresh.discountPrice ?? fresh.price;
+        picks.push({
+          productId: fresh._id, name: `${fresh.name} (${fresh.color}/${fresh.size})`, barcode: fresh.barcode,
+          price: unit, mrp: fresh.price, isDiscounted: fresh.discountPrice != null, qty: 1,
+          image: fresh.images?.[0] || '', hsnCode: fresh.hsnCode || '6111', gstPercent: null,
+        });
       }
-      if (!chosen.length) continue;
-
-      const items = chosen.map((p) => ({ productId: p._id, name: `${p.name} (${p.color}/${p.size})`, barcode: p.barcode, price: p.price, qty: 1, image: '' }));
-      const subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);
-      const shippingCost = subtotal > 999 ? 0 : 99;
-      const totalAmount = subtotal + shippingCost;
-      const fulfillmentStatus = pick(fulfillmentStatuses);
-      const paymentStatus = ['DELIVERED', 'SHIPPED', 'PROCESSING'].includes(fulfillmentStatus) ? 'PAID' : fulfillmentStatus === 'CANCELLED' ? 'REFUNDED' : 'PENDING';
-      const orderId = `ORD-${Date.now()}-${id()}`;
-
-      const orderDate = new Date();
-      orderDate.setDate(orderDate.getDate() - d);
-      orderDate.setHours(rand(8, 22), rand(0, 59));
+      if (!picks.length) continue;
+      const subtotal = picks.reduce((s, i) => s + i.price * i.qty, 0);
+      const shippingCost = subtotal >= 999 ? 0 : 49;
+      const total = subtotal + shippingCost;
+      const f = pick(fulfil);
+      const payStatus = ['DELIVERED', 'SHIPPED', 'PROCESSING'].includes(f) ? 'PAID' : f === 'CANCELLED' ? 'REFUNDED' : 'PENDING';
+      const orderDate = new Date(); orderDate.setDate(orderDate.getDate() - d); orderDate.setHours(rand(9, 22), rand(0, 59), 0, 0);
+      const orderId = `ORD-${String(orderDate.getFullYear()).slice(2)}${String(orderDate.getMonth() + 1).padStart(2, '0')}${String(++orderCount).padStart(4, '0')}`;
 
       await Order.create({
-        orderId,
-        customerId: customer._id,
-        channel: 'WEB',
-        items,
-        shippingAddress: customer.addresses[0],
-        subtotal,
-        shippingCost,
-        totalAmount,
-        paymentMethod: pick(['COD', 'ONLINE', 'CARD']),
-        paymentStatus,
-        fulfillmentStatus,
-        stockReserved: false,
-        stockDeducted: paymentStatus === 'PAID',
-        note: '',
-        couponCode: '',
-        discountAmount: 0,
-        creditPointsEarned: paymentStatus === 'PAID' ? Math.floor(totalAmount / 500) : 0,
-        createdAt: orderDate,
-        updatedAt: orderDate,
+        orderId, customerId: cust._id, channel: 'WEB', items: picks,
+        shippingAddress: cust.addresses[0], subtotal, shippingCost, totalAmount: total,
+        paymentMethod: pick(['COD', 'ONLINE', 'CARD']), paymentStatus: payStatus, fulfillmentStatus: f,
+        stockReserved: false, stockDeducted: payStatus === 'PAID', note: '',
+        couponCode: '', discountAmount: 0,
+        creditPointsEarned: payStatus === 'PAID' ? Math.floor(total / 200) : 0,
+        createdAt: orderDate, updatedAt: orderDate,
       });
-      orderCount++;
     }
   }
-  console.log(`  ${orderCount} web orders created`);
+  console.log(`  ${orderCount} web orders`);
 
-  // ── Coupons ─────────────────────────────────────────────────
-  console.log('\nCreating coupons…');
+  // ── coupons ───────────────────────────────────────────────
   await Coupon.insertMany([
-    { code: 'WELCOME10', description: '10% off your order', type: 'PERCENTAGE', value: 10, minOrderAmount: 500, maxDiscountAmount: 200, maxUses: 100, usedCount: 12, isActive: true, createdBy: admin._id, expiresAt: new Date(Date.now() + 30 * 86400000) },
-    { code: 'FLAT100', description: 'Flat ₹100 off', type: 'FIXED_AMOUNT', value: 100, minOrderAmount: 999, maxDiscountAmount: 0, maxUses: 50, usedCount: 8, isActive: true, createdBy: admin._id, expiresAt: new Date(Date.now() + 60 * 86400000) },
-    { code: 'SAVE20', description: '20% off on orders above ₹2000', type: 'PERCENTAGE', value: 20, minOrderAmount: 2000, maxDiscountAmount: 500, maxUses: 30, usedCount: 3, isActive: true, createdBy: admin._id, expiresAt: new Date(Date.now() + 90 * 86400000) },
-    { code: 'SUMMER15', description: 'Summer sale 15% off', type: 'PERCENTAGE', value: 15, minOrderAmount: 800, maxDiscountAmount: 300, maxUses: 200, usedCount: 45, isActive: true, createdBy: admin._id, expiresAt: new Date(Date.now() + 45 * 86400000) },
-    { code: 'EXPIRED50', description: 'Expired flat ₹50 off', type: 'FIXED_AMOUNT', value: 50, minOrderAmount: 300, maxDiscountAmount: 0, maxUses: 10, usedCount: 10, isActive: false, createdBy: admin._id, expiresAt: new Date(Date.now() - 5 * 86400000) },
+    { code: 'FIRSTSTEP', description: '15% off your first order', type: 'PERCENTAGE', value: 15, minOrderAmount: 499, maxDiscountAmount: 300, maxUses: 500, usedCount: 37, isActive: true, createdBy: admin._id, expiresAt: new Date(nowTs + 60 * DAY) },
+    { code: 'BABY100',   description: 'Flat ₹100 off on ₹799+', type: 'FIXED_AMOUNT', value: 100, minOrderAmount: 799, maxDiscountAmount: 0, maxUses: 300, usedCount: 21, isActive: true, createdBy: admin._id, expiresAt: new Date(nowTs + 45 * DAY) },
+    { code: 'BUNDLE20',  description: '20% off on 3+ items (₹1499+)', type: 'PERCENTAGE', value: 20, minOrderAmount: 1499, maxDiscountAmount: 600, maxUses: 200, usedCount: 9, isActive: true, createdBy: admin._id, expiresAt: new Date(nowTs + 90 * DAY) },
+    { code: 'WINTER10',  description: '10% off jackets & sweatshirts', type: 'PERCENTAGE', value: 10, minOrderAmount: 699, maxDiscountAmount: 250, maxUses: 400, usedCount: 52, isActive: true, createdBy: admin._id, expiresAt: new Date(nowTs + 30 * DAY) },
+    { code: 'DIWALI25',  description: 'Expired festive 25% off', type: 'PERCENTAGE', value: 25, minOrderAmount: 999, maxDiscountAmount: 500, maxUses: 100, usedCount: 100, isActive: false, createdBy: admin._id, expiresAt: new Date(nowTs - 12 * DAY) },
   ]);
-  console.log('  5 coupons created');
 
-  // ── Summary ─────────────────────────────────────────────────
-  console.log('\n' + '='.repeat(55));
-  console.log('SEED COMPLETE');
-  console.log('='.repeat(55));
-  console.log('\nLogin credentials:');
-  console.log('  Admin:    admin@commoncart.com  /  Admin@123');
-  console.log('  Staff:    staff@commoncart.com  /  Staff@123');
-  console.log('  Customer: (any email above)     /  Customer@123');
-  console.log('\nCoupon codes: WELCOME10 · FLAT100 · SAVE20 · SUMMER15');
-  console.log('\nData summary:');
-  console.log(`  Users:      2 (admin + staff)`);
-  console.log(`  Suppliers:  ${suppliers.length}`);
-  console.log(`  Products:   ${allProducts.length} variants (${discounted} on clearance discount)`);
-  console.log(`  Purchases:  ${allPurchases.length}`);
-  console.log(`  Customers:  ${customers.length}`);
-  console.log(`  POS Sales:  ${saleCount}`);
-  console.log(`  Web Orders: ${orderCount}`);
-  console.log(`  Coupons:    5`);
-  console.log('='.repeat(55));
+  // ── summary ───────────────────────────────────────────────
+  const [pTotal, pWeb, pAging, pAged, pPromo] = await Promise.all([
+    Product.countDocuments({}), Product.countDocuments({ isWebVisible: true }),
+    Product.countDocuments({ agingEnabled: true }), Product.countDocuments({ isAged: true }),
+    Product.countDocuments({ isAged: false, discountPrice: { $ne: null } }),
+  ]);
+  console.log('\n' + '='.repeat(58));
+  console.log('  TOM & JERRY KIDS WEAR — SEED COMPLETE');
+  console.log('='.repeat(58));
+  console.log('  Admin:    admin@commoncart.com / Admin@123');
+  console.log('  Staff:    staff@commoncart.com / Staff@123');
+  console.log('  Customer: any of the 10 emails / Customer@123');
+  console.log('  Coupons:  FIRSTSTEP · BABY100 · BUNDLE20 · WINTER10  (DIWALI25 expired)');
+  console.log('  ─────────────────────────────────────────────────────');
+  console.log(`  Product lines:     ${PRODUCT_LINES.length}   (${CATEGORY_CATALOG.length} age-band categories)`);
+  console.log(`  Unit-products:     ${pTotal}  (all with a sample photo, ${pWeb} web-visible)`);
+  console.log(`  Aging enabled:     ${pAging}   ·  auto-aged: ${pAged}   ·  manual promo: ${pPromo}`);
+  console.log(`  Purchases:         ${purchaseCount}  (backdated 8–800 days for aging buckets)`);
+  console.log(`  Suppliers:         ${suppliers.length}   ·  Customers: ${customers.length}`);
+  console.log(`  POS sales:         ${saleCount}   ·  Web orders: ${orderCount}`);
+  console.log('='.repeat(58));
 
   await mongoose.disconnect();
   console.log('\nDone.');

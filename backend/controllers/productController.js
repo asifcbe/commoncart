@@ -4,17 +4,63 @@ const generateSKU = require('../utils/generateSKU');
 const { generateEAN13 } = require('../utils/generateBarcode');
 const { deleteProductImageFiles } = require('../utils/productImages');
 
+// Turn an "age is between minDays and maxDays old" window into a Mongo filter
+// on the product's aging base date (agingBaseDate, falling back to createdAt).
+// older  ⇢ smaller date;  age ≥ minDays  ⇢  baseDate ≤ (now - minDays)
+//                          age <  maxDays ⇢  baseDate >  (now - maxDays)
+function agingWindowFilter(minDays, maxDays) {
+  const now = Date.now();
+  const DAY = 86400000;
+  const range = {};
+  if (Number.isFinite(minDays)) range.$lte = new Date(now - minDays * DAY);
+  if (Number.isFinite(maxDays)) range.$gt = new Date(now - maxDays * DAY);
+  // agingBaseDate set → use it; else fall back to createdAt.
+  return {
+    $or: [
+      { agingBaseDate: { $ne: null, ...range } },
+      { agingBaseDate: null, createdAt: range },
+      { agingBaseDate: { $exists: false }, createdAt: range },
+    ],
+  };
+}
+
 exports.listProducts = async (req, res) => {
   try {
-    const { search, category, subCategory, color, size, page = 1, limit = 20, sort = '-createdAt', isActive } = req.query;
+    const { search, category, subCategory, color, size, page = 1, limit = 20, sort = '-createdAt', isActive, isWebVisible, agingBucket } = req.query;
 
     const query = {};
     if (isActive !== undefined) query.isActive = isActive === 'true';
+    if (isWebVisible !== undefined) query.isWebVisible = isWebVisible === 'true';
     if (category) query.category = category;
     if (subCategory) query.subCategory = subCategory;
     if (color) query.color = color;
     if (size) query.size = size;
     if (search) query.$text = { $search: search };
+
+    // Price-aging filter. Values:
+    //   'enabled'      → every product opted into aging
+    //   'aged'         → products that currently carry an aging discount
+    //   'not-aged'     → aging-enabled but not yet auto-discounted
+    //   '<min>-<max>'  → aging-enabled products whose age (from agingBaseDate)
+    //                    falls in that day window ('<min>+' = open-ended)
+    if (agingBucket) {
+      if (agingBucket === 'enabled') {
+        query.agingEnabled = true;
+      } else if (agingBucket === 'aged') {
+        query.isAged = true;
+      } else if (agingBucket === 'not-aged') {
+        query.agingEnabled = true;
+        query.isAged = { $ne: true };
+      } else {
+        const m = String(agingBucket).match(/^(\d+)-(\d+)$/) || String(agingBucket).match(/^(\d+)(\+)$/);
+        if (m) {
+          const minDays = Number(m[1]);
+          const maxDays = m[2] === '+' ? Infinity : Number(m[2]);
+          query.agingEnabled = true;
+          Object.assign(query, agingWindowFilter(minDays, maxDays));
+        }
+      }
+    }
 
     const skip = (Number(page) - 1) * Number(limit);
     const [products, total] = await Promise.all([
@@ -30,7 +76,7 @@ exports.listProducts = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, category, subCategory, color, size, price, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, hsnCode, gstPercent } = req.body;
+    const { name, description, category, subCategory, color, size, price, discountPrice, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, agingEnabled, hsnCode, gstPercent } = req.body;
     const providedBarcode = (req.body.barcode || '').trim();
     const providedSKU = (req.body.SKU || '').trim();
 
@@ -64,12 +110,21 @@ exports.createProduct = async (req, res) => {
       name, description, category, subCategory: (subCategory || '').trim(),
       color: (color || '').trim(), size: (size || '').trim(),
       price: Number(price),
+      // Optional. Blank / 0 / not-below-MRP → no discount (null). The same
+      // value is the "manual" discount (kept so Price Aging can age down from
+      // it and restore it later) and the initial effective discountPrice.
+      discountPrice: (discountPrice === '' || discountPrice == null || Number(discountPrice) <= 0 || Number(discountPrice) >= Number(price))
+        ? null : Number(discountPrice),
+      manualDiscountPrice: (discountPrice === '' || discountPrice == null || Number(discountPrice) <= 0 || Number(discountPrice) >= Number(price))
+        ? null : Number(discountPrice),
       costPrice: Number(costPrice) || 0,
       quantity: Number(quantity) || 0,
       supplier, location,
       lowStockThreshold: Number(lowStockThreshold) || 10,
       // Hidden from the web store by default — only visible when explicitly enabled
       isWebVisible: isWebVisible === true || isWebVisible === 'true',
+      // Opt-in to Price Aging — off unless explicitly enabled.
+      agingEnabled: agingEnabled === true || agingEnabled === 'true',
       hsnCode: (hsnCode || '').trim(),
       gstPercent: gstPercent === '' || gstPercent == null ? null : Math.max(0, Math.min(100, Number(gstPercent))),
       SKU, barcode, images,
@@ -102,13 +157,65 @@ exports.updateProduct = async (req, res) => {
     // ("use shop default"), not fail Mongoose's Number cast.
     if (updates.gstPercent === '') updates.gstPercent = null;
 
-    // If new images are uploaded they replace the old ones — capture old set to clean up
-    let oldImages = [];
-    if (req.files && req.files.length > 0) {
-      const existing = await Product.findById(req.params.id).select('images');
-      oldImages = existing?.images || [];
-      updates.images = req.files.map((f) => `/uploads/products/${f.filename}`);
+    // discountPrice from the form is the MANUAL (shop-set) discount. A blank
+    // field clears it; a value that isn't a real discount (0, or >= MRP) is
+    // also cleared. We store it as `manualDiscountPrice` and set the effective
+    // `discountPrice` to it — Price Aging re-tightens it on the next apply.
+    if ('discountPrice' in updates) {
+      const dp = Number(updates.discountPrice);
+      const mrp = updates.price != null ? Number(updates.price)
+        : Number((await Product.findById(req.params.id).select('price'))?.price || 0);
+      const manual = (updates.discountPrice === '' || updates.discountPrice == null || Number.isNaN(dp) || dp <= 0 || (mrp > 0 && dp >= mrp))
+        ? null : dp;
+      updates.manualDiscountPrice = manual;
+      updates.discountPrice = manual;
+      updates.isAged = false; // a changed manual price supersedes any aged price until re-applied
     }
+
+    // agingEnabled comes from FormData as the string "true"/"false" — coerce.
+    // Turning it OFF also clears any aging discount already applied — the
+    // price reverts to the manual discount (not to full price).
+    if ('agingEnabled' in updates) {
+      const on = updates.agingEnabled === true || updates.agingEnabled === 'true';
+      updates.agingEnabled = on;
+      if (!on && !('discountPrice' in updates)) {
+        const cur = await Product.findById(req.params.id).select('manualDiscountPrice discountPrice isAged');
+        updates.isAged = false;
+        updates.discountPrice = cur?.manualDiscountPrice ?? null;
+      }
+    }
+    if ('isWebVisible' in updates) {
+      updates.isWebVisible = updates.isWebVisible === true || updates.isWebVisible === 'true';
+    }
+
+    // ── Images ──────────────────────────────────────────────
+    // The form may send `keepImages` — a JSON array of existing image paths
+    // the user chose to keep. New uploads (req.files) are appended. Any
+    // existing image NOT in keepImages is removed from disk.
+    let removedImages = [];
+    const hasKeep = 'keepImages' in updates;
+    const hasNewFiles = req.files && req.files.length > 0;
+
+    if (hasKeep || hasNewFiles) {
+      const existing = await Product.findById(req.params.id).select('images');
+      const oldImages = existing?.images || [];
+
+      let kept;
+      if (hasKeep) {
+        let parsed;
+        try { parsed = JSON.parse(updates.keepImages); } catch { parsed = null; }
+        // Only trust paths that were actually on this product.
+        kept = Array.isArray(parsed) ? parsed.filter((p) => oldImages.includes(p)) : oldImages;
+      } else {
+        // No keepImages sent but new files uploaded → legacy behaviour: replace.
+        kept = [];
+      }
+
+      const added = hasNewFiles ? req.files.map((f) => `/uploads/products/${f.filename}`) : [];
+      updates.images = [...kept, ...added].slice(0, 5);
+      removedImages = oldImages.filter((p) => !kept.includes(p));
+    }
+    delete updates.keepImages;
 
     const product = await Product.findByIdAndUpdate(req.params.id, updates, {
       new: true,
@@ -116,8 +223,8 @@ exports.updateProduct = async (req, res) => {
     });
     if (!product) return res.status(404).json({ message: 'Product not found' });
 
-    // Delete the now-replaced image files from disk
-    if (oldImages.length) deleteProductImageFiles(oldImages);
+    // Delete de-selected / replaced image files from disk
+    if (removedImages.length) deleteProductImageFiles(removedImages);
 
     res.json({ product });
   } catch (err) {

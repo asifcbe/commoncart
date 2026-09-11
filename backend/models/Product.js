@@ -33,10 +33,34 @@ const productSchema = new mongoose.Schema(
     isWebVisible: { type: Boolean, default: false },
     color: { type: String, default: '' },
     size: { type: String, default: '' },
+    // `discountPrice` is the EFFECTIVE selling price shown everywhere (POS,
+    // storefront, bills) — null means "sell at `price`". It may be set by the
+    // shop manually, or lowered further by the Price Aging system.
     discountPrice: { type: Number, default: null },
+    // The shop-set discount, kept separate so Price Aging can compute from it
+    // (aging discounts the manual price when one exists, else the MRP) and
+    // restore it when an aging discount is later cleared. null = no manual
+    // discount. Products created before this field existed have it backfilled
+    // from `discountPrice` when they are not currently aged.
+    manualDiscountPrice: { type: Number, default: null },
+    // Opt-in to the Price Aging system (Settings → Price Aging). Only products
+    // with this ON are ever auto-discounted by product age, listed on the
+    // Aged Products screen, or shown on the storefront clearance page. Default
+    // OFF — set per-product at purchase-entry time via the "Enable aging" box.
+    agingEnabled: { type: Boolean, default: false },
+    // The date product age is measured from for Price Aging — the PURCHASE
+    // date, not when this record was inserted. Set from the purchase's
+    // `purchaseDate` when the unit is created / on purchase edit. Falls back
+    // to `createdAt` for products made before this field existed.
+    agingBaseDate: { type: Date, default: null },
     // true only when the price-aging system has auto-discounted this product.
     // Aged items cannot be exchanged; manually-discounted items can.
     isAged: { type: Boolean, default: false },
+    // Per-unit Exchange/Replace eligibility, set at purchase-entry time via
+    // the "Exchange/Replace Eligible" checkbox (default ON). OFF behaves like
+    // an aged/clearance item — returnSessionController blocks RETURN/EXCHANGE/
+    // REPLACE against it — and the barcode label prints a "No Exchange" line.
+    exchangeable: { type: Boolean, default: true },
     // Timestamp of when available stock first hit zero. Set when availableQty
     // drops to 0, cleared on restock. Used by the auto-delete sweep to measure
     // how long a product has been continuously out of stock.

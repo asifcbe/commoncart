@@ -68,6 +68,11 @@ const DEFAULT_LABEL_PRINT = {
   // independently. 1.0 = no change. Per-field overrides live in fieldStyles.
   mrpScale: 1.0,
   salePriceScale: 1.0,
+  // Fraction (0.3–1) of its zone the barcode strip occupies — narrows it
+  // without changing bar thickness/height.
+  barcodeWidth: 1.0,
+  // Inner label inset per side, in mm (0–8).
+  labelPadding: 0.8,
   // CommonCart-only. Target printer resolution in dpi (152/200/203/300/600 —
   // see frontend PRINTER_DPI_OPTIONS). Barcode/QR images render at this
   // resolution instead of the browser's fixed 96dpi default so they print
@@ -286,6 +291,15 @@ exports.updateInvoiceConfig = async (req, res) => {
 };
 
 const AGING_KEY = 'PRICE_AGING_CONFIG';
+
+// Price Aging measures a product's age from its PURCHASE date
+// (`agingBaseDate`, stamped when the unit is created from a purchase), not
+// from when the DB row was inserted. Older products with no agingBaseDate
+// fall back to `createdAt`.
+const agingAgeDays = (product, now = new Date()) => {
+  const from = product.agingBaseDate || product.createdAt;
+  return (now - new Date(from)) / 86400000;
+};
 // steps: array of { days, percent, label }
 // enabled: bool — whether the auto-reduce job is active
 const DEFAULT_AGING = {
@@ -377,8 +391,20 @@ exports.updateBusinessConfig = async (req, res) => {
 
 // ─── Category catalog ────────────────────────────────────────
 
-// Normalize raw input into { categories: [{ name, subCategories: [] }] },
+// Normalize raw input into
+//   { categories: [{ name, image, subCategories: [], subImages: { <sub>: url } }] }
 // trimming, dropping blanks, and de-duplicating case-insensitively.
+// `subCategories` stays a plain string array (every product-form/dropdown
+// consumer depends on that); per-sub images live in the `subImages` map keyed
+// by sub-category name. `image`/`subImages` are optional — absent on catalogs
+// saved before images existed.
+const cleanImg = (v) => {
+  const s = (v ?? '').toString().trim();
+  // Only accept our own uploaded paths / absolute URLs, cap length.
+  if (!s || s.length > 300) return '';
+  if (s.startsWith('/uploads/') || s.startsWith('http://') || s.startsWith('https://')) return s;
+  return '';
+};
 function normalizeCategories(raw) {
   const list = Array.isArray(raw) ? raw : [];
   const seen = new Set();
@@ -392,6 +418,8 @@ function normalizeCategories(raw) {
 
     const subSeen = new Set();
     const subCategories = [];
+    const rawSubImages = (c && typeof c.subImages === 'object' && c.subImages) || {};
+    const subImages = {};
     for (const s of Array.isArray(c?.subCategories) ? c.subCategories : []) {
       const sub = (s ?? '').toString().trim();
       if (!sub) continue;
@@ -399,18 +427,37 @@ function normalizeCategories(raw) {
       if (subSeen.has(sk)) continue;
       subSeen.add(sk);
       subCategories.push(sub);
+      const img = cleanImg(rawSubImages[sub]);
+      if (img) subImages[sub] = img;
     }
-    categories.push({ name, subCategories });
+    categories.push({ name, image: cleanImg(c?.image), subCategories, subImages });
   }
   return { categories };
 }
 
 exports.getCategoryConfig = async (_req, res) => {
   try {
-    const config = await AppSettings.get(CATEGORY_KEY, DEFAULT_CATEGORIES);
-    res.json({ config });
+    const saved = await AppSettings.get(CATEGORY_KEY, DEFAULT_CATEGORIES);
+    // Run through the normalizer so old catalogs come back with the
+    // image/subImages keys present (empty), giving the editor a stable shape.
+    res.json({ config: normalizeCategories(saved?.categories) });
   } catch (err) {
     res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /settings/category-image  (multipart, field name "image")
+// Compresses one uploaded image to a ≤250KB WebP under uploads/categories/
+// and returns its web path. Used by the Settings category editor for both
+// category and sub-category thumbnails.
+exports.uploadCategoryImage = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
+    const { compressToFile } = require('../utils/imageCompress');
+    const { filename } = await compressToFile(req.file.buffer, 'categories');
+    res.json({ url: `/uploads/categories/${filename}` });
+  } catch (err) {
+    res.status(500).json({ message: `Image processing failed: ${err.message}` });
   }
 };
 
@@ -609,6 +656,8 @@ exports.updateLabelPrintConfig = async (req, res) => {
       barcodeDarkness: Math.max(1, Math.min(4, Number(b.barcodeDarkness) || DEFAULT_LABEL_PRINT.barcodeDarkness)),
       mrpScale: Math.max(1, Math.min(5, Number(b.mrpScale) || DEFAULT_LABEL_PRINT.mrpScale)),
       salePriceScale: Math.max(1, Math.min(5, Number(b.salePriceScale) || DEFAULT_LABEL_PRINT.salePriceScale)),
+      barcodeWidth: Math.max(0.3, Math.min(1, Number(b.barcodeWidth) || DEFAULT_LABEL_PRINT.barcodeWidth)),
+      labelPadding: Math.max(0, Math.min(8, b.labelPadding == null ? DEFAULT_LABEL_PRINT.labelPadding : Number(b.labelPadding))),
       printerDpi: Number(b.printerDpi) || DEFAULT_LABEL_PRINT.printerDpi,
       fieldOrder: Array.isArray(b.fieldOrder) ? b.fieldOrder.slice(0, 40) : DEFAULT_LABEL_PRINT.fieldOrder,
       fieldStyles: (b.fieldStyles && typeof b.fieldStyles === 'object') ? b.fieldStyles : {},
@@ -741,13 +790,23 @@ exports.updateAgingConfig = async (req, res) => {
   try {
     const { enabled, steps } = req.body;
     if (!Array.isArray(steps)) return res.status(400).json({ message: 'steps must be an array' });
+    // Keep only well-formed rows (days ≥ 1, percent 0–100); de-duplicate by
+    // days threshold (last one wins); sort ascending. An empty list is valid —
+    // it just means "no age-based discounting", same as aging disabled.
+    const byDays = new Map();
+    for (const s of steps) {
+      const days = Math.floor(Number(s.days));
+      const percent = Math.max(0, Math.min(100, Number(s.percent)));
+      if (!Number.isFinite(days) || days < 1 || !Number.isFinite(percent)) continue;
+      byDays.set(days, {
+        days,
+        label: String(s.label ?? '').trim() || `After ${days} days`,
+        percent,
+      });
+    }
     const config = {
       enabled: !!enabled,
-      steps: steps.map((s) => ({
-        days: Number(s.days),
-        label: String(s.label),
-        percent: Math.max(0, Math.min(100, Number(s.percent))),
-      })).sort((a, b) => a.days - b.days),
+      steps: [...byDays.values()].sort((a, b) => a.days - b.days),
     };
     await AppSettings.set(AGING_KEY, config);
     res.json({ config });
@@ -756,39 +815,82 @@ exports.updateAgingConfig = async (req, res) => {
   }
 };
 
-// Apply aging discounts to all eligible products right now (manual trigger)
+// Apply aging discounts to all eligible products right now (manual trigger).
+//
+// - Runs for EVERY aging-enabled active product, regardless of web visibility
+//   (the storefront clearance page filters by isWebVisible on its own; the
+//   discount itself must not depend on it).
+// - The aging discount is computed from the product's MANUAL discount price
+//   when it has one, otherwise from its MRP (`price`). So a product already
+//   on a ₹X shop discount ages down from ₹X, not from the list price.
+// - The step percentage is applied exactly — the result is NOT floored at
+//   cost price. Deep clearance steps are meant to move dead stock even at a
+//   loss, so a 50% step always gives a 50%-off price.
+// - Idempotent: always recomputed from that fixed base (never from the current
+//   effective discountPrice), so running twice in the same time frame is a
+//   no-op. As a product ages into a deeper step a re-run re-prices it.
+// - When a product no longer qualifies for any >0% step, its aging discount
+//   is removed and it reverts to the manual discount (or full price).
 exports.applyAgingNow = async (req, res) => {
   try {
     const config = await AppSettings.get(AGING_KEY, DEFAULT_AGING);
     const sortedSteps = [...config.steps].sort((a, b) => b.days - a.days); // largest first
     const now = new Date();
     let updated = 0;
+    let cleared = 0;
 
-    const products = await Product.find({ isActive: true, isWebVisible: true });
+    // Only products explicitly opted into Price Aging are ever auto-discounted.
+    const products = await Product.find({ isActive: true, agingEnabled: true });
     for (const product of products) {
-      const ageMs = now - new Date(product.createdAt);
-      const ageDays = ageMs / 86400000;
+      // Backfill: an un-aged product with a discountPrice but no recorded
+      // manual price predates this field — treat its current discount as the
+      // manual one.
+      if (product.manualDiscountPrice == null && !product.isAged && product.discountPrice != null) {
+        product.manualDiscountPrice = product.discountPrice;
+      }
+
+      const ageDays = agingAgeDays(product, now);
+      // Age down from the manual discount when there is one, else from MRP.
+      const manual = product.manualDiscountPrice != null && product.manualDiscountPrice > 0
+        ? product.manualDiscountPrice : null;
+      const base = manual != null ? manual : product.price;
 
       const matchedStep = sortedSteps.find((s) => ageDays >= s.days);
-      if (!matchedStep || matchedStep.percent <= 0) continue;
+      const qualifies = matchedStep && matchedStep.percent > 0 && base > 0;
 
-      // Compute discounted price from the base (original) price
-      // Use costPrice-floor to avoid selling below cost
-      const base = product.price;
-      if (!base || base <= 0) continue;
+      if (!qualifies) {
+        // No discounting step applies (too new, all matching steps are 0%, or
+        // steps/thresholds changed). Undo any aging discount this system set —
+        // fall back to the manual discount, or to full price.
+        if (product.isAged) {
+          product.discountPrice = manual;
+          product.isAged = false;
+          await product.save();
+          cleared++;
+        } else if (product.isModified('manualDiscountPrice')) {
+          await product.save(); // persist the backfill
+        }
+        continue;
+      }
 
-      const discounted = Math.max(product.costPrice || 0, base * (1 - matchedStep.percent / 100));
-      const rounded = Math.round(discounted * 100) / 100;
+      // Compute from the base (manual discount or MRP). The step percentage is
+      // applied exactly — NOT floored at cost, so clearance steps really clear.
+      const discounted = base * (1 - matchedStep.percent / 100);
+      const rounded = Math.max(0, Math.round(discounted * 100) / 100);
 
-      if (rounded < base) {
+      if (rounded < base && (product.discountPrice !== rounded || !product.isAged)) {
         product.discountPrice = rounded;
-        product.isAged = true; // mark as aging-discounted → not exchangeable
+        product.isAged = true; // aging-discounted → not exchangeable
         await product.save();
         updated++;
+      } else if (product.isModified('manualDiscountPrice')) {
+        await product.save(); // persist the backfill
       }
     }
 
-    res.json({ message: `Applied aging discounts to ${updated} product(s)`, updated });
+    const parts = [`Applied aging discounts to ${updated} product(s)`];
+    if (cleared) parts.push(`cleared ${cleared} no longer eligible`);
+    res.json({ message: parts.join(', '), updated, cleared });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -801,18 +903,19 @@ exports.getAgedProducts = async (_req, res) => {
     const sortedSteps = [...config.steps].sort((a, b) => a.days - b.days);
     const now = new Date();
 
-    const products = await Product.find({ isActive: true }).lean();
+    // Aged Products view only shows aging-enabled products.
+    const products = await Product.find({ isActive: true, agingEnabled: true }).lean();
 
     const groups = sortedSteps.map((step, i) => {
       const minDays = step.days;
       const maxDays = sortedSteps[i + 1] ? sortedSteps[i + 1].days : Infinity;
 
       const items = products.filter((p) => {
-        const ageDays = (now - new Date(p.createdAt)) / 86400000;
+        const ageDays = agingAgeDays(p, now);
         return ageDays >= minDays && ageDays < maxDays;
       }).map((p) => ({
         ...p,
-        ageDays: Math.floor((now - new Date(p.createdAt)) / 86400000),
+        ageDays: Math.floor(agingAgeDays(p, now)),
         availableQty: Math.max(0, p.quantity - p.reservedQty),
       }));
 
@@ -821,10 +924,7 @@ exports.getAgedProducts = async (_req, res) => {
 
     // Also include products below the first step (too new)
     const firstStepDays = sortedSteps[0]?.days || 30;
-    const freshProducts = products.filter((p) => {
-      const ageDays = (now - new Date(p.createdAt)) / 86400000;
-      return ageDays < firstStepDays;
-    });
+    const freshProducts = products.filter((p) => agingAgeDays(p, now) < firstStepDays);
 
     res.json({ groups, freshCount: freshProducts.length, config });
   } catch (err) {
@@ -841,13 +941,13 @@ exports.getClearanceProducts = async (_req, res) => {
     const sortedSteps = [...config.steps].filter((s) => s.percent > 0).sort((a, b) => b.days - a.days);
     const now = new Date();
 
-    const allProducts = await Product.find({ isActive: true, isWebVisible: true })
-      .select('name description category SKU barcode price costPrice discountPrice images quantity reservedQty color size createdAt')
+    const allProducts = await Product.find({ isActive: true, isWebVisible: true, agingEnabled: true })
+      .select('name description category SKU barcode price costPrice discountPrice images quantity reservedQty color size createdAt agingBaseDate')
       .lean();
 
     const clearance = [];
     for (const p of allProducts) {
-      const ageDays = (now - new Date(p.createdAt)) / 86400000;
+      const ageDays = agingAgeDays(p, now);
       const step = sortedSteps.find((s) => ageDays >= s.days);
       if (!step) continue;
 

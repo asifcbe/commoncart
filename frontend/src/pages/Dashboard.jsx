@@ -7,6 +7,7 @@ import useAutoRefresh from '../hooks/useAutoRefresh';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import Spinner from '../components/ui/Spinner';
+import { formatTime } from '../utils/date';
 
 const COLORS = ['#22c55e', '#ef4444'];
 
@@ -144,7 +145,7 @@ export default function Dashboard() {
                     <div>
                       <div className="text-sm font-medium">{sale.transactionId}</div>
                       <div className="text-xs text-gray-500">
-                        {sale.channel === 'WEB' ? (sale.customer?.name || 'Web Customer') : (sale.soldBy?.name || 'Staff')} · {new Date(sale.createdAt).toLocaleTimeString()}
+                        {sale.channel === 'WEB' ? (sale.customer?.name || 'Web Customer') : (sale.soldBy?.name || 'Staff')} · {formatTime(sale.createdAt)}
                       </div>
                     </div>
                     <div className="flex items-center gap-3">

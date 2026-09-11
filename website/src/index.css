@@ -2,40 +2,227 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Config-driven CSS variables — set by ThemeProvider from shop.config.js */
+/* Config-driven CSS variables — set by applyTheme() from shop.config.js.
+   The values below are just first-paint fallbacks. */
 :root {
-  --color-primary: #2563eb;
-  --color-primary-dark: #1d4ed8;
-  --color-primary-light: #dbeafe;
-  --color-secondary: #7c3aed;
-  --color-accent: #f59e0b;
+  --color-primary: #1CB0F6;
+  --color-primary-dark: #0E8FCB;
+  --color-primary-light: #E4F6FF;
+  --color-secondary: #FF5DA2;
+  --color-secondary-dark: #E23E85;
+  --color-secondary-light: #FFE6F1;
+  --color-accent: #FFC93C;
+  --color-success: #43C639;
+  --color-danger: #FF4D6D;
+  --color-bg: #FFF9F0;
+  --color-ink: #3A2C1A;
+  --color-ink-soft: #8A7B6A;
+  --color-toffee: #FFE6C7;
 }
 
 @layer base {
   body {
-    @apply text-gray-900 bg-gray-50;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: var(--color-ink);
+    background-color: var(--color-bg);
+    font-family: 'Baloo 2', 'Quicksand', ui-rounded, 'Segoe UI', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
-  a { @apply transition-colors; }
+  h1, h2, h3, h4 { font-weight: 800; letter-spacing: -0.01em; }
+  a { transition: color .15s ease; }
 }
 
-@layer utilities {
+@layer components {
+  /* Bubbly candy button — soft press animation, thick friendly radius */
   .btn-primary {
-    @apply bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] text-white font-semibold rounded-lg px-6 py-2.5 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed;
+    @apply relative overflow-hidden inline-flex items-center justify-center gap-2 font-extrabold text-white rounded-2xl px-6 py-3
+           transition-transform duration-150 active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed;
+    background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    box-shadow: 0 5px 0 0 var(--color-primary-dark), 0 10px 20px -6px rgba(28,176,246,.5);
   }
+  .btn-primary::after {
+    content: ''; position: absolute; inset: 0 auto 0 0; width: 55%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.45), transparent);
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  .btn-primary:hover { filter: brightness(1.05); }
+  .btn-primary:hover::after { animation: sheen .9s ease; }
+  .btn-primary:active { box-shadow: 0 2px 0 0 var(--color-primary-dark); transform: translateY(3px) scale(.98); }
+
+  .btn-candy-pink {
+    @apply relative overflow-hidden inline-flex items-center justify-center gap-2 font-extrabold text-white rounded-2xl px-6 py-3
+           transition-transform duration-150 active:scale-95;
+    background: linear-gradient(180deg, var(--color-secondary) 0%, var(--color-secondary-dark) 100%);
+    box-shadow: 0 5px 0 0 var(--color-secondary-dark), 0 10px 20px -6px rgba(255,93,162,.5);
+  }
+  .btn-candy-pink::after {
+    content: ''; position: absolute; inset: 0 auto 0 0; width: 55%;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.5), transparent);
+    transform: translateX(-130%) skewX(-18deg);
+  }
+  .btn-candy-pink:hover::after { animation: sheen .9s ease; }
+  .btn-candy-pink:active { box-shadow: 0 2px 0 0 var(--color-secondary-dark); transform: translateY(3px) scale(.98); }
+
   .btn-outline {
-    @apply border-2 border-[var(--color-primary)] text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] font-semibold rounded-lg px-6 py-2.5 transition-colors inline-flex items-center justify-center gap-2;
+    @apply inline-flex items-center justify-center gap-2 font-extrabold rounded-2xl px-6 py-3
+           border-[3px] transition-all duration-150 active:scale-95;
+    color: var(--color-primary);
+    border-color: var(--color-primary);
+    background: #fff;
   }
+  .btn-outline:hover { background: var(--color-primary-light); transform: translateY(-2px); }
+
+  /* Rounded card with a soft toffee ring, like a cut-out cookie */
   .card {
-    @apply bg-white rounded-xl border border-gray-100 shadow-sm;
+    @apply bg-white rounded-3xl;
+    border: 2px solid var(--color-toffee);
+    box-shadow: 0 10px 30px -12px rgba(58,44,26,.15);
+    transition: transform .2s cubic-bezier(.2,.9,.3,1.2), box-shadow .2s ease;
   }
+  .card-hover:hover {
+    transform: translateY(-6px) rotate(-.4deg);
+    box-shadow: 0 22px 44px -18px rgba(58,44,26,.28);
+  }
+
   .input {
-    @apply w-full h-10 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)];
+    @apply w-full h-11 rounded-2xl px-4 text-sm outline-none transition-shadow;
+    border: 2px solid var(--color-toffee);
+    background: #fff;
   }
-  .badge-stock-in   { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800; }
-  .badge-stock-low  { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800; }
-  .badge-stock-out  { @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800; }
+  .input:focus { border-color: var(--color-primary); box-shadow: 0 0 0 4px var(--color-primary-light); }
+
+  .badge-stock-in   { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold; background: #E7F9E6; color: #2E9C27; }
+  .badge-stock-low  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold; background: #FFF3D6; color: #B27A00; }
+  .badge-stock-out  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold; background: #FFE3E8; color: #D23A54; }
+
+  /* Chunky pill used by the guided Category → Sub → Size flow */
+  .pick-pill {
+    @apply inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-bold transition-transform duration-150 active:scale-95;
+    border: 2px solid var(--color-toffee);
+    background: #fff;
+    color: var(--color-ink);
+  }
+  .pick-pill:hover { border-color: var(--color-primary); transform: translateY(-2px); }
+  .pick-pill[data-active="true"] {
+    background: linear-gradient(180deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    border-color: var(--color-primary-dark);
+    color: #fff;
+    box-shadow: 0 4px 0 0 var(--color-primary-dark);
+  }
+  .pick-pill--pink[data-active="true"] {
+    background: linear-gradient(180deg, var(--color-secondary) 0%, var(--color-secondary-dark) 100%);
+    border-color: var(--color-secondary-dark);
+    box-shadow: 0 4px 0 0 var(--color-secondary-dark);
+  }
 }
 
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 9999px; }
+/* ── Animations ─────────────────────────────────────────────── */
+@keyframes float {
+  0%,100% { transform: translateY(0) rotate(var(--r, 0deg)); }
+  50%     { transform: translateY(-14px) rotate(var(--r, 0deg)); }
+}
+@keyframes bob {
+  0%,100% { transform: translateY(0); }
+  50%     { transform: translateY(-6px); }
+}
+@keyframes wiggle {
+  0%,100% { transform: rotate(-3deg); }
+  50%     { transform: rotate(3deg); }
+}
+@keyframes pop-in {
+  0%   { opacity: 0; transform: scale(.8) translateY(10px); }
+  60%  { opacity: 1; transform: scale(1.03) translateY(0); }
+  100% { transform: scale(1); }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(18px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sheen {
+  0%   { transform: translateX(-120%) skewX(-18deg); }
+  100% { transform: translateX(220%) skewX(-18deg); }
+}
+@keyframes blob {
+  0%,100% { border-radius: 42% 58% 63% 37% / 42% 45% 55% 58%; }
+  50%     { border-radius: 58% 42% 40% 60% / 55% 58% 42% 45%; }
+}
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+@keyframes gradient-pan {
+  0%,100% { background-position: 0% 50%; }
+  50%     { background-position: 100% 50%; }
+}
+@keyframes heartbeat {
+  0%,100% { transform: scale(1); }
+  15%     { transform: scale(1.25); }
+  30%     { transform: scale(1); }
+  45%     { transform: scale(1.15); }
+}
+@keyframes twinkle {
+  0%,100% { opacity: .25; transform: scale(.8); }
+  50%     { opacity: 1;   transform: scale(1.15); }
+}
+@keyframes drift {
+  0%   { transform: translate(0,0) rotate(0deg); }
+  33%  { transform: translate(14px,-18px) rotate(8deg); }
+  66%  { transform: translate(-10px,12px) rotate(-6deg); }
+  100% { transform: translate(0,0) rotate(0deg); }
+}
+@keyframes press-in {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(.94); }
+  100% { transform: scale(1); }
+}
+@keyframes fall {
+  0%   { transform: translateY(-10%) rotate(0deg); opacity: 0; }
+  10%  { opacity: 1; }
+  100% { transform: translateY(120vh) rotate(360deg); opacity: 0; }
+}
+
+.anim-float     { animation: float 5s ease-in-out infinite; }
+.anim-bob       { animation: bob 2.4s ease-in-out infinite; }
+.anim-wiggle    { animation: wiggle 2.8s ease-in-out infinite; transform-origin: top center; }
+.anim-pop       { animation: pop-in .5s cubic-bezier(.2,.9,.3,1.2) both; }
+.anim-rise      { animation: rise .6s ease both; }
+.anim-blob      { animation: blob 9s ease-in-out infinite; }
+.anim-spin-slow { animation: spin-slow 18s linear infinite; }
+.anim-heartbeat { animation: heartbeat 1.6s ease-in-out infinite; }
+.anim-twinkle   { animation: twinkle 2.2s ease-in-out infinite; }
+.anim-drift     { animation: drift 12s ease-in-out infinite; }
+
+/* Candy gradient text (headings) */
+.text-candy {
+  background: linear-gradient(90deg, var(--color-primary) 0%, var(--color-secondary) 50%, var(--color-accent) 100%);
+  background-size: 200% auto;
+  -webkit-background-clip: text; background-clip: text;
+  color: transparent;
+  animation: gradient-pan 6s ease infinite;
+}
+
+/* Moving sheen swiped across a surface on hover */
+.sheen { position: relative; overflow: hidden; }
+.sheen::after {
+  content: ''; position: absolute; top: 0; left: 0; width: 60%; height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.55), transparent);
+  transform: translateX(-120%) skewX(-18deg);
+}
+.sheen:hover::after { animation: sheen .9s ease; }
+
+/* Hover-lift used by cards/pills; presses on click */
+.lift { transition: transform .18s cubic-bezier(.2,.9,.3,1.2), box-shadow .18s ease; }
+.lift:hover { transform: translateY(-4px); }
+.lift:active { animation: press-in .25s ease; }
+
+/* Staggered reveal helper — pair with .anim-rise / .anim-pop */
+.stagger > * { animation-delay: calc(var(--i, 0) * 60ms); }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-float, .anim-bob, .anim-wiggle, .anim-pop, .anim-rise, .anim-blob,
+  .anim-spin-slow, .anim-heartbeat, .anim-twinkle, .anim-drift,
+  .text-candy, .sheen:hover::after, .lift:active { animation: none !important; }
+  .text-candy { color: var(--color-primary); }
+}
+
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--color-primary), var(--color-secondary));
+  border-radius: 9999px;
+}

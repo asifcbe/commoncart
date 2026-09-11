@@ -32,6 +32,7 @@ export const ALL_LABEL_FIELDS = [
   { key: 'showBarcode',      defaultLabel: 'Barcode Strip' },
   { key: 'showBarcodeNumber',defaultLabel: 'Code Number' },
   { key: 'showExtraFields',  defaultLabel: 'Extra Fields' },
+  { key: 'showNoExchange',   defaultLabel: 'No Exchange Notice' },
 ];
 
 // size variant → font-size multiplier relative to the label's base fontSize
@@ -75,7 +76,7 @@ export const DEFAULT_ZONE_LAYOUT = {
   left: ['showItemCode', 'showSize'],
   center: [CODE_KEY],
   right: ['showVariant', 'showCategory'],
-  bottom: ['showMrp', 'showSalePrice', 'showBarcodeNumber'],
+  bottom: ['showMrp', 'showSalePrice', 'showBarcodeNumber', 'showNoExchange'],
 };
 
 const ALL_ZONE_ITEM_KEYS = () => [CODE_KEY, ...ALL_LABEL_FIELDS.filter((f) => f.key !== 'showBarcode').map((f) => f.key)];
@@ -205,16 +206,19 @@ export const PX_PER_MM = 3.7795;
 // codeScale       → barcode strip height, QR square size, bar thickness
 // barcodeDarkness → barcode bar thickness ONLY (not height, not QR) — a
 //                   distinct "make it darker" control from "make it bigger"
+// labelPadding    → inner inset per side, in mm (physical labels only)
 // printerDpi      → CommonCart-only; target physical printer resolution. Does
 //                   NOT change any on-page layout size, only how many real
 //                   bitmap pixels barcodeDataURL/qrDataURL render per CSS px.
-export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, printerDpi = DEFAULT_PRINTER_DPI, barcodeDarkness = 1.0) => {
+export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, printerDpi = DEFAULT_PRINTER_DPI, barcodeDarkness = 1.0, labelPadding = 0.8, barcodeWidth = 1.0) => {
   const wPx  = entry.widthMm  * PX_PER_MM;
   const hPx  = entry.heightMm ? entry.heightMm * PX_PER_MM : null;
   const isA4 = entry.key === 'a4';
-  // Physical labels get a slim content inset (was 6px per side, ~3mm wasted on
-  // a 50mm label) — just enough that content isn't flush to the die-cut edge.
-  const pad  = isA4 ? 40 : 3;
+  // Inner inset. A4 keeps its generous margin; physical labels use the
+  // configurable labelPadding (mm → px), clamped so a tiny label can't lose
+  // all its usable area.
+  const padMm = Math.max(0, Math.min(8, Number(labelPadding) ?? 0.8));
+  const pad  = isA4 ? 40 : Math.min(padMm * PX_PER_MM, wPx * 0.2);
   const innerW = wPx - pad * 2;
   const innerH = hPx ? hPx - pad * 2 : null;
 
@@ -240,6 +244,11 @@ export const buildSizeConfig = (entry, contentScale = 1.0, codeScale = 1.0, prin
     fontSize:      baseFontPx,
     smallFontSize: smallFontPx,
     barWidth:      Math.max(1, (innerW / 100) * codeScale) * (Number(barcodeDarkness) || 1), // bar thickness
+    // Fraction of the zone width the barcode <img> is capped at (0.3–1.0).
+    barcodeWidth:  Math.max(0.3, Math.min(1, Number(barcodeWidth) || 1)),
+    // Physical inner inset in px — the outer label div uses this so the visual
+    // padding matches the math above.
+    padPx:         pad,
     printerDpi:    Number(printerDpi) || DEFAULT_PRINTER_DPI,
     pixelRatio:    pixelRatioForDpi(printerDpi),
   };
@@ -285,6 +294,11 @@ export const DEFAULT_BARCODE_LABEL = {
   showSize: false,
   showVariant: false,
   showExtraFields: true,
+  // On by default — a "No Exchange" line only ever draws for a product with
+  // exchangeable:false (see renderLabelField's 'showNoExchange' case), so
+  // there's no downside to always including the chip; turning this off hides
+  // the notice shop-wide even on non-exchangeable items.
+  showNoExchange: true,
   defaultLabelSize: 'standard',
   // Layout settings
   codePosition: 'top',          // 'top' | 'middle' | 'bottom' | 'left' | 'right'
@@ -308,6 +322,14 @@ export const DEFAULT_BARCODE_LABEL = {
   // set in the zone editor) wins over these shop-wide defaults when > 0.
   mrpScale: 1.0,
   salePriceScale: 1.0,
+  // Fraction of its zone's width the barcode strip is allowed to occupy
+  // (0.3–1.0). Lower = a narrower printed barcode without changing bar
+  // thickness (barcodeDarkness) or height (codeScale). QR is unaffected.
+  barcodeWidth: 1.0,
+  // Inner padding of the whole label, in millimetres per side (0–8). The old
+  // fixed ~0.8mm inset wasted space on small labels; this makes it tunable so
+  // content can sit closer to (or further from) the die-cut edge.
+  labelPadding: 0.8,
   fieldOrder: [],               // ordered list of ALL_LABEL_FIELDS keys (derived from `zones`)
   fieldStyles: {},              // { [fieldKey]: { size, color } }
   fieldLabels: {},              // { [fieldKey]: customPrefixText }
@@ -430,6 +452,9 @@ export function productToLabelItem(p, businessName) {
     mrp: list || '',
     salePrice: disc != null ? disc : (list || ''),
     barcodeExtraFields: p.barcodeExtraFields || [],
+    // Explicit false only — undefined (item shape doesn't carry it, e.g. an
+    // older cached preview) must never read as "no exchange".
+    noExchange: p.exchangeable === false,
     _businessName: businessName || '',
   };
 }

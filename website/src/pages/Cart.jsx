@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { Trash2, Plus, Minus, ShoppingCart, ArrowRight, Package } from 'lucide-react';
 import useCartStore from '../store/useCartStore';
 import { formatPrice } from '../utils/theme';
+import Img from '../components/ui/Img';
 import shopConfig from '../config/shop.config';
 
 export default function Cart() {
@@ -36,13 +37,8 @@ export default function Cart() {
             <div key={item.productId} className="card p-4 flex gap-4">
               {/* Image */}
               <div className="h-20 w-20 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0">
-                {item.image ? (
-                  <img src={item.image} alt={item.name} className="h-full w-full object-cover" />
-                ) : (
-                  <div className="h-full w-full flex items-center justify-center">
-                    <Package size={24} className="text-gray-300" />
-                  </div>
-                )}
+                <Img src={item.image} alt={item.name} iconSize={24} className="h-full w-full"
+                  imgClassName="h-full w-full object-cover" />
               </div>
 
               {/* Info */}
@@ -50,8 +46,13 @@ export default function Cart() {
                 <Link to={`/products/${item.productId}`} className="font-semibold text-gray-900 hover:underline line-clamp-2 text-sm">
                   {item.name}
                 </Link>
-                <div className="text-sm font-bold mt-1" style={{ color: 'var(--color-primary)' }}>
-                  {formatPrice(item.price)}
+                <div className="flex items-baseline gap-1.5 mt-1">
+                  <span className="text-sm font-bold" style={{ color: 'var(--color-primary)' }}>
+                    {formatPrice(item.price)}
+                  </span>
+                  {item.onSale && item.mrp > item.price && (
+                    <span className="text-xs text-gray-400 line-through">{formatPrice(item.mrp)}</span>
+                  )}
                 </div>
               </div>
 

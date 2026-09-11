@@ -2,6 +2,7 @@ import React, { useEffect } from 'react';
 import { Outlet } from 'react-router-dom';
 import Header from './Header';
 import Footer from './Footer';
+import ScrollToTop from '../ScrollToTop';
 import { connectSocket, disconnectSocket, getSocket } from '../../utils/socket';
 import useShopStore from '../../store/useShopStore';
 import useCartStore from '../../store/useCartStore';
@@ -27,6 +28,7 @@ export default function Layout() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <ScrollToTop />
       <Header />
       <main className="flex-1">
         <Outlet />

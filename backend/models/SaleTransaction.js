@@ -2,12 +2,41 @@ const mongoose = require('mongoose');
 
 const saleItemSchema = new mongoose.Schema(
   {
-    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    // Null for a "custom" line item sold at POS without a catalogued product
+    // (no barcode, no stock tracking) — see `custom` below. Otherwise the
+    // Product this line was sold from.
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+    // True when this line has no backing Product: entered by hand at POS
+    // (name + price + optional HSN/GST), no stock movement, still taxed and
+    // still earns loyalty points like any other line.
+    custom: { type: Boolean, default: false },
+    // Stable per-line identity. For scanned items this is just the productId
+    // string; for custom items (productId: null) it's a generated id so the
+    // Return/Exchange/Replace flow can tell two custom lines apart. Absent on
+    // sales made before this field existed — those fall back to productId,
+    // which is fine since they never carry custom items.
+    lineId: { type: String, default: null },
     barcode: { type: String },
     name: { type: String, required: true },
     qty: { type: Number, required: true, min: 1 },
+    // What the customer is actually charged per unit (the aged/discount price
+    // when the product had one, else the list price). GST is computed from this.
     price: { type: Number, required: true, min: 0 },
+    // The price this line was selling at BEFORE any aging discount — the
+    // product's manual/shop discount price if it had one, otherwise the MRP.
+    // Equal to `price` when the line wasn't aged; higher when it was. Shown on
+    // the bill so the aged reduction is broken out as a "Clearance discount"
+    // line. Absent on sales made before this field.
+    mrp: { type: Number, default: null },
+    // true when this line was sold at an AGING (clearance) discount — the
+    // reduction is shown as "Clearance discount" on the bill, and the line
+    // can't be returned/exchanged.
     isDiscounted: { type: Boolean, default: false },
+    // Snapshotted from Product.exchangeable at sale time (false only when the
+    // purchase-entry "Exchange/Replace Eligible" box was unchecked). Distinct
+    // from isDiscounted/aged — a full-price item can still be marked no-
+    // exchange. Blocks RETURN/EXCHANGE/REPLACE the same way isDiscounted does.
+    noExchange: { type: Boolean, default: false },
     // Snapshotted from the Product at sale time — GST-compliance field for the
     // bill's HSN-wise tax summary. Absent (undefined) on sales made before
     // this field existed, or when the product had no HSN code set.

@@ -18,19 +18,35 @@ export function formatDate(date) {
   return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
 
+// Local wall-clock time as 12-hour with AM/PM (e.g. "2:05 PM") — always 12h
+// regardless of the browser/OS locale, which is what users here expect.
+export function formatTime(date) {
+  if (!date) return '';
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+}
+
 // Same date formatting, plus the local time — replaces toLocaleString() call
-// sites that show a date+time together. Time formatting itself is left as the
-// browser default (12h with AM/PM); only the date portion is reformatted.
+// sites that show a date+time together. Time is always rendered 12-hour with
+// AM/PM (see formatTime); only the date portion follows DISPLAY_CONFIG.
 export function formatDateTime(date) {
   if (!date) return '';
   const d = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(d.getTime())) return '';
 
   const format = useDisplayConfigStore.getState().dateFormat;
-  if (format === 'SYSTEM') return d.toLocaleString();
+  if (format === 'SYSTEM') return `${d.toLocaleDateString()}, ${formatTime(d)}`;
 
-  const time = d.toLocaleTimeString();
-  return `${formatDate(d)}, ${time}`;
+  return `${formatDate(d)}, ${formatTime(d)}`;
+}
+
+// Local date as `YYYY-MM-DD` — the value an `<input type="date">` expects.
+// Built from local getters (not toISOString) so it never shifts by TZ offset.
+export function toDateInput(date = new Date()) {
+  const d = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
 // Formats a Date as the local (system-clock) `YYYY-MM-DDTHH:mm` string a

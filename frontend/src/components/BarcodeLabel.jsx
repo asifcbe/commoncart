@@ -15,14 +15,17 @@ import {
 // instead of the browser's 96dpi default. The <img> is then pinned to
 // `cssWidth` (the 1× size) with height:auto + maxWidth:100%, so on-page layout
 // is unchanged — only sharper on real hardware.
-export const BarcodeImage = ({ value, height = 70, fontSize = 13, barWidth = 1.5, pixelRatio = 1 }) => {
+export const BarcodeImage = ({ value, height = 70, fontSize = 13, barWidth = 1.5, pixelRatio = 1, widthPct = 1 }) => {
   const bc = barcodeDataURL(value, { height, fontSize, barWidth, pixelRatio });
   if (!bc) return <svg style={{ maxWidth: '100%', display: 'block' }} />;
+  // widthPct (0.3–1) caps how wide the strip prints relative to its zone —
+  // narrows the barcode without touching bar thickness or height.
+  const cap = `${Math.max(30, Math.min(100, widthPct * 100))}%`;
   return (
     <img
       src={bc.src}
       alt={value}
-      style={{ width: bc.cssWidth, height: 'auto', maxWidth: '100%', display: 'block' }}
+      style={{ width: bc.cssWidth, height: 'auto', maxWidth: cap, display: 'block' }}
     />
   );
 };
@@ -234,6 +237,21 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
         </p>
       );
     }
+    case 'showNoExchange': {
+      // Data-driven: only ever draws for an item whose product was purchased
+      // with "Exchange/Replace Eligible" unchecked (see productToLabelItem's
+      // `noExchange` mapping) — the field toggle just lets a shop hide the
+      // notice everywhere, not opt individual products in.
+      if (!show(key) || !item?.noExchange) return null;
+      const st = fStyle(key, smallFontSize);
+      const prefix = fLabel(key);
+      const text = prefix != null ? prefix : 'No Exchange';
+      return (
+        <p key={key} style={{ margin: '0 0 1px', fontWeight: 700, ...st }}>
+          {text}
+        </p>
+      );
+    }
     case 'showExtraFields':
       return show(key) ? (
         (item?.barcodeExtraFields || []).filter((f) => f.label || f.value).map((f, i) => {
@@ -259,7 +277,7 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
 // the barcode/QR always stacks vertically regardless (the code needs its own
 // full-width line).
 function ZoneContent({ keys, item, lbl, sizeConfig, mode, align, zoneKey }) {
-  const { barcodeHeight, qrSize, barWidth, fontSize, smallFontSize, pixelRatio } = sizeConfig;
+  const { barcodeHeight, qrSize, barWidth, fontSize, smallFontSize, pixelRatio, barcodeWidth } = sizeConfig;
   const show = (k) => lbl?.[k] !== false;
   const qrValue = item?.barcode || item?.itemCode || item?.name || 'item';
 
@@ -275,8 +293,8 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align, zoneKey }) {
     </div>
   ) : (
     (show('showBarcode') && item?.barcode) ? (
-      <div key={CODE_KEY} style={{ flexShrink: 0, width: '100%' }}>
-        <BarcodeImage value={item.barcode} height={barcodeHeight} fontSize={smallFontSize} barWidth={barWidth} pixelRatio={pixelRatio} />
+      <div key={CODE_KEY} style={{ flexShrink: 0, width: '100%', display: 'flex', justifyContent: 'center' }}>
+        <BarcodeImage value={item.barcode} height={barcodeHeight} fontSize={smallFontSize} barWidth={barWidth} pixelRatio={pixelRatio} widthPct={barcodeWidth ?? 1} />
       </div>
     ) : null
   );
@@ -328,7 +346,7 @@ function ZoneContent({ keys, item, lbl, sizeConfig, mode, align, zoneKey }) {
 
 /* ── Generic label rendered as a 5-zone grid (top / left / center / right / bottom) ── */
 export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
-  const { width, height, key: sizeKey } = sizeConfig;
+  const { width, height, key: sizeKey, padPx } = sizeConfig;
   const align = lbl?.contentAlign || 'center';
   const bgColor = lbl?.backgroundColor || '#ffffff';
   const borderStyle = lbl?.borderStyle || 'solid';
@@ -337,7 +355,9 @@ export const UnifiedLabel = ({ item, sizeConfig, lbl, mode = 'barcode' }) => {
 
   const outerStyle = {
     width, height: height || 'auto',
-    padding: isA4 ? '12px 14px' : '1px 2px',
+    // Physical labels: the configurable inset (padPx from buildSizeConfig,
+    // driven by lbl.labelPadding). A4 keeps its fixed print margin.
+    padding: isA4 ? '12px 14px' : `${Number(padPx) || 1}px`,
     fontFamily: 'Arial, sans-serif',
     overflow: 'hidden',
     display: 'grid',

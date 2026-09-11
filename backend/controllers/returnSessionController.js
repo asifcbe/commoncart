@@ -9,31 +9,39 @@ const StockMovement = require('../models/StockMovement');
 const { generateInvoiceNumber } = require('../utils/invoiceNumber');
 const { getGstSnapshot, computeItemizedGst } = require('../utils/gstSnapshot');
 
-// Sum of returned/replaced qty so far per productId, across ALL CreditNotes /
+// Stable per-line key: the line's own lineId when it has one (all sales made
+// since lineId was introduced), else its productId string (older sales — they
+// never carry custom lines, so productId is unique enough there).
+function lineKeyOf(item) {
+  if (item.lineId) return String(item.lineId);
+  return item.productId ? String(item.productId) : 'null';
+}
+
+// Sum of returned/replaced qty so far per LINE, across ALL CreditNotes /
 // ReplacementNotes referencing this original sale — the sole source of truth
 // for "how much of this line is still available to act on." Both source
 // collections are insert-only, so this is always consistent (no cache to
-// invalidate).
+// invalidate). Keyed by lineKeyOf() so custom lines (productId: null) are told
+// apart from each other.
 async function getConsumedQtyByProduct(originalSaleId) {
   const [returned, replaced] = await Promise.all([
-    CreditNote.aggregate([
-      { $match: { originalSaleId } },
-      { $unwind: '$items' },
-      { $group: { _id: '$items.productId', qty: { $sum: '$items.qty' } } },
-    ]),
-    ReplacementNote.aggregate([
-      { $match: { originalSaleId } },
-      { $unwind: '$items' },
-      { $group: { _id: '$items.productId', qty: { $sum: '$items.qty' } } },
-    ]),
+    CreditNote.find({ originalSaleId }).select('items.productId items.lineId items.qty').lean(),
+    ReplacementNote.find({ originalSaleId }).select('items.productId items.lineId items.qty').lean(),
   ]);
   const map = {};
-  returned.forEach((r) => { map[String(r._id)] = (map[String(r._id)] || 0) + r.qty; });
-  replaced.forEach((r) => { map[String(r._id)] = (map[String(r._id)] || 0) + r.qty; });
+  const tally = (docs) => {
+    docs.forEach((d) => (d.items || []).forEach((it) => {
+      const k = lineKeyOf(it);
+      map[k] = (map[k] || 0) + (it.qty || 0);
+    }));
+  };
+  tally(returned);
+  tally(replaced);
   return map;
 }
 
 exports.getConsumedQtyByProduct = getConsumedQtyByProduct;
+exports.lineKeyOf = lineKeyOf;
 
 // ─── Process a full return/exchange/replace session for one invoice ──────
 exports.processReturnSession = async (req, res) => {
@@ -66,12 +74,13 @@ exports.processReturnSession = async (req, res) => {
       const sale = await SaleTransaction.findById(saleId).session(mongoSession);
       if (!sale) throw Object.assign(new Error('Sale not found'), { status: 404 });
 
-      // Build original per-product line quantities (defensive sum — a sale
-      // could in theory carry the same product on two lines).
-      const originalLineQtyByProduct = {};
+      // Build original per-LINE quantities (keyed by lineKeyOf so two custom
+      // lines — both productId:null — are counted separately). Defensive sum:
+      // a pre-lineId sale could carry the same productId on two lines.
+      const originalLineQty = {};
       sale.items.forEach((it) => {
-        const key = String(it.productId);
-        originalLineQtyByProduct[key] = (originalLineQtyByProduct[key] || 0) + it.qty;
+        const key = lineKeyOf(it);
+        originalLineQty[key] = (originalLineQty[key] || 0) + it.qty;
       });
 
       const consumed = await getConsumedQtyByProduct(sale._id);
@@ -81,32 +90,44 @@ exports.processReturnSession = async (req, res) => {
       const replaceLines = [];   // REPLACE → one ReplacementNote
 
       for (const act of actions) {
-        const key = String(act.productId);
-        const originalItem = sale.items.find((it) => String(it.productId) === key);
+        // Prefer the explicit line key the client selected; fall back to the
+        // productId string for older clients / pre-lineId sales.
+        const key = act.lineKey != null ? String(act.lineKey)
+          : (act.productId ? String(act.productId) : 'null');
+        const originalItem = sale.items.find((it) => lineKeyOf(it) === key);
         if (!originalItem)
-          throw Object.assign(new Error(`Product ${act.productId} was not on this invoice`), { status: 400 });
+          throw Object.assign(new Error(`That line was not on this invoice`), { status: 400 });
+
+        const isCustom = originalItem.custom || !originalItem.productId;
 
         const qty = Number(act.qty) || 0;
         if (qty < 1)
           throw Object.assign(new Error('Quantity must be at least 1'), { status: 400 });
 
         const already = consumed[key] || 0;
-        const available = (originalLineQtyByProduct[key] || 0) - already;
+        const available = (originalLineQty[key] || 0) - already;
         if (qty > available)
           throw Object.assign(new Error(`Only ${available} unit(s) of "${originalItem.name}" remain available to act on`), {
-            status: 409, productId: act.productId, available,
+            status: 409, lineKey: key, available,
           });
         // Reserve this qty against further actions in the same request
         // (e.g. two lines can't both consume the same remaining units).
         consumed[key] = already + qty;
 
         if (act.action === 'RETURN' || act.action === 'EXCHANGE') {
-          const product = await Product.findById(act.productId).session(mongoSession);
-          if (product?.isAged)
-            throw Object.assign(new Error(`"${originalItem.name}" is an aged/clearance item and cannot be returned or exchanged.`), { status: 400 });
+          if (!isCustom) {
+            const product = await Product.findById(originalItem.productId).session(mongoSession);
+            if (product?.isAged)
+              throw Object.assign(new Error(`"${originalItem.name}" is an aged/clearance item and cannot be returned or exchanged.`), { status: 400 });
+            if (product?.exchangeable === false)
+              throw Object.assign(new Error(`"${originalItem.name}" is marked No Exchange and cannot be returned or exchanged.`), { status: 400 });
+          }
 
           returnLines.push({
-            productId: originalItem.productId, barcode: originalItem.barcode, name: originalItem.name,
+            productId: originalItem.productId || null,
+            lineId: originalItem.lineId || null,
+            custom: !!isCustom,
+            barcode: originalItem.barcode, name: originalItem.name,
             qty, price: originalItem.price, isDiscounted: originalItem.isDiscounted,
             // Copied from the original sale item's own snapshot — a return
             // must reverse tax at the rate the item was actually sold at.
@@ -118,11 +139,18 @@ exports.processReturnSession = async (req, res) => {
             reason: act.reason || '',
           });
         } else if (act.action === 'REPLACE') {
-          const product = await Product.findById(act.productId).session(mongoSession);
-          if (product?.isAged)
-            throw Object.assign(new Error(`"${originalItem.name}" is an aged/clearance item and cannot be replaced.`), { status: 400 });
+          if (!isCustom) {
+            const product = await Product.findById(originalItem.productId).session(mongoSession);
+            if (product?.isAged)
+              throw Object.assign(new Error(`"${originalItem.name}" is an aged/clearance item and cannot be replaced.`), { status: 400 });
+            if (product?.exchangeable === false)
+              throw Object.assign(new Error(`"${originalItem.name}" is marked No Exchange and cannot be replaced.`), { status: 400 });
+          }
           replaceLines.push({
-            productId: originalItem.productId, barcode: originalItem.barcode, name: originalItem.name,
+            productId: originalItem.productId || null,
+            lineId: originalItem.lineId || null,
+            custom: !!isCustom,
+            barcode: originalItem.barcode, name: originalItem.name,
             qty, price: originalItem.price, reason: act.reason || '',
           });
         } else {
@@ -218,6 +246,8 @@ exports.processReturnSession = async (req, res) => {
         }
 
         for (const line of returnLines) {
+          // Custom (no-barcode) lines have no stock to put back — money only.
+          if (line.custom || !line.productId) continue;
           const product = await Product.findById(line.productId).session(mongoSession);
           const prev = product.quantity;
           product.quantity += line.qty;
@@ -240,6 +270,9 @@ exports.processReturnSession = async (req, res) => {
       if (replaceLines.length) {
         const replacementNumber = await generateInvoiceNumber('RN');
         for (const line of replaceLines) {
+          // Custom (no-barcode) lines have no stock — no damaged-stock move,
+          // no replacement-out move. The ReplacementNote record is still made.
+          if (line.custom || !line.productId) continue;
           const product = await Product.findById(line.productId).session(mongoSession);
           const prevQty = product.quantity;
           product.quantity = Math.max(0, product.quantity - line.qty);
@@ -267,8 +300,9 @@ exports.processReturnSession = async (req, res) => {
           originalTransactionId: sale.transactionId,
           originalSaleId: sale._id,
           items: replaceLines.map((l) => ({
-            productId: l.productId, barcode: l.barcode, name: l.name, qty: l.qty,
-            price: l.price, replacementProductId: l.productId,
+            productId: l.productId || null, lineId: l.lineId || null, custom: !!l.custom,
+            barcode: l.barcode, name: l.name, qty: l.qty,
+            price: l.price, replacementProductId: l.productId || null,
           })),
           reason: replaceLines.map((l) => l.reason).filter(Boolean).join('; '),
           note: note || '',
@@ -303,8 +337,8 @@ exports.processReturnSession = async (req, res) => {
 
       // ── Derive full-coverage and flip status (the one permitted write) ──
       const finalConsumed = await getConsumedQtyByProduct(sale._id);
-      const fullyCovered = Object.entries(originalLineQtyByProduct)
-        .every(([productId, qty]) => (finalConsumed[productId] || 0) >= qty);
+      const fullyCovered = Object.entries(originalLineQty)
+        .every(([key, qty]) => (finalConsumed[key] || 0) >= qty);
       if (fullyCovered && sale.status !== 'REFUNDED') {
         sale.status = 'REFUNDED';
         await sale.save({ session: mongoSession });
@@ -328,7 +362,7 @@ exports.processReturnSession = async (req, res) => {
 
     res.status(201).json(result);
   } catch (err) {
-    res.status(err.status || 500).json({ message: err.message, productId: err.productId, available: err.available });
+    res.status(err.status || 500).json({ message: err.message, lineKey: err.lineKey, available: err.available });
   } finally {
     mongoSession.endSession();
   }

@@ -28,10 +28,19 @@ import {
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import useAuthStore from '../store/useAuthStore';
 import { canManage } from '../config/permissions';
-import { formatDateTime } from '../utils/date';
+import { formatDateTime, toDateInput } from '../utils/date';
 
 const FULFILLMENT_VARIANT = { PENDING: 'warning', PROCESSING: 'info', SHIPPED: 'secondary', DELIVERED: 'success', CANCELLED: 'danger' };
 const ACTIONS = ['KEEP', 'RETURN', 'EXCHANGE'];
+
+// Stable per-line key — mirrors the backend's lineKeyOf(). Uses the line's own
+// lineId when present (all sales since lineId was added); else the productId
+// string; else 'null'. Lets custom (barcode-less) lines be told apart.
+const lineKeyOf = (it) => {
+  if (it.lineId) return String(it.lineId);
+  const pid = it.productId && typeof it.productId === 'object' ? it.productId._id : it.productId;
+  return pid ? String(pid) : 'null';
+};
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 
 // Phone for sharing a bill (registered customer phone, then captured phone)
@@ -164,20 +173,21 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
 
   const sale = data?.sale;
   const isOrder = data?._type === 'order';
-  const consumedQtyByProduct = sale?.consumedQtyByProduct || {};
+  // Server returns this keyed by lineKeyOf() (see backend getConsumedQtyByProduct).
+  const consumedByLine = sale?.consumedQtyByProduct || {};
 
-  // Total qty per product on the original invoice (a product could appear on
-  // more than one line in principle — sum defensively).
-  const originalQtyByProduct = useMemo(() => {
+  // Total qty per LINE on the original invoice, keyed by lineKeyOf so two
+  // custom lines (both productId:null) count separately.
+  const originalQtyByLine = useMemo(() => {
     const map = {};
     (sale?.items || []).forEach((it) => {
-      const pid = typeof it.productId === 'object' ? it.productId._id : it.productId;
-      map[pid] = (map[pid] || 0) + it.qty;
+      const k = lineKeyOf(it);
+      map[k] = (map[k] || 0) + it.qty;
     });
     return map;
   }, [sale]);
 
-  const remainingFor = (productId) => Math.max(0, (originalQtyByProduct[productId] || 0) - (consumedQtyByProduct[productId] || 0));
+  const remainingFor = (lineKey) => Math.max(0, (originalQtyByLine[lineKey] || 0) - (consumedByLine[lineKey] || 0));
 
   const startEdit = () => {
     setEditForm({
@@ -220,9 +230,9 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
     } finally { setVoiding(false); }
   };
 
-  // ── Return/Exchange session ──
-  const setItemAction = (productId, patch) => {
-    setItemActions((prev) => ({ ...prev, [productId]: { ...prev[productId], ...patch } }));
+  // ── Return/Exchange session ── (keyed by lineKey, not productId)
+  const setItemAction = (lineKey, patch) => {
+    setItemActions((prev) => ({ ...prev, [lineKey]: { ...prev[lineKey], ...patch } }));
     setSessionResult(null);
   };
 
@@ -241,8 +251,8 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   const netPayableRatio = grossBillTotal > 0 ? netPayable / grossBillTotal : 1;
   const creditNotePreviewTotal = activeActions
     .filter(([, v]) => v.action === 'RETURN' || v.action === 'EXCHANGE')
-    .reduce((s, [pid, v]) => {
-      const item = sale?.items.find((it) => (typeof it.productId === 'object' ? it.productId._id : it.productId) === pid);
+    .reduce((s, [lineKey, v]) => {
+      const item = sale?.items.find((it) => lineKeyOf(it) === lineKey);
       return s + (item ? item.price * v.qty * netPayableRatio : 0);
     }, 0);
   const hasFinancialLines = activeActions.some(([, v]) => v.action === 'RETURN' || v.action === 'EXCHANGE');
@@ -252,8 +262,8 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   const previewPointsRestored = Math.min(sale?.creditPointsRedeemed || 0, Math.round((sale?.creditPointsRedeemed || 0) * previewValueRatio));
 
   const handleConfirmSession = async () => {
-    const actions = activeActions.map(([productId, v]) => ({
-      productId, action: v.action, qty: v.qty, reason: v.reason || '',
+    const actions = activeActions.map(([lineKey, v]) => ({
+      lineKey, action: v.action, qty: v.qty, reason: v.reason || '',
     }));
     if (!actions.length) { toast({ message: 'Select at least one item to Return, Exchange, or Replace', type: 'warning' }); return; }
     setSubmittingSession(true);
@@ -410,9 +420,11 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
               </thead>
               <tbody>
                 {sale.items.map((item, i) => {
-                  const pid = typeof item.productId === 'object' ? item.productId._id : item.productId;
+                  const lineKey = lineKeyOf(item);
+                  const isCustom = item.custom || !item.productId;
                   const isDiscounted = item.isDiscounted;
-                  const remaining = remainingFor(pid);
+                  const isNoExchange = item.noExchange;
+                  const remaining = remainingFor(lineKey);
                   const isHighlighted = item.barcode && highlightedBarcodes.has(item.barcode);
                   const cellBase = 'px-3 py-2.5';
                   const cellHighlight = isHighlighted ? ' border-y-2 border-red-500 first:border-l-2 last:border-r-2' : '';
@@ -420,23 +432,34 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                     <tr key={i} className="border-t hover:bg-gray-50 align-top">
                       <td className={`${cellBase}${cellHighlight}`}>
                         {item.name}
-                        {isDiscounted && <span className="ml-1 text-xs text-red-500 font-medium">(Discounted)</span>}
-                        {remaining < item.qty && !isDiscounted && (
+                        {isDiscounted && <span className="ml-1 text-xs text-red-500 font-medium">(Clearance)</span>}
+                        {isNoExchange && <span className="ml-1 text-xs text-red-500 font-medium">(No Exchange)</span>}
+                        {isCustom && <span className="ml-1.5 text-[10px] text-amber-600 border border-amber-300 rounded px-1 py-0.5 align-middle">no barcode</span>}
+                        {remaining < item.qty && !isDiscounted && !isNoExchange && (
                           <div className="text-[10px] text-gray-400 mt-0.5">{item.qty - remaining} of {item.qty} already processed</div>
                         )}
                       </td>
                       <td className={`${cellBase}${cellHighlight} text-xs text-gray-500 font-mono`}>{item.barcode || '—'}</td>
                       <td className={`${cellBase}${cellHighlight}`}>{item.qty}</td>
-                      <td className={`${cellBase}${cellHighlight}`}>₹{item.price.toFixed(2)}</td>
+                      <td className={`${cellBase}${cellHighlight}`}>
+                        {isDiscounted && item.mrp != null && item.mrp > item.price ? (
+                          <>
+                            <span className="line-through text-gray-400">₹{item.mrp.toFixed(2)}</span>{' '}
+                            <span className="text-red-600">₹{item.price.toFixed(2)}</span>
+                          </>
+                        ) : (
+                          <>₹{item.price.toFixed(2)}</>
+                        )}
+                      </td>
                       <td className={`${cellBase}${cellHighlight} font-medium`}>₹{(item.price * item.qty).toFixed(2)}</td>
                       {!isOrder && (
                         <td className={`${cellBase}${cellHighlight}`}>
                           <ItemActionRow
                             item={item}
                             remaining={remaining}
-                            state={itemActions[pid]}
-                            onChange={(next) => setItemAction(pid, next)}
-                            disabled={isDiscounted}
+                            state={itemActions[lineKey]}
+                            onChange={(next) => setItemAction(lineKey, next)}
+                            disabled={isDiscounted || isNoExchange}
                           />
                         </td>
                       )}
@@ -462,7 +485,12 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
 
           {!editing && sale.items.some((i) => i.isDiscounted) && (
             <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-              * Discounted items in this bill cannot be returned, exchanged, or replaced.
+              * Clearance items in this bill cannot be returned, exchanged, or replaced.
+            </p>
+          )}
+          {!editing && sale.items.some((i) => i.noExchange) && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+              * No Exchange items in this bill cannot be returned, exchanged, or replaced.
             </p>
           )}
 
@@ -962,8 +990,9 @@ export default function SalesHistory() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [channel, setChannel] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // Default the sales list to today's sales.
+  const [startDate, setStartDate] = useState(() => toDateInput());
+  const [endDate, setEndDate] = useState(() => toDateInput());
   const [search, setSearch] = useState('');
   const [detailSaleId, setDetailSaleId] = useState(null);
   const [scanInput, setScanInput] = useState('');
@@ -975,7 +1004,12 @@ export default function SalesHistory() {
 
   const fetchSales = (silent = false) => {
     if (!silent) setLoading(true);
-    api.get('/sales', { params: { channel: channel || undefined, startDate: startDate || undefined, endDate: endDate || undefined, search: search || undefined, page, limit: 20 } })
+    // Turn the date-picker's bare YYYY-MM-DD into full local-day boundaries as
+    // ISO instants, so "today" means today in the user's timezone, not the
+    // server's (which is usually UTC).
+    const startISO = startDate ? new Date(`${startDate}T00:00:00`).toISOString() : undefined;
+    const endISO = endDate ? new Date(`${endDate}T23:59:59.999`).toISOString() : undefined;
+    api.get('/sales', { params: { channel: channel || undefined, startDate: startISO, endDate: endISO, search: search || undefined, page, limit: 20 } })
       .then(({ data }) => { setSales(data.sales); setTotal(data.total); setPages(data.pages); })
       .finally(() => { if (!silent) setLoading(false); });
   };
@@ -1154,8 +1188,11 @@ export default function SalesHistory() {
                   <span className="text-gray-400 text-sm">to</span>
                   <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-40" />
                 </div>
-                {(channel || startDate || endDate || searchInput) && (
-                  <Button variant="ghost" size="sm" onClick={() => { setChannel(''); setStartDate(''); setEndDate(''); setSearchInput(''); setPage(1); }}>Clear filters</Button>
+                {(channel || searchInput || startDate !== toDateInput() || endDate !== toDateInput()) && (
+                  <Button variant="ghost" size="sm" onClick={() => { setChannel(''); setStartDate(toDateInput()); setEndDate(toDateInput()); setSearchInput(''); setPage(1); }}>Reset to today</Button>
+                )}
+                {(startDate || endDate) && (
+                  <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate(''); setPage(1); }}>Show all dates</Button>
                 )}
                 <Button variant="outline" size="sm" className="ml-auto" onClick={fetchSales} disabled={loading}>
                   <RefreshCw size={13} className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} /> Refresh

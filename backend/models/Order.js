@@ -5,7 +5,16 @@ const orderItemSchema = new mongoose.Schema(
     productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
     name: { type: String, required: true },
     barcode: { type: String },
+    // What the customer was charged per unit — the discount price when the
+    // product had one, else the list price.
     price: { type: Number, required: true },
+    // The list price at order time. Equal to `price` when not discounted;
+    // shown struck-through on the receipt when higher.
+    mrp: { type: Number, default: null },
+    isDiscounted: { type: Boolean, default: false },
+    // true when this line was sold at an AGING (clearance) discount. Clearance
+    // items earn no loyalty points. Absent on orders before this field existed.
+    isAged: { type: Boolean, default: false },
     qty: { type: Number, required: true, min: 1 },
     image: { type: String, default: '' },
     // Snapshotted from the Product at order time — GST-compliance field for

@@ -15,8 +15,10 @@ const {
   getBarcodeConfig, updateBarcodeConfig, reserveBarcodes,
   getInvoiceConfig, updateInvoiceConfig,
   getDocNumberingConfig, updateDocNumberingConfig,
+  uploadCategoryImage,
 } = require('../controllers/settingsController');
 const { protect, adminOnly, manageOnly } = require('../middleware/auth');
+const upload = require('../utils/multerConfig');
 
 router.get('/credit-config', protect, getCreditConfig);
 router.put('/credit-config', protect, adminOnly, updateCreditConfig);
@@ -28,6 +30,8 @@ router.put('/business-config', protect, adminOnly, updateBusinessConfig);
 // Category catalog — readable by any logged-in user (product form needs it), writable by admin
 router.get('/category-config', protect, getCategoryConfig);
 router.put('/category-config', protect, adminOnly, updateCategoryConfig);
+// Category / sub-category thumbnail upload (compressed to a ≤250KB WebP)
+router.post('/category-image', protect, adminOnly, upload.single('image'), uploadCategoryImage);
 
 // Variants & sizes master lists — readable by any logged-in user (forms need it), writable by admin
 router.get('/variant-config', protect, getVariantConfig);

@@ -312,6 +312,12 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [prodCostPrice, setProdCostPrice] = useState('');
   const [prodPrice, setProdPrice] = useState('');
   const [prodDiscountPrice, setProdDiscountPrice] = useState('');
+  // Opt every unit of this product into the Price Aging system. Default OFF.
+  const [prodAgingEnabled, setProdAgingEnabled] = useState(false);
+  // Exchange/Replace eligibility for every unit of this product. Default ON —
+  // turning it off behaves like an aged/clearance item (blocked in
+  // returnSessionController) and prints "No Exchange" on the barcode label.
+  const [prodExchangeable, setProdExchangeable] = useState(true);
   const [totalQty, setTotalQty] = useState('');
   // variantRows: filled rows { color, size, qty, costPrice, price, discountPrice, barcodes: string[] }
   // slotDrafts: one draft per unassigned slot — these render as editable rows below filled rows
@@ -325,7 +331,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [variantOptions, setVariantOptions] = useState([]);
   const [sizeOptions, setSizeOptions] = useState([]);
   const [variantSelectorEnabled, setVariantSelectorEnabled] = useState(false);
-  useEffect(() => {
+  const loadCatalogs = React.useCallback(() => {
     api.get('/settings/category-config')
       .then(({ data }) => setCategoryCatalog(data.config?.categories || []))
       .catch(() => {});
@@ -336,6 +342,26 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
         setVariantSelectorEnabled(!!data.config?.variantSelectorEnabled);
       })
       .catch(() => {});
+  }, []);
+  useEffect(() => { loadCatalogs(); }, [loadCatalogs]);
+
+  // Optimistically register a just-typed new category / sub-category into the
+  // local catalog so it stays selectable (and re-pickable) in this session,
+  // before the purchase is even saved. The server-side ensureCategoryEntries
+  // persists it for good on submit; loadCatalogs() after save reconciles.
+  const registerLocalCategory = React.useCallback((category, subCategory) => {
+    const cat = (category || '').trim();
+    if (!cat) return;
+    const sub = (subCategory || '').trim();
+    setCategoryCatalog((prev) => {
+      const list = prev.map((c) => ({ ...c, subCategories: [...(c.subCategories || [])] }));
+      let entry = list.find((c) => c.name.toLowerCase() === cat.toLowerCase());
+      if (!entry) { entry = { name: cat, subCategories: [] }; list.push(entry); }
+      if (sub && !entry.subCategories.some((s) => s.toLowerCase() === sub.toLowerCase())) {
+        entry.subCategories.push(sub);
+      }
+      return list;
+    });
   }, []);
 
   // ── EDIT: per-item overrides
@@ -583,12 +609,12 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
           name: prodName, color: row.color.trim(), size: row.size.trim(),
           price: row.price !== '' ? Number(row.price) : (Number(prodPrice) || 0),
           discountPrice: row.discountPrice !== '' ? Number(row.discountPrice) : globalDiscount,
-          qty: 1, _previewBarcode: bc,
+          qty: 1, _previewBarcode: bc, exchangeable: prodExchangeable,
         });
       });
     });
     return result;
-  }, [variantRows, prodName, prodPrice, prodDiscountPrice]);
+  }, [variantRows, prodName, prodPrice, prodDiscountPrice, prodExchangeable]);
 
   const editPrintItems = existingPurchase
     ? existingPurchase.items.map((item, i) => ({
@@ -596,6 +622,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
         price: itemOverrides[i]?.price ?? item.price ?? item.costPrice,
         discountPrice: itemOverrides[i]?.discountPrice ?? item.discountPrice,
         _previewBarcode: item.barcode || '', qty: item.qty,
+        exchangeable: itemOverrides[i]?.exchangeable ?? item.exchangeable !== false,
       }))
     : [];
 
@@ -610,6 +637,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
       try {
         await api.put(`/purchases/${purchaseId}`, { supplierId: supplierId || undefined, supplier: supplierName, note, purchaseDate: localDateTimeInputToISO(purchaseDate), itemOverrides });
         toast({ message: 'Purchase updated', type: 'success' });
+        loadCatalogs(); // pick up any category/sub-category the edit just registered
         onSaved();
       } catch (err) {
         toast({ message: err.response?.data?.message || 'Failed to update purchase', type: 'error' });
@@ -633,6 +661,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
       name: prodName.trim(), category: prodCategory.trim() || 'General', subCategory: prodSubCategory.trim(), hsnCode: prodHsnCode.trim(),
       gstPercent: prodGstPercent === '' ? null : Number(prodGstPercent),
       costPrice: v.costPrice, price: v.price, discountPrice: v.discountPrice,
+      agingEnabled: prodAgingEnabled,
+      exchangeable: prodExchangeable,
       color: v.color, size: v.size, qty: 1, barcode: v.barcode,
     }));
 
@@ -640,6 +670,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     try {
       await api.post('/purchases', { supplierId: supplierId || undefined, supplier: supplierName, items, note, purchaseDate: localDateTimeInputToISO(purchaseDate) });
       toast({ message: 'Purchase recorded — products created / stock updated', type: 'success' });
+      loadCatalogs(); // pick up any new category/sub-category / colour / size just registered
       // Offer to print labels before handing off to the list (onSaved) — the
       // barcodes are only available from this local form state, not after.
       setShowPostSaveConfirm(true);
@@ -754,6 +785,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     subCategory={prodSubCategory}
                     onCategoryChange={setProdCategory}
                     onSubCategoryChange={setProdSubCategory}
+                    onRegisterNew={registerLocalCategory}
                     onKeyDown={productStepEnterNav}
                     labelClass="text-xs font-medium text-gray-600 block mb-1"
                   />
@@ -778,6 +810,36 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     <Input type="number" min="1" max="200" value={totalQty}
                       onChange={(e) => setTotalQty(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 10" /></div>
                 </div>
+                <label className="flex items-start gap-2.5 mt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={prodAgingEnabled}
+                    onChange={(e) => setProdAgingEnabled(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>
+                    <span className="text-sm font-medium text-gray-700">Enable aging</span>
+                    <span className="block text-[11px] text-gray-400">
+                      Opt these units into Price Aging — Automatic Discount by Product Age (Settings → Price Aging).
+                      Aging discounts, the Aged Products screen and the storefront clearance page only apply to products with this on.
+                    </span>
+                  </span>
+                </label>
+                <label className="flex items-start gap-2.5 mt-1 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={prodExchangeable}
+                    onChange={(e) => setProdExchangeable(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>
+                    <span className="text-sm font-medium text-gray-700">Exchange/Replace Eligible</span>
+                    <span className="block text-[11px] text-gray-400">
+                      Off behaves like an aged/clearance item — these units can't be returned, exchanged or replaced in
+                      Sales History, and the barcode label prints "No Exchange".
+                    </span>
+                  </span>
+                </label>
                 <div className="flex justify-between items-center pt-3 border-t">
                   <Button size="sm" variant="ghost" onClick={() => setPurchaseStep('meta')}>Back</Button>
                   <Button size="sm" onClick={goNextPurchaseStep} data-enter-submit>
@@ -1045,6 +1107,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
               const gstPercent = firstOv.gstPercent !== undefined
                 ? (firstOv.gstPercent == null ? '' : String(firstOv.gstPercent))
                 : (firstItem.gstPercent != null ? String(firstItem.gstPercent) : '');
+              const agingEnabled = firstOv.agingEnabled ?? !!firstItem.agingEnabled;
+              const exchangeable = firstOv.exchangeable ?? firstItem.exchangeable !== false;
               const setAllField = (field, val) =>
                 grp.indices.forEach((i) => setItemOverrides((prev) => ({ ...prev, [i]: { ...prev[i], [field]: val } })));
               const soldCount = grp.indices.filter((i) => existingPurchase.items[i].isSold).length;
@@ -1063,6 +1127,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                           catalog={categoryCatalog} category={category} subCategory={subCategory}
                           onCategoryChange={(v) => setAllField('category', v)}
                           onSubCategoryChange={(v) => setAllField('subCategory', v)}
+                          onRegisterNew={registerLocalCategory}
                           onKeyDown={enterNav}
                           labelClass="text-xs font-medium text-gray-600 block mb-1"
                         />
@@ -1071,6 +1136,35 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                         <div><label className="text-xs font-medium text-gray-600 block mb-1">GST % <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
                           <Input type="number" min="0" max="100" step="0.01" value={gstPercent} onChange={(e) => setAllField('gstPercent', e.target.value === '' ? null : Number(e.target.value))} onKeyDown={enterNav} placeholder="e.g. 12" /></div>
                       </div>
+                      <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={agingEnabled}
+                          onChange={(e) => setAllField('agingEnabled', e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>
+                          <span className="text-sm font-medium text-gray-700">Enable aging</span>
+                          <span className="block text-[11px] text-gray-400">
+                            Opt these units into Price Aging. Turning it off also clears any aging discount already applied.
+                          </span>
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={exchangeable}
+                          onChange={(e) => setAllField('exchangeable', e.target.checked)}
+                          className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>
+                          <span className="text-sm font-medium text-gray-700">Exchange/Replace Eligible</span>
+                          <span className="block text-[11px] text-gray-400">
+                            Off behaves like an aged/clearance item — blocked from return/exchange/replace, and the
+                            barcode label prints "No Exchange".
+                          </span>
+                        </span>
+                      </label>
                       <div className="flex gap-4 text-xs text-gray-500">
                         <span>Total units: <strong className="text-gray-700">{grp.indices.length}</strong></span>
                         {soldCount > 0 && <span className="text-red-500">Sold (locked): <strong>{soldCount}</strong></span>}
@@ -1246,6 +1340,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                 name: it.name, barcode: code,
                 price: it.price ?? it.costPrice, discountPrice: it.discountPrice,
                 color: it.color, size: it.size, SKU: it.SKU,
+                exchangeable: it.exchangeable !== false,
               };
             })
             .filter((it) => !printOnlyBarcode || it.barcode === printOnlyBarcode)}

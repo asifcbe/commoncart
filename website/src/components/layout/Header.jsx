@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Search, Menu, X, LogOut, Package, Flame } from 'lucide-react';
+import { ShoppingCart, User, Search, Menu, X, LogOut, Package, Heart } from 'lucide-react';
 import shopConfig from '../../config/shop.config';
 import useCartStore from '../../store/useCartStore';
 import useCustomerStore from '../../store/useCustomerStore';
+import BrandLogo from '../ui/BrandLogo';
 
 export default function Header() {
   const { brand } = shopConfig;
@@ -31,22 +32,14 @@ export default function Header() {
   };
 
   return (
-    <header className="bg-white border-b border-gray-200 sticky top-0 z-40 shadow-sm">
+    <header className="bg-white sticky top-0 z-40 shadow-sm" style={{ borderBottom: '3px solid var(--color-toffee)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16 gap-4">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-2 flex-shrink-0">
-            {brand.logoUrl ? (
-              <img src={brand.logoUrl} alt={brand.logoAltText} className="h-8" />
-            ) : (
-              <div
-                className="h-9 w-9 rounded-lg flex items-center justify-center text-white font-bold text-sm"
-                style={{ background: 'var(--color-primary)' }}
-              >
-                {brand.shortName}
-              </div>
-            )}
-            <span className="font-bold text-lg text-gray-900 hidden sm:block">{brand.name}</span>
+          {/* Logo — one consistent mark at every screen size */}
+          <Link to="/" className="flex-shrink-0" aria-label={brand.name}>
+            {brand.logoUrl
+              ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-9 w-auto" />
+              : <BrandLogo size={32} animated={false} showText />}
           </Link>
 
           {/* Search — desktop */}
@@ -56,9 +49,8 @@ export default function Header() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search products…"
-                className="w-full h-9 rounded-lg border border-gray-300 pl-9 pr-4 text-sm focus:outline-none focus:ring-2 focus:border-transparent"
-                style={{ '--tw-ring-color': 'var(--color-primary)' }}
+                placeholder="Search little outfits…"
+                className="input h-10 pl-9"
               />
             </div>
           </form>
@@ -154,8 +146,8 @@ export default function Header() {
               <input
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search products…"
-                className="flex-1 h-9 rounded-lg border border-gray-300 px-3 text-sm focus:outline-none"
+                placeholder="Search little outfits…"
+                className="input flex-1"
               />
               <button type="submit" className="btn-primary px-4 py-1.5 text-sm rounded-lg">
                 Search
@@ -171,22 +163,21 @@ export default function Header() {
       </div>
 
       {/* Category nav */}
-      <nav className="border-t border-gray-100 bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-6 overflow-x-auto py-2 scrollbar-hide">
-          <Link to="/products" className="text-sm text-gray-600 hover:text-gray-900 whitespace-nowrap font-medium">
-            All Products
+      <nav style={{ background: 'var(--color-primary-light)', borderTop: '2px solid var(--color-toffee)' }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-5 overflow-x-auto py-2 scrollbar-hide items-center">
+          <Link to="/products" className="text-sm font-extrabold whitespace-nowrap" style={{ color: 'var(--color-ink)' }}>
+            All Outfits
           </Link>
-          <Link to="/" className="text-sm text-gray-600 hover:text-gray-900 whitespace-nowrap">
+          <Link to="/" className="text-sm font-bold whitespace-nowrap" style={{ color: 'var(--color-ink-soft)' }}>
             Home
           </Link>
-          <Link to="/clearance" className="text-sm font-semibold text-red-600 hover:text-red-700 whitespace-nowrap flex items-center gap-1">
-            <Flame size={14} /> Clearance Sale
+          <Link to="/clearance" className="text-sm font-extrabold whitespace-nowrap flex items-center gap-1"
+            style={{ color: 'var(--color-secondary-dark)' }}>
+            <Heart size={14} /> Sale
           </Link>
           {shopConfig.contact.phone && (
-            <a
-              href={`tel:${shopConfig.contact.phone}`}
-              className="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap ml-auto"
-            >
+            <a href={`tel:${shopConfig.contact.phone}`}
+              className="text-sm font-bold whitespace-nowrap ml-auto" style={{ color: 'var(--color-ink-soft)' }}>
               {shopConfig.contact.phone}
             </a>
           )}

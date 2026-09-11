@@ -234,6 +234,16 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   const gst = computeItemizedGst(scaledItems, b, sale.gst);
   const hsnRows = gst ? gst.rows : null;
   const hasDiscounted = sale.items.some((i) => i.isDiscounted);
+  // Clearance (aging) discount: the difference between the list price the
+  // customer sees on each line and what they were actually charged, summed
+  // over the aged lines. Shown as its own totals line; the line rate/amount
+  // for those items is the MRP, and this brings the bill back to the charged
+  // goods total before GST (which is still computed from the charged prices).
+  const lineMrp = (it) => (it.mrp != null && it.mrp > it.price ? it.mrp : it.price);
+  const clearanceDiscount = sale.items.reduce(
+    (s, it) => s + (it.isDiscounted ? (lineMrp(it) - it.price) * it.qty : 0),
+    0
+  );
   const grand = gst ? gst.grandTotal : goodsAmount;
   const carried = carriedSettlementOf(sale);
   const netPayable = grand + roundOffAmount + (carried?.amount || 0);
@@ -279,14 +289,17 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
     ],
     columns: anyHsn ? ['#', 'Item', 'HSN', 'Qty', 'Rate', 'Amount'] : ['#', 'Item', 'Qty', 'Rate', 'Amount'],
     align: anyHsn ? ['left', 'left', 'left', 'right', 'right', 'right'] : ['left', 'left', 'right', 'right', 'right'],
-    rows: sale.items.map((it, i) => [
-      i + 1,
-      it.name + (it.isDiscounted ? ' (Discounted)' : ''),
-      ...(anyHsn ? [it.hsnCode || '—'] : []),
-      it.qty,
-      `₹${Number(it.price).toFixed(2)}`,
-      `₹${(it.price * it.qty).toFixed(2)}`,
-    ]),
+    rows: sale.items.map((it, i) => {
+      const rate = it.isDiscounted ? lineMrp(it) : it.price;
+      return [
+        i + 1,
+        it.name + (it.isDiscounted ? ' (Clearance)' : ''),
+        ...(anyHsn ? [it.hsnCode || '—'] : []),
+        it.qty,
+        `₹${Number(rate).toFixed(2)}`,
+        `₹${(rate * it.qty).toFixed(2)}`,
+      ];
+    }),
     hsnRows,
     // Each row's 4th element groups it for the thin section-divider rule in
     // invoiceLayout: 'adjust' = pre-tax bill value/discount/round-off/points,
@@ -296,7 +309,8 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
     // taken off (discount, round-off, points) → the tax on what's left →
     // any carried-forward settlement → what's actually payable → loyalty balance.
     totals: [
-      ...(discount > 0 ? [['Bill Value', `₹${billValue.toFixed(2)}`, false, 'adjust']] : []),
+      ...((discount > 0 || clearanceDiscount > 0.005) ? [['Bill Value', `₹${(billValue + clearanceDiscount).toFixed(2)}`, false, 'adjust']] : []),
+      ...(clearanceDiscount > 0.005 ? [['Clearance Discount', `-₹${clearanceDiscount.toFixed(2)}`, false, 'adjust']] : []),
       ...(nonPointsDiscount > 0 ? [['Discount', `-₹${nonPointsDiscount.toFixed(2)}`, false, 'adjust']] : []),
       ...(roundOffAmount !== 0 ? [['Round Off', `${roundOffAmount > 0 ? '+' : '-'}₹${Math.abs(roundOffAmount).toFixed(2)}`, false, 'adjust']] : []),
       ...(pointsRedeemed > 0 ? [[`Points (${pointsRedeemed} pts)`, `-₹${pointsRedeemedValue.toFixed(2)}`, false, 'adjust']] : []),
@@ -308,7 +322,7 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
         : pointsEarned > 0 ? [[`Points Earned`, `+${pointsEarned} pts`, false, 'loyalty']] : []),
       ...(balancePoints !== null ? [[`Balance Points`, `${balancePoints} pts`, false, 'loyalty']] : []),
     ],
-    note: hasDiscounted ? '* Discounted items cannot be replaced or exchanged.' : '',
+    note: hasDiscounted ? '* Clearance items cannot be replaced or exchanged.' : '',
     footer: b.footerNote || 'Thank you for shopping!',
   });
   }
@@ -316,12 +330,16 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
   // ── Thermal receipt (roll) ──
   // Everything is pure black on white for maximum thermal-print contrast and
   // on-screen readability — no light greys.
-  const itemsHTML = sale.items.map((item, i) =>
-    `<div style="display:flex;justify-content:space-between;font-size:13px;margin:3px 0;color:#000;font-weight:600;">
-      <span>${i + 1}. ${item.name}${item.isDiscounted ? ' <em style="color:#000;font-size:11px;">(Discounted)</em>' : ''} x${item.qty}</span>
-      <span>₹${(item.price * item.qty).toFixed(2)}</span>
-    </div>`
-  ).join('');
+  const itemsHTML = sale.items.map((item, i) => {
+    const rate = item.isDiscounted ? lineMrp(item) : item.price;
+    return `<div style="display:flex;justify-content:space-between;font-size:13px;margin:3px 0;color:#000;font-weight:600;">
+      <span>${i + 1}. ${item.name}${item.isDiscounted ? ' <em style="color:#000;font-size:11px;">(Clearance)</em>' : ''} x${item.qty}</span>
+      <span>₹${(rate * item.qty).toFixed(2)}</span>
+    </div>`;
+  }).join('');
+  const clearanceHTML = clearanceDiscount > 0.005
+    ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>Clearance Discount</span><span>-₹${clearanceDiscount.toFixed(2)}</span></div>`
+    : '';
   const headerLines = [
     `<strong style="font-size:18px;color:#000;">${b.businessName}</strong>`,
     b.addressLine ? `<span style="font-size:11px;color:#000;">${b.addressLine}</span>` : '',
@@ -374,7 +392,8 @@ export function buildBillBodyHTML(sale, business, kind = 'roll', extra = {}) {
 </div>
 ${itemsHTML}
 <div style="border-top:2px solid #000;margin-top:6px;padding-top:6px;">
-  ${discount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:bold;color:#000;"><span>Bill Value</span><span>₹${billValue.toFixed(2)}</span></div>` : ''}
+  ${(discount > 0 || clearanceDiscount > 0.005) ? `<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:bold;color:#000;"><span>Bill Value</span><span>₹${(billValue + clearanceDiscount).toFixed(2)}</span></div>` : ''}
+  ${clearanceHTML}
   ${nonPointsDiscount > 0 ? `<div style="display:flex;justify-content:space-between;font-size:12px;color:#000;font-weight:700;"><span>Discount</span><span>-₹${nonPointsDiscount.toFixed(2)}</span></div>` : ''}
   ${roundOffHTML}
   ${pointsRedeemedHTML}
@@ -385,7 +404,7 @@ ${itemsHTML}
 </div>
 ${hsnHTMLRoll}
 ${pointsHTML}
-${hasDiscounted ? '<p style="font-size:11px;color:#000;font-weight:700;margin-top:8px;border-top:1px dashed #000;padding-top:6px;">* Discounted items cannot be replaced or exchanged.</p>' : ''}
+${hasDiscounted ? '<p style="font-size:11px;color:#000;font-weight:700;margin-top:8px;border-top:1px dashed #000;padding-top:6px;">* Clearance items cannot be replaced or exchanged.</p>' : ''}
 ${barcodeImg ? `<div style="text-align:center;margin-top:10px;border-top:2px solid #000;padding-top:10px;"><img src="${barcodeImg}" style="width:100%;max-width:340px;" alt="${sale.transactionId}" /></div>` : ''}
 <div style="text-align:center;font-size:11px;color:#000;margin-top:8px;font-weight:600;white-space:pre-line;">${b.footerNote || 'Thank you for shopping!'}</div>
 ${billedByName ? `<div style="text-align:center;font-size:9px;color:#000;margin-top:4px;">Billed by: ${billedByName}</div>` : ''}
@@ -690,16 +709,23 @@ export function shareBillWhatsApp(sale, phone, business, extra = {}) {
   lines.push(`Bill #${sale.transactionId}`);
   lines.push(formatDateTime(sale.createdAt));
   lines.push('--------------------------');
+  const waLineMrp = (it) => (it.mrp != null && it.mrp > it.price ? it.mrp : it.price);
   sale.items.forEach((it, i) => {
-    lines.push(`${i + 1}. ${it.name} x${it.qty}  -  ₹${(it.price * it.qty).toFixed(2)}`);
+    const rate = it.isDiscounted ? waLineMrp(it) : it.price;
+    lines.push(`${i + 1}. ${it.name}${it.isDiscounted ? ' (Clearance)' : ''} x${it.qty}  -  ₹${(rate * it.qty).toFixed(2)}`);
   });
   lines.push('--------------------------');
+  const clearanceDiscount = sale.items.reduce(
+    (s, it) => s + (it.isDiscounted ? (waLineMrp(it) - it.price) * it.qty : 0),
+    0
+  );
   // sale.discountAmount bundles coupon + manual discount + points redeemed —
   // split the points portion out so it isn't listed twice (once here, once
   // in the "Points Redeemed" line below).
   const pointsRedeemedValue = extra.pointsRedeemedValue != null ? Number(extra.pointsRedeemedValue) : (Number(extra.pointsRedeemed) || 0);
   const nonPointsDiscount = Math.max(0, (sale.discountAmount || 0) - pointsRedeemedValue);
-  if (sale.discountAmount > 0) lines.push(`*Bill Value: ₹${(goodsAmount + sale.discountAmount).toFixed(2)}*`);
+  if (sale.discountAmount > 0 || clearanceDiscount > 0.005) lines.push(`*Bill Value: ₹${(goodsAmount + sale.discountAmount + clearanceDiscount).toFixed(2)}*`);
+  if (clearanceDiscount > 0.005) lines.push(`Clearance Discount: -₹${clearanceDiscount.toFixed(2)}`);
   if (nonPointsDiscount > 0) lines.push(`Discount: -₹${nonPointsDiscount.toFixed(2)}`);
   if (roundOffAmount !== 0) lines.push(`Round Off: ${roundOffAmount > 0 ? '+' : '-'}₹${Math.abs(roundOffAmount).toFixed(2)}`);
   // Points Redeemed reduces what's owed, so it belongs above the total —

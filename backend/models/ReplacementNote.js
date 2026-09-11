@@ -2,7 +2,11 @@ const mongoose = require('mongoose');
 
 const replacementItemSchema = new mongoose.Schema(
   {
-    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    // Null when replacing a custom (no-barcode) POS line — no backing Product.
+    // `lineId` identifies which sale line it was.
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+    lineId: { type: String, default: null },
+    custom: { type: Boolean, default: false },
     barcode: { type: String },
     name: { type: String, required: true },
     qty: { type: Number, required: true, min: 1 },
@@ -10,7 +14,7 @@ const replacementItemSchema = new mongoose.Schema(
     // The replacement is always the identical product (warranty/defective
     // swap) — kept explicit for clarity and to leave room for a future
     // "equivalent SKU" relaxation without a schema change.
-    replacementProductId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    replacementProductId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
   },
   { _id: false }
 );

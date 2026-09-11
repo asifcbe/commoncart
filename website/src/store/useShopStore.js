@@ -4,6 +4,7 @@ import api from '../utils/api';
 const useShopStore = create((set, get) => ({
   products: [],
   categories: [],
+  categoryCards: [], // [{ name, image }] — managed catalog order + images, for the home cards
   subCategories: [],
   variants: [],
   sizes: [],
@@ -21,6 +22,7 @@ const useShopStore = create((set, get) => ({
       set({
         products: data.products,
         categories: data.categories || [],
+        categoryCards: data.categoryCards || (data.categories || []).map((name) => ({ name, image: '' })),
         subCategories: data.subCategories || [],
         variants: data.variants || [],
         sizes: data.sizes || [],
@@ -37,15 +39,19 @@ const useShopStore = create((set, get) => ({
   setFilter: (key, value) => set((s) => ({ filters: { ...s.filters, [key]: value } })),
   setPage: (page) => set({ page }),
 
-  // Patch a single product's stock from socket event
+  // Patch a single product's stock from a socket event. No-op (same array
+  // reference) when the product isn't in the list or its stock is unchanged —
+  // avoids re-rendering the whole grid (and its <img>s) on every stock ping.
   patchStock: (productId, quantity, reservedQty) => {
-    set((state) => ({
-      products: state.products.map((p) =>
-        p._id === productId
-          ? { ...p, quantity, reservedQty, availableQty: Math.max(0, quantity - reservedQty) }
-          : p
-      ),
-    }));
+    set((state) => {
+      const i = state.products.findIndex((p) => p._id === productId);
+      if (i === -1) return state;
+      const cur = state.products[i];
+      if (cur.quantity === quantity && cur.reservedQty === reservedQty) return state;
+      const next = state.products.slice();
+      next[i] = { ...cur, quantity, reservedQty, availableQty: Math.max(0, quantity - reservedQty) };
+      return { products: next };
+    });
   },
 }));
 

@@ -83,17 +83,26 @@ exports.placeOrder = async (req, res) => {
       if (!product || !product.isActive)
         return res.status(404).json({ message: `Product not found: ${item.productId}` });
 
+      // Charge the discount price when the product has one, matching POS
+      // (which uses discountPrice ?? price). MRP is kept separately for the
+      // struck-through line on the order/receipt.
+      const effectivePrice = (product.discountPrice != null && product.discountPrice > 0 && product.discountPrice < product.price)
+        ? product.discountPrice : product.price;
       resolvedItems.push({
         productId: product._id,
         name: product.name,
         barcode: product.barcode,
-        price: product.price,
+        price: effectivePrice,
+        mrp: product.price,
+        isDiscounted: effectivePrice < product.price,
+        // Clearance (aging) line — earns no loyalty points.
+        isAged: !!product.isAged && effectivePrice < product.price,
         qty: item.qty,
         image: product.images?.[0] || '',
         hsnCode: product.hsnCode || '',
         gstPercent: product.gstPercent,
       });
-      subtotal += product.price * item.qty;
+      subtotal += effectivePrice * item.qty;
     }
 
     // Coupon + credit points
@@ -187,10 +196,17 @@ exports.confirmOrder = async (req, res) => {
       order.stockReserved = false;
     }
 
-    // Award credit points on payment confirmation
+    // Award credit points on payment confirmation. CLEARANCE (aged) items earn
+    // no points — their full line value is excluded from the qualifying amount,
+    // so an order mixing clearance + normal items only accrues points on the
+    // normal items. (Coupon/points discounts already reduced totalAmount.)
     if (!order.creditPointsEarned) {
       const creditConfig = await AppSettings.get('CREDIT_CONFIG', DEFAULT_CREDIT);
-      const pointsEarned = Math.floor(order.totalAmount / creditConfig.rupeesPerPoint);
+      const clearanceGoods = (order.items || []).reduce(
+        (s, it) => s + (it.isAged ? it.price * it.qty : 0),
+        0
+      );
+      const pointsEarned = Math.floor(Math.max(0, order.totalAmount - clearanceGoods) / creditConfig.rupeesPerPoint);
       if (pointsEarned > 0) {
         order.creditPointsEarned = pointsEarned;
         await Customer.findByIdAndUpdate(order.customerId, { $inc: { creditPoints: pointsEarned } });
@@ -342,26 +358,48 @@ exports.publicProducts = async (req, res) => {
     if (category) facetScope.category = category;
 
     const skip = (Number(page) - 1) * Number(limit);
-    const [products, total, categories, subCategoriesRaw, colorsRaw, sizesRaw] = await Promise.all([
+    const [products, total, categories, subCategoriesRaw, colorsRaw, sizesRaw, categoryConfig] = await Promise.all([
       Product.find(query).sort(sort).skip(skip).limit(Number(limit))
-        .select('name description category subCategory color size SKU barcode price images quantity reservedQty lowStockThreshold'),
+        .select('name description category subCategory color size SKU barcode price discountPrice images quantity reservedQty lowStockThreshold'),
       Product.countDocuments(query),
       Product.distinct('category', { isActive: true, isWebVisible: true }),
       Product.distinct('subCategory', facetScope),
       Product.distinct('color', facetScope),
       Product.distinct('size', facetScope),
+      AppSettings.get('CATEGORY_CONFIG', { categories: [] }),
     ]);
 
     const subCategories = subCategoriesRaw.filter(Boolean).sort();
     const variants = colorsRaw.filter(Boolean).sort();
     const sizes = sizesRaw.filter(Boolean).sort();
 
-    const enriched = products.map((p) => ({
-      ...p.toObject(),
-      availableQty: Math.max(0, p.quantity - p.reservedQty),
-    }));
+    // Storefront category cards: the managed catalog (with its images), but
+    // only the categories that actually have web-visible products right now.
+    // Falls back to the bare distinct list order when the catalog is empty.
+    const liveCats = new Set(categories);
+    const catalog = Array.isArray(categoryConfig?.categories) ? categoryConfig.categories : [];
+    const categoryCards = catalog
+      .filter((c) => c && c.name && liveCats.has(c.name))
+      .map((c) => ({ name: c.name, image: c.image || '' }));
+    for (const name of categories) {
+      if (!categoryCards.some((c) => c.name === name)) categoryCards.push({ name, image: '' });
+    }
 
-    res.json({ products: enriched, total, page: Number(page), pages: Math.ceil(total / Number(limit)), categories, subCategories, variants, sizes });
+    const enriched = products.map((p) => {
+      const o = p.toObject();
+      const hasDiscount = o.discountPrice != null && o.discountPrice > 0 && o.discountPrice < o.price;
+      return {
+        ...o,
+        availableQty: Math.max(0, p.quantity - p.reservedQty),
+        // Explicit storefront shape: `mrp` is the list price (strike it through
+        // when discounted); `salePrice` is what the customer pays.
+        mrp: o.price,
+        salePrice: hasDiscount ? o.discountPrice : o.price,
+        onSale: hasDiscount,
+      };
+    });
+
+    res.json({ products: enriched, total, page: Number(page), pages: Math.ceil(total / Number(limit)), categories, categoryCards, subCategories, variants, sizes });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -369,12 +407,54 @@ exports.publicProducts = async (req, res) => {
 
 exports.publicProductDetail = async (req, res) => {
   try {
+    // `supplier` / internal `location` are deliberately NOT selected — they
+    // must never reach the storefront.
     const product = await Product.findOne({ _id: req.params.id, isActive: true, isWebVisible: true })
-      .select('name description category subCategory color size SKU barcode price images quantity reservedQty lowStockThreshold supplier location');
+      .select('name description category subCategory color size SKU barcode price discountPrice images quantity reservedQty lowStockThreshold');
     if (!product) return res.status(404).json({ message: 'Product not found' });
     const data = product.toObject();
     data.availableQty = Math.max(0, product.quantity - product.reservedQty);
+    const hasDiscount = data.discountPrice != null && data.discountPrice > 0 && data.discountPrice < data.price;
+    data.mrp = data.price;
+    data.salePrice = hasDiscount ? data.discountPrice : data.price;
+    data.onSale = hasDiscount;
     res.json({ product: data });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// GET /orders/categories/public
+// The managed category tree (names + images) intersected with what actually
+// has web-visible products right now. Used by the storefront home cards and
+// the guided filter to show category / sub-category photos.
+exports.publicCategoryTree = async (_req, res) => {
+  try {
+    const [cfg, liveCats, liveSubs] = await Promise.all([
+      AppSettings.get('CATEGORY_CONFIG', { categories: [] }),
+      Product.distinct('category', { isActive: true, isWebVisible: true }),
+      Product.distinct('subCategory', { isActive: true, isWebVisible: true }),
+    ]);
+    const catSet = new Set(liveCats);
+    const subSet = new Set(liveSubs.filter(Boolean));
+    const catalog = Array.isArray(cfg?.categories) ? cfg.categories : [];
+
+    const categories = catalog
+      .filter((c) => c && c.name && catSet.has(c.name))
+      .map((c) => {
+        const subImages = (c.subImages && typeof c.subImages === 'object') ? c.subImages : {};
+        const subCategories = (c.subCategories || [])
+          .filter((s) => subSet.has(s))
+          .map((s) => ({ name: s, image: subImages[s] || '' }));
+        return { name: c.name, image: c.image || '', subCategories };
+      });
+
+    // Any live category not in the managed catalog still gets a bare entry.
+    for (const name of liveCats) {
+      if (!categories.some((c) => c.name === name)) categories.push({ name, image: '', subCategories: [] });
+    }
+
+    res.json({ categories });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

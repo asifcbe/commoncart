@@ -9,15 +9,19 @@ import { Plus, X } from 'lucide-react';
 // Supplier quick-create field) that opens an inline text panel instead of
 // burying "add new" inside the dropdown's option list.
 //
-// A typed category/sub-category isn't saved to the catalog immediately (that
-// needs adminOnly access) — it's just held as plain text here and gets
-// registered into the managed catalog automatically when the parent form
-// (Purchase/Product) is submitted, same as before.
+// A typed category/sub-category isn't persisted to the managed catalog here
+// (that needs adminOnly access) — it's held as plain text and registered into
+// the catalog automatically when the parent form (Purchase/Product) is
+// submitted. `onRegisterNew(category, subCategory)` (optional) lets the parent
+// also add it to its *local* catalog copy immediately, so a just-created value
+// stays a real, re-selectable dropdown option in the same session instead of
+// collapsing into a locked "(new)" chip.
 //
 //   <CategoryFields
 //     catalog={catalog}
 //     category={cat} subCategory={sub}
 //     onCategoryChange={setCat} onSubCategoryChange={setSub}
+//     onRegisterNew={(c, s) => mergeIntoLocalCatalog(c, s)}
 //   />
 // Changing the category clears the sub-category.
 export default function CategoryFields({
@@ -26,44 +30,57 @@ export default function CategoryFields({
   subCategory = '',
   onCategoryChange,
   onSubCategoryChange,
+  onRegisterNew,
   required = false,
   labelClass = 'text-sm font-medium text-gray-700 block mb-1',
   inputClass = '',
   onKeyDown,
 }) {
   const knownCat = catalog.some((c) => c.name === category);
-  // A category value that's set but not (yet) in the catalog — a pending new
-  // one, entered via the panel below and awaiting submit-time registration.
-  const customCat = category && !knownCat ? category : '';
+  // A category value that's set but not in the catalog AND can't be merged in
+  // locally (no onRegisterNew) — falls back to an editable "(new)" chip.
+  const customCat = category && !knownCat && !onRegisterNew ? category : '';
   const [showNewCat, setShowNewCat] = useState(false);
   const [newCatDraft, setNewCatDraft] = useState('');
 
   const selectedCat = catalog.find((c) => c.name === category);
   const subs = selectedCat?.subCategories || [];
   const knownSub = subs.includes(subCategory);
-  const customSub = subCategory && !knownSub ? subCategory : '';
+  const customSub = subCategory && !knownSub && !onRegisterNew ? subCategory : '';
   const [showNewSub, setShowNewSub] = useState(false);
   const [newSubDraft, setNewSubDraft] = useState('');
 
   const setCategory = (val) => { onCategoryChange?.(val); onSubCategoryChange?.(''); };
 
   const onCatSelect = (val) => setCategory(val);
+  const createCat = (val) => {
+    const v = (val || '').trim();
+    if (!v) return;
+    onRegisterNew?.(v);       // land it in the local catalog now
+    setCategory(v);
+  };
 
   const openNewCat = () => { setShowNewCat(true); setNewCatDraft(''); };
   const confirmNewCat = () => {
     const v = newCatDraft.trim();
     if (!v) return;
-    setCategory(v);
+    createCat(v);
     setShowNewCat(false);
   };
 
   const onSubSelect = (val) => onSubCategoryChange?.(val);
+  const createSub = (val) => {
+    const v = (val || '').trim();
+    if (!v) return;
+    onRegisterNew?.(category, v); // land "category → v" in the local catalog now
+    onSubCategoryChange?.(v);
+  };
 
   const openNewSub = () => { setShowNewSub(true); setNewSubDraft(''); };
   const confirmNewSub = () => {
     const v = newSubDraft.trim();
     if (!v) return;
-    onSubCategoryChange?.(v);
+    createSub(v);
     setShowNewSub(false);
   };
 
@@ -82,7 +99,7 @@ export default function CategoryFields({
           <div className="flex gap-2">
             <Combobox
               options={catalog.map((c) => ({ value: c.name, label: c.name }))}
-              value={category} onChange={onCatSelect} onCreateNew={setCategory} onKeyDown={onKeyDown} required={required}
+              value={category} onChange={onCatSelect} onCreateNew={createCat} onKeyDown={onKeyDown} required={required}
               placeholder="Select a category…" className={`flex-1 ${inputClass}`}
             />
             <Button type="button" size="sm" variant="outline" onClick={openNewCat}>
@@ -121,7 +138,7 @@ export default function CategoryFields({
           <div className="flex gap-2">
             <Combobox
               options={subs.map((s) => ({ value: s, label: s }))}
-              value={subCategory} onChange={onSubSelect} onCreateNew={(v) => onSubCategoryChange?.(v)} onKeyDown={onKeyDown} disabled={!category}
+              value={subCategory} onChange={onSubSelect} onCreateNew={createSub} onKeyDown={onKeyDown} disabled={!category}
               placeholder={category ? 'None' : 'Select a category first'} className={`flex-1 ${inputClass}`}
             />
             <Button type="button" size="sm" variant="outline" onClick={openNewSub} disabled={!category}>

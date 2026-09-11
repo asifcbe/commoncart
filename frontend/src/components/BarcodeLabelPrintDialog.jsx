@@ -130,7 +130,7 @@ export function BarcodeDialog({ item, businessName, onClose }) {
   const printRef = useRef(null);
 
   const sizeEntry = LABEL_SIZES.find((s) => s.key === labelSizeKey) || LABEL_SIZES[0];
-  const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale, lbl.printerDpi, lbl.barcodeDarkness);
+  const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale, lbl.printerDpi, lbl.barcodeDarkness, lbl.labelPadding, lbl.barcodeWidth);
   const labelItem = item ? productToLabelItem(item, businessName) : null;
   const hasContent = !!(labelItem?.barcode || printMode === 'qr');
   const finalCopies = Math.max(1, Number(copies) || 1);
@@ -258,7 +258,7 @@ export function BulkBarcodeDialog({ items, businessName, onClose }) {
   }, [defaultCopies, items]);
 
   const sizeEntry = LABEL_SIZES.find((s) => s.key === labelSizeKey) || LABEL_SIZES[0];
-  const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale, lbl.printerDpi, lbl.barcodeDarkness);
+  const sizeConfig = buildSizeConfig(sizeEntry, contentScale, codeScale, lbl.printerDpi, lbl.barcodeDarkness, lbl.labelPadding, lbl.barcodeWidth);
   const columnsNum = Math.max(1, Number(columns) || 1);
 
   const getCopies = (id) => copiesMap[id] ?? 1;

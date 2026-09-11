@@ -1,7 +1,8 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Phone, Mail, MapPin, Facebook, Instagram, Twitter, Youtube } from 'lucide-react';
+import { Phone, Mail, MapPin, Facebook, Instagram, Twitter, Youtube, Heart } from 'lucide-react';
 import shopConfig from '../../config/shop.config';
+import BrandLogo from '../ui/BrandLogo';
 
 export default function Footer() {
   const { brand, contact, social } = shopConfig;
@@ -15,25 +16,26 @@ export default function Footer() {
   ].filter((s) => social[s.key]);
 
   return (
-    <footer className="bg-gray-900 text-gray-300 mt-16">
+    <footer className="mt-16" style={{ background: 'var(--color-ink)', color: '#EAD9C4' }}>
+      {/* scalloped top edge */}
+      <div className="h-4 w-full" style={{
+        background: 'radial-gradient(circle at 10px -2px, var(--color-bg) 12px, transparent 13px) repeat-x',
+        backgroundSize: '20px 20px',
+      }} />
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           {/* Brand */}
           <div>
-            <div className="flex items-center gap-2 mb-4">
-              {brand.logoUrl ? (
-                <img src={brand.logoUrl} alt={brand.logoAltText} className="h-8 brightness-0 invert" />
-              ) : (
-                <div
-                  className="h-9 w-9 rounded-lg flex items-center justify-center text-white font-bold text-sm"
-                  style={{ background: 'var(--color-primary)' }}
-                >
-                  {brand.shortName}
-                </div>
-              )}
-              <span className="font-bold text-white text-lg">{brand.name}</span>
+            <div className="mb-3">
+              {brand.logoUrl
+                ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-9" />
+                : <BrandLogo size={38} animated={false} />}
             </div>
-            <p className="text-sm text-gray-400 leading-relaxed">{brand.description}</p>
+            <p className="font-extrabold text-white text-lg leading-none">
+              Tom <span style={{ color: 'var(--color-secondary)' }}>&amp;</span> Jerry
+              <span className="block text-[0.6rem] font-bold tracking-[0.25em] uppercase mt-1" style={{ color: '#C9B49B' }}>Kids Wear</span>
+            </p>
+            <p className="text-sm mt-3 leading-relaxed" style={{ color: '#C9B49B' }}>{brand.description}</p>
             {socialLinks.length > 0 && (
               <div className="flex gap-3 mt-4">
                 {socialLinks.map(({ key, Icon, label }) => (
@@ -123,9 +125,10 @@ export default function Footer() {
         </div>
       </div>
 
-      <div className="border-t border-gray-800 py-4">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center text-xs text-gray-600">
+      <div className="py-4" style={{ borderTop: '1px solid rgba(255,255,255,.08)' }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center text-xs flex items-center justify-center gap-1.5" style={{ color: '#9C8973' }}>
           {brand.footerText.replace('2024', year.toString())}
+          <span className="mx-1">·</span> made with <Heart size={11} style={{ color: 'var(--color-danger)' }} /> for little ones
         </div>
       </div>
     </footer>

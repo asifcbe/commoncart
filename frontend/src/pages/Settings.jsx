@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Plus, Trash2, Edit2, UserCog, AlertTriangle, ShieldAlert, Eye, EyeOff, Star, Clock, Zap,
   Building2, FolderTree, PackageX, X, Printer, Palette, User, Hash, Receipt,
-  ChevronRight, Menu, Wallet, DownloadCloud,
+  ChevronRight, Menu, Wallet, DownloadCloud, ImagePlus,
 } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 import { useToast } from '../components/ui/Toast';
@@ -281,6 +281,48 @@ function ResetAllModal({ onClose }) {
   );
 }
 
+// A small square image drop-zone used in the category editor. Shows the
+// current thumbnail with a hover "remove", or an "add image" placeholder.
+// `small` renders the compact chip-sized variant used for sub-categories.
+function CatImageSlot({ url, busy, onPick, onClear, small }) {
+  const inputRef = React.useRef(null);
+  const box = small ? 'h-6 w-6 rounded-md' : 'h-12 w-12 rounded-lg';
+  return (
+    <span className={`relative inline-flex shrink-0 items-center justify-center ${box} overflow-hidden border ${url ? 'border-gray-200' : 'border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100'}`}>
+      {busy ? (
+        <Spinner size="sm" />
+      ) : url ? (
+        <>
+          {/* click the thumbnail to replace it */}
+          <button type="button" onClick={() => inputRef.current?.click()} className="block h-full w-full" title="Change image">
+            <img src={url} alt="" className="h-full w-full object-cover" />
+          </button>
+          <button
+            type="button"
+            onClick={onClear}
+            className="absolute top-0 right-0 flex items-center justify-center bg-black/55 text-white rounded-bl-md"
+            style={{ height: small ? 12 : 16, width: small ? 12 : 16 }}
+            title="Remove image"
+          >
+            <X size={small ? 9 : 11} />
+          </button>
+        </>
+      ) : (
+        <button type="button" onClick={() => inputRef.current?.click()} className="flex h-full w-full items-center justify-center text-gray-400" title="Add image">
+          <ImagePlus size={small ? 12 : 18} />
+        </button>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onPick(f); }}
+      />
+    </span>
+  );
+}
+
 export default function Settings() {
   const toast = useToast();
   const { user: currentUser } = useAuthStore();
@@ -295,6 +337,10 @@ export default function Settings() {
   const [savingCredit, setSavingCredit] = useState(false);
   const [backupSummary, setBackupSummary] = useState(null);
   const [downloadingBackup, setDownloadingBackup] = useState(false);
+  const [restoreFile, setRestoreFile] = useState(null);
+  const [restoreConfirm, setRestoreConfirm] = useState('');
+  const [restoring, setRestoring] = useState(false);
+  const [restoreResult, setRestoreResult] = useState(null);
 
   const DEFAULT_STEPS = [
     { days: 30,  label: 'Fresh (30 days)',           percent: 0  },
@@ -316,11 +362,12 @@ export default function Settings() {
   });
   const [savingBusiness, setSavingBusiness] = useState(false);
 
-  // Category catalog: [{ name, subCategories: [] }]
+  // Category catalog: [{ name, image, subCategories: [], subImages: { <sub>: url } }]
   const [categories, setCategories] = useState([]);
   const [savingCategories, setSavingCategories] = useState(false);
   const [newCat, setNewCat] = useState('');
   const [newSub, setNewSub] = useState({}); // { [catIndex]: 'sub name' }
+  const [catImgBusy, setCatImgBusy] = useState(''); // key of the image slot currently uploading
 
   const [autoDelete, setAutoDelete] = useState({ enabled: false, days: 3 });
   const [savingAutoDelete, setSavingAutoDelete] = useState(false);
@@ -433,6 +480,28 @@ export default function Settings() {
       toast({ message: err.response?.data?.message || 'Failed to create backup', type: 'error' });
     } finally {
       setDownloadingBackup(false);
+    }
+  };
+
+  const handleRestoreBackup = async () => {
+    if (!restoreFile || restoreConfirm.trim() !== 'RESTORE') return;
+    if (!window.confirm('This wipes and rebuilds every collection in the backup file. Continue?')) return;
+    setRestoring(true);
+    setRestoreResult(null);
+    try {
+      const fd = new FormData();
+      fd.append('file', restoreFile);
+      fd.append('confirm', restoreConfirm.trim());
+      const { data } = await api.post('/backup/restore', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setRestoreResult(data);
+      setRestoreConfirm('');
+      setRestoreFile(null);
+      setBackupSummary(null); // force the "included collections" list to re-fetch fresh counts
+      toast({ message: 'Restore complete', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Restore failed', type: 'error' });
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -553,11 +622,39 @@ export default function Settings() {
       toast({ message: 'Category already exists', type: 'warning' });
       return;
     }
-    setCategories((prev) => [...prev, { name, subCategories: [] }]);
+    setCategories((prev) => [...prev, { name, image: '', subCategories: [], subImages: {} }]);
     setNewCat('');
   };
 
   const removeCategory = (idx) => setCategories((prev) => prev.filter((_, i) => i !== idx));
+
+  // Upload one image file and stash its URL. `sub` omitted → category image;
+  // `sub` given → that sub-category's image (in the subImages map).
+  const uploadCatImage = async (idx, file, sub) => {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { toast({ message: 'Please choose an image file', type: 'warning' }); return; }
+    const key = `${idx}:${sub || ''}`;
+    setCatImgBusy(key);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const { data } = await api.post('/settings/category-image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setCategories((prev) => prev.map((c, i) => {
+        if (i !== idx) return c;
+        if (sub) return { ...c, subImages: { ...(c.subImages || {}), [sub]: data.url } };
+        return { ...c, image: data.url };
+      }));
+      toast({ message: 'Image uploaded — remember to Save', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Upload failed', type: 'error' });
+    } finally { setCatImgBusy(''); }
+  };
+
+  const clearCatImage = (idx, sub) => setCategories((prev) => prev.map((c, i) => {
+    if (i !== idx) return c;
+    if (sub) { const next = { ...(c.subImages || {}) }; delete next[sub]; return { ...c, subImages: next }; }
+    return { ...c, image: '' };
+  }));
 
   const addSubCategory = (idx) => {
     const sub = (newSub[idx] || '').trim();
@@ -571,7 +668,12 @@ export default function Settings() {
   };
 
   const removeSubCategory = (idx, sub) =>
-    setCategories((prev) => prev.map((c, i) => i === idx ? { ...c, subCategories: c.subCategories.filter((s) => s !== sub) } : c));
+    setCategories((prev) => prev.map((c, i) => {
+      if (i !== idx) return c;
+      const subImages = { ...(c.subImages || {}) };
+      delete subImages[sub];
+      return { ...c, subCategories: c.subCategories.filter((s) => s !== sub), subImages };
+    }));
 
   const handleSaveCategories = async () => {
     setSavingCategories(true);
@@ -690,6 +792,22 @@ export default function Settings() {
       const steps = [...prev.steps];
       steps[idx] = { ...steps[idx], [field]: field === 'label' ? value : Number(value) };
       return { ...prev, steps };
+    });
+  };
+
+  const removeStep = (idx) => {
+    setAgingConfig((prev) => ({ ...prev, steps: prev.steps.filter((_, i) => i !== idx) }));
+  };
+
+  const addStep = () => {
+    setAgingConfig((prev) => {
+      const last = prev.steps[prev.steps.length - 1];
+      const days = last ? Number(last.days) + 30 : 30;
+      const percent = last ? Math.min(100, Number(last.percent) + 5) : 0;
+      return {
+        ...prev,
+        steps: [...prev.steps, { days, label: `After ${days} days`, percent }],
+      };
     });
   };
 
@@ -1046,7 +1164,8 @@ export default function Settings() {
             <CardContent>
               <p className="text-sm text-gray-500 mb-4">
                 Define the categories and sub-categories available when creating a product.
-                Only these will appear in the product form's dropdowns.
+                Only these will appear in the product form's dropdowns. A category image
+                (optional) is shown on the storefront home in place of the plain text card.
               </p>
 
               {/* Add a new category */}
@@ -1068,21 +1187,36 @@ export default function Settings() {
                 <div className="space-y-3">
                   {categories.map((cat, idx) => (
                     <div key={idx} className="border rounded-lg p-3">
-                      <div className="flex items-center justify-between">
-                        <span className="font-medium text-gray-800">{cat.name}</span>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <CatImageSlot
+                            url={cat.image}
+                            busy={catImgBusy === `${idx}:`}
+                            onPick={(f) => uploadCatImage(idx, f)}
+                            onClear={() => clearCatImage(idx)}
+                          />
+                          <span className="font-medium text-gray-800 truncate">{cat.name}</span>
+                        </div>
                         <button
                           onClick={() => removeCategory(idx)}
-                          className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-500"
+                          className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-500 shrink-0"
                           title="Remove category"
                         >
                           <Trash2 size={14} />
                         </button>
                       </div>
 
-                      {/* Sub-categories */}
-                      <div className="flex flex-wrap gap-2 mt-2">
+                      {/* Sub-categories — each with its own optional image */}
+                      <div className="flex flex-wrap gap-2 mt-3">
                         {cat.subCategories.map((sub) => (
-                          <span key={sub} className="inline-flex items-center gap-1 bg-gray-100 text-gray-700 text-xs rounded-full pl-2.5 pr-1 py-1">
+                          <span key={sub} className="inline-flex items-center gap-1.5 bg-gray-100 text-gray-700 text-xs rounded-lg pl-1.5 pr-1 py-1">
+                            <CatImageSlot
+                              small
+                              url={(cat.subImages || {})[sub]}
+                              busy={catImgBusy === `${idx}:${sub}`}
+                              onPick={(f) => uploadCatImage(idx, f, sub)}
+                              onClear={() => clearCatImage(idx, sub)}
+                            />
                             {sub}
                             <button
                               onClick={() => removeSubCategory(idx, sub)}
@@ -1295,7 +1429,7 @@ export default function Settings() {
                     <div className="flex justify-center border border-gray-200 rounded-lg p-4" style={{ background: '#f8f8f8' }}>
                       <BarcodeLabel
                         item={SAMPLE_LABEL_ITEM}
-                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale, labelPrint.printerDpi, labelPrint.barcodeDarkness), width: 'auto', height: 'auto' }}
+                        sizeConfig={{ ...buildSizeConfig(LABEL_SIZES.find((s) => s.key === labelPrint.defaultLabelSize) || LABEL_SIZES[0], labelPrint.contentScale, labelPrint.codeScale, labelPrint.printerDpi, labelPrint.barcodeDarkness, labelPrint.labelPadding, labelPrint.barcodeWidth), width: 'auto', height: 'auto' }}
                         lbl={labelPrint}
                       />
                     </div>
@@ -1366,6 +1500,33 @@ export default function Settings() {
                       Thickens the barcode's bars (not its overall size) so it prints darker and more consistently —
                       raise this if labels come out light, especially early in a long print run before the printer
                       head warms up. Doesn't affect QR codes.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">Barcode Width</label>
+                      <span className="text-xs font-bold text-teal-600">{Math.round((labelPrint.barcodeWidth ?? 1) * 100)}%</span>
+                    </div>
+                    <input type="range" min="0.3" max="1.0" step="0.05" value={labelPrint.barcodeWidth ?? 1}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, barcodeWidth: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                    <p className="text-[0.65rem] text-gray-400 mt-1">
+                      Narrows the printed barcode strip (as a share of its space) without changing bar thickness or
+                      height. 100% = full width. Doesn't affect QR codes.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-medium text-gray-600">Label Padding</label>
+                      <span className="text-xs font-bold text-teal-600">{(labelPrint.labelPadding ?? 0.8).toFixed(1)} mm</span>
+                    </div>
+                    <input type="range" min="0" max="8" step="0.2" value={labelPrint.labelPadding ?? 0.8}
+                      onChange={(e) => setLabelPrint((c) => ({ ...c, labelPadding: Number(e.target.value) }))}
+                      className="w-full cursor-pointer" style={{ accentColor: '#0d9488' }} />
+                    <p className="text-[0.65rem] text-gray-400 mt-1">
+                      Inner blank margin on every side of the label, in millimetres. Lower it to fit more content /
+                      cut wasted space; raise it to keep content away from the die-cut edge. (A4 sheets keep a fixed
+                      print margin.)
                     </p>
                   </div>
                   <div>
@@ -1765,9 +1926,14 @@ export default function Settings() {
             </CardHeader>
             <CardContent>
               <p className="text-sm text-gray-500 mb-4">
-                Define thresholds by age (days since product was created). When a product reaches a threshold,
-                its <strong>discount price</strong> is automatically set to the specified percentage off the original price.
-                The discount price is always floored at cost price so you never sell at a loss.
+                Define thresholds by product age (measured from the purchase date). When a product reaches a
+                threshold, its <strong>discount price</strong> is set to that percentage off — the deepest step
+                the product qualifies for wins. The percentage is applied exactly; deep clearance steps can
+                take the price below cost, so set them deliberately.
+              </p>
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-4">
+                These rules apply <strong>only to products with "Enable aging" turned on</strong> — set that per product
+                on the purchase-entry screen. All other products are never aged, and by default aging is off for every product.
               </p>
               <form onSubmit={handleSaveAgingConfig} className="space-y-6">
                 {/* Enable toggle */}
@@ -1792,7 +1958,7 @@ export default function Settings() {
                   <p className="text-sm font-medium text-gray-700 mb-2">Aging Steps</p>
                   <p className="text-xs text-gray-400 mb-3">
                     Products aged ≥ a step's days but &lt; the next step get that step's discount applied.
-                    Set percent to 0 to skip a step (no discount applied at that age).
+                    Add only the steps you want; set a percent to 0 for an age band that should get no discount.
                   </p>
                   <div className="border rounded-lg overflow-hidden">
                     <table className="w-full text-sm">
@@ -1802,9 +1968,17 @@ export default function Settings() {
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">Age Threshold (days)</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">Discount %</th>
                           <th className="px-3 py-2.5 text-left text-xs font-semibold text-gray-500">Example (₹1000 item)</th>
+                          <th className="px-3 py-2.5 w-10"></th>
                         </tr>
                       </thead>
                       <tbody className="divide-y">
+                        {agingConfig.steps.length === 0 && (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-6 text-center text-sm text-gray-400">
+                              No aging steps. Add one below to start discounting products by age.
+                            </td>
+                          </tr>
+                        )}
                         {agingConfig.steps.map((step, idx) => (
                           <tr key={idx} className={step.percent > 0 ? 'bg-orange-50/40' : ''}>
                             <td className="px-3 py-2">
@@ -1839,11 +2013,24 @@ export default function Settings() {
                                 ? <><span className="line-through text-gray-400">₹1000</span> → <span className="font-semibold text-orange-700">₹{(1000 * (1 - step.percent / 100)).toFixed(0)}</span></>
                                 : <span className="text-gray-300">No discount</span>}
                             </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => removeStep(idx)}
+                                className="p-1 rounded text-gray-400 hover:text-red-500 hover:bg-red-50"
+                                title="Delete this step"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
+                  <Button type="button" variant="outline" size="sm" className="mt-3" onClick={addStep}>
+                    <Plus size={14} className="mr-1.5" /> Add step
+                  </Button>
                 </div>
 
                 <div className="flex items-center gap-3 pt-2 border-t">
@@ -1902,8 +2089,61 @@ export default function Settings() {
               </Button>
               <p className="text-[0.65rem] text-gray-400">
                 Keep downloaded backups somewhere safe — the file contains all customer, sales, and account data.
-                There is no restore option in the app yet; restoring a backup requires a database administrator.
               </p>
+            </CardContent>
+          </Card>
+
+          <Card className="mt-6 border-red-200">
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2 text-red-700">
+                <AlertTriangle size={16} /> Restore from Backup
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                This <strong>replaces</strong> the current data. Every collection contained in the backup file is
+                wiped and rebuilt from the file. This cannot be undone — download a fresh backup first.
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">Backup file (.ndjson.gz)</label>
+                <input
+                  type="file"
+                  accept=".gz,.ndjson.gz,application/gzip"
+                  onChange={(e) => setRestoreFile(e.target.files?.[0] || null)}
+                  className="block w-full text-sm text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded file:border file:border-gray-300 file:bg-gray-50 file:text-gray-700"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">
+                  Type <span className="font-mono bg-gray-100 px-1 rounded">RESTORE</span> to confirm
+                </label>
+                <Input value={restoreConfirm} onChange={(e) => setRestoreConfirm(e.target.value)} placeholder="RESTORE" />
+              </div>
+              {restoreResult && (
+                <div className="text-xs border border-gray-200 rounded-lg p-3 max-h-48 overflow-y-auto">
+                  <p className="font-semibold text-green-700 mb-1">
+                    Restored {restoreResult.restoredFrom ? `from ${formatDate(restoreResult.restoredFrom)}` : ''}
+                  </p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-gray-600">
+                    {restoreResult.collections.map((c) => (
+                      <div key={c.collection} className="flex justify-between">
+                        <span>{c.collection}</span>
+                        <span className="font-mono text-gray-400">
+                          {c.skipped ? 'skipped' : `${(c.restored ?? 0).toLocaleString('en-IN')}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <Button
+                onClick={handleRestoreBackup}
+                disabled={restoring || !restoreFile || restoreConfirm.trim() !== 'RESTORE'}
+                className="bg-red-600 hover:bg-red-700 text-white"
+              >
+                {restoring ? <Spinner size="sm" className="mr-2" /> : <AlertTriangle size={16} className="mr-2" />}
+                {restoring ? 'Restoring…' : 'Restore Now'}
+              </Button>
             </CardContent>
           </Card>
         </div>

@@ -19,40 +19,43 @@ const shopConfig = {
   brand: {
     name: 'Tom & Jerry',
     shortName: 'T&J',
-    tagline: 'Everything you need, all in one place.',
-    description: 'Your trusted local store — now online.',
-    logoUrl: null,           // e.g. '/logo.png' — place in /public/
-    logoAltText: 'Tom & Jerry Logo',
+    tagline: 'Adorable kids wear, stitched with love.',
+    description: 'Tom & Jerry Kids Wear — playful, comfy outfits for little ones.',
+    logoUrl: null,           // null → in-app CSS/SVG candy wordmark (see BrandLogo)
+    logoAltText: 'Tom & Jerry Kids Wear',
     faviconUrl: '/favicon.ico',
-    footerText: '© 2024 CommonCart. All rights reserved.',
+    footerText: '© 2024 Tom & Jerry Kids Wear. All rights reserved.',
+    domain: 'tomandjerry.in',
   },
 
   // ─── Theme / Colors ───────────────────────────────────────────
-  // These are injected as CSS custom properties at runtime.
-  // Just change the hex values to rebrand the entire site instantly.
+  // Candy / kids-wear palette taken from the logo artwork:
+  // Tom-blue tee, Jerry-pink J, cheese-yellow buttons, heart red, cream.
   theme: {
-    primary: '#1e40af',        // Tom's deep blue (buttons, links)
-    primaryDark: '#172554',    // Darker blue for hover
-    primaryLight: '#dbeafe',   // Light blue backgrounds
-    secondary: '#b45309',      // Jerry's warm brown/tan
-    accent: '#f59e0b',         // Cheese yellow (sale badges, CTAs)
-    success: '#16a34a',        // Green – cheese is safe!
-    danger: '#dc2626',         // Red – Tom's angry blush
-    background: '#fefce8',     // Very light cream, like old paper
+    primary: '#1CB0F6',        // Tom-blue (buttons, links)
+    primaryDark: '#0E8FCB',    // Deeper blue for hover
+    primaryLight: '#E4F6FF',   // Pale blue backgrounds
+    secondary: '#FF5DA2',      // Jerry-pink (accents, secondary CTAs)
+    secondaryDark: '#E23E85',
+    secondaryLight: '#FFE6F1',
+    accent: '#FFC93C',         // Cheese-button yellow (sale badges, CTAs)
+    success: '#43C639',        // Candy green
+    danger: '#FF4D6D',         // Heart red
+    background: '#FFF9F0',     // Warm cream, like the logo glow
     surface: '#ffffff',        // White cards
-    textPrimary: '#2d2a24',    // Warm dark brown/black
-    textSecondary: '#78716c',  // Muted warm grey
-    borderColor: '#fde68a',    // Soft cheese-yellow borders
+    textPrimary: '#3A2C1A',    // Warm cocoa-brown ink (the stitched outline)
+    textSecondary: '#8A7B6A',  // Muted warm grey
+    borderColor: '#FFE6C7',    // Soft toffee borders
   },
 
   // ─── Contact & Location ───────────────────────────────────────
   contact: {
-    phone: '+1 (555) 123-4567',
-    whatsapp: '+15551234567',   // digits only for wa.me link
-    email: 'hello@tjgs.com',
-    address: '123 Commerce Street, New York, NY 10001, USA',
-    mapUrl: '',                 // Google Maps embed URL (optional)
-    businessHours: 'Mon–Sat: 9am – 7pm',
+    phone: '+91 90000 00000',
+    whatsapp: '919000000000',   // digits only for wa.me link
+    email: 'hello@tomandjerry.in',
+    address: 'Tom & Jerry Kids Wear, India',
+    mapUrl: '',
+    businessHours: 'Mon–Sat: 10am – 8pm',
   },
 
   // ─── Social Media ─────────────────────────────────────────────
@@ -67,31 +70,31 @@ const shopConfig = {
   // ─── Homepage Content ─────────────────────────────────────────
   homepage: {
     hero: {
-      title: 'Shop Smart, Live Better',
-      subtitle: 'Discover thousands of products with same-day in-store pickup or fast delivery.',
-      ctaText: 'Shop Now',
-      backgroundImage: null,    // e.g. '/hero.jpg' — place in /public/
+      title: 'Dressing up little smiles',
+      subtitle: '',
+      ctaText: 'Start Shopping',
+      backgroundImage: null,
       overlayOpacity: 0.4,
     },
-    featuredSectionTitle: 'Featured Products',
-    categorySectionTitle: 'Shop by Category',
+    featuredSectionTitle: 'Fresh Picks',
+    categorySectionTitle: 'Find their perfect outfit',
     features: [
-      { icon: 'truck', title: 'Fast Delivery', description: 'Get your order delivered within 24–48 hours.' },
-      { icon: 'shield', title: 'Secure Payments', description: 'Your payment information is always safe.' },
-      { icon: 'refresh', title: 'Easy Returns', description: '30-day hassle-free return policy.' },
-      { icon: 'headphones', title: '24/7 Support', description: 'We\'re here to help anytime you need us.' },
+      { icon: 'truck', title: 'Quick Delivery', description: 'Doorstep in 24–48 hours across India.' },
+      { icon: 'shield', title: 'Safe Payments', description: 'Cash on delivery & secure bank transfer.' },
+      { icon: 'refresh', title: 'Easy Exchange', description: 'Wrong size? Swap it, no fuss.' },
+      { icon: 'headphones', title: 'Here to Help', description: 'Message us any time — we love to chat.' },
     ],
   },
 
   // ─── Store / Commerce Settings ────────────────────────────────
   store: {
-    currency: '$',
-    currencyCode: 'USD',
-    currencyLocale: 'en-US',
+    currency: '₹',
+    currencyCode: 'INR',
+    currencyLocale: 'en-IN',
 
     // Shipping
-    freeShippingAbove: 50,      // Set to 0 to disable free shipping threshold
-    defaultShippingCost: 5.99,
+    freeShippingAbove: 999,     // Set to 0 to disable free shipping threshold
+    defaultShippingCost: 49,
     shippingLabel: 'Standard Shipping',
 
     // Payment methods shown at checkout
@@ -119,9 +122,9 @@ const shopConfig = {
 
   // ─── SEO Defaults ─────────────────────────────────────────────
   seo: {
-    titleSuffix: '| CommonCart',   // Appended to every page title
-    defaultDescription: 'Shop online at CommonCart — your trusted local store.',
-    defaultKeywords: 'online shop, ecommerce, buy online, local store',
+    titleSuffix: '| Tom & Jerry Kids Wear',
+    defaultDescription: 'Tom & Jerry Kids Wear — playful, comfy outfits for babies and kids. Shop by age, style and size.',
+    defaultKeywords: 'kids wear, baby clothes, children clothing, tom and jerry, online kids fashion india',
     ogImage: null,
   },
 

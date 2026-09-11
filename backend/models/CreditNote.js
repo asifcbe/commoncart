@@ -2,7 +2,11 @@ const mongoose = require('mongoose');
 
 const creditNoteItemSchema = new mongoose.Schema(
   {
-    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', required: true },
+    // Null when the returned line was a custom (no-barcode) POS item — it had
+    // no backing Product. `lineId` then identifies which sale line it was.
+    productId: { type: mongoose.Schema.Types.ObjectId, ref: 'Product', default: null },
+    lineId: { type: String, default: null },
+    custom: { type: Boolean, default: false },
     barcode: { type: String },
     name: { type: String, required: true },
     qty: { type: Number, required: true, min: 1 },

@@ -28,6 +28,17 @@ function blankBill(id) {
 
 let nextBillSeq = 1;
 
+// Local-only id for a "custom" cart line (no catalogued product). Prefixed so
+// checkout can tell it apart from a real Product _id and send the right shape.
+let customSeq = 0;
+const nextCustomId = () => `custom:${Date.now()}:${++customSeq}`;
+
+// Stable per-line identity sent to the backend as `lineId`, so a later
+// Return/Exchange/Replace can address this exact line — essential for custom
+// items, which all share productId:null.
+let lineSeq = 0;
+const nextLineId = () => `L${Date.now().toString(36)}${(++lineSeq).toString(36)}`;
+
 const usePOSStore = create((set, get) => ({
   bills: [blankBill(1)],
   activeBillId: 1,
@@ -83,6 +94,7 @@ const usePOSStore = create((set, get) => ({
           ? b.cart.map((i) => (i.productId === product._id ? { ...i, qty: i.qty + qty } : i))
           : [...b.cart, {
               productId: product._id,
+              lineId: nextLineId(),
               name: product.name,
               price: product.discountPrice != null ? product.discountPrice : product.price,
               originalPrice: product.price,
@@ -97,6 +109,30 @@ const usePOSStore = create((set, get) => ({
       }),
     }));
     return added;
+  },
+
+  // Adds a hand-entered line with no catalogued product / barcode. No stock
+  // check — it isn't tracked stock. Keyed on a synthetic `productId` so the
+  // existing cart plumbing (updateQty / removeFromCart / render) works
+  // unchanged; checkout unpacks it back into a custom payload line.
+  addCustomItem: ({ name, price, qty = 1, hsnCode = '', gstPercent = null }) => {
+    const line = {
+      productId: nextCustomId(),
+      lineId: nextLineId(),
+      custom: true,
+      name: (name || '').trim(),
+      price: Number(price) || 0,
+      originalPrice: Number(price) || 0,
+      isDiscounted: false,
+      barcode: '',
+      hsnCode: (hsnCode || '').trim(),
+      gstPercent: gstPercent === '' || gstPercent == null ? null : Number(gstPercent),
+      maxQty: Infinity,
+      qty: Math.max(1, Number(qty) || 1),
+    };
+    set((state) => ({
+      bills: state.bills.map((b) => (b.id !== state.activeBillId ? b : { ...b, cart: [...b.cart, line] })),
+    }));
   },
 
   updateQty: (productId, qty) => {
@@ -122,7 +158,11 @@ const usePOSStore = create((set, get) => ({
     set({ processing: true });
     try {
       const bill = get().activeBill();
-      const items = bill.cart.map((i) => ({ productId: i.productId, qty: i.qty }));
+      const items = bill.cart.map((i) => (
+        i.custom
+          ? { custom: true, lineId: i.lineId, name: i.name, price: i.price, qty: i.qty, hsnCode: i.hsnCode || '', gstPercent: i.gstPercent ?? null }
+          : { productId: i.productId, lineId: i.lineId, qty: i.qty }
+      ));
       const { data } = await api.post('/sales/store', {
         items,
         paymentMethod,

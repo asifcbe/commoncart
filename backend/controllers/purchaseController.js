@@ -15,10 +15,13 @@ const { ensureCategoryEntries, ensureVariantSizeEntries } = require('./settingsC
 // Batched for large purchases (100s–1000s of units): a single countDocuments() seeds
 // SKU numbering, barcodes are reserved once via generateEAN13(count), and every product
 // is written in one insertMany() instead of N sequential creates.
-async function resolveItems(items, supplier) {
+async function resolveItems(items, supplier, purchaseDate) {
   const docs = [];
   let totalCost = 0;
   let skuSeed = null;
+  // Price Aging measures product age from the PURCHASE date, not the row's
+  // createdAt. Stamp every unit with it.
+  const agingBaseDate = purchaseDate ? new Date(purchaseDate) : new Date();
 
   // How many units need a generated (not frontend-supplied) barcode
   const missingBarcodeCount = items.reduce((n, item) => n + (item.barcode ? 0 : Number(item.qty)), 0);
@@ -54,6 +57,13 @@ async function resolveItems(items, supplier) {
         color: (item.color || '').trim(),
         size: (item.size || '').trim(),
         discountPrice: item.discountPrice != null && item.discountPrice !== '' ? Number(item.discountPrice) : null,
+        manualDiscountPrice: item.discountPrice != null && item.discountPrice !== '' ? Number(item.discountPrice) : null,
+        // Opt this unit into Price Aging only if the purchase line said so.
+        agingEnabled: item.agingEnabled === true || item.agingEnabled === 'true',
+        agingBaseDate,
+        // Exchange/Replace eligibility — defaults ON; only OFF when the
+        // purchase line explicitly unchecked it.
+        exchangeable: item.exchangeable !== false && item.exchangeable !== 'false',
         SKU,
         barcode,
       });
@@ -100,7 +110,7 @@ exports.createPurchase = async (req, res) => {
       if (sup) { resolvedSupplierName = sup.name; resolvedSupplierId = sup._id; }
     }
 
-    const { resolvedItems, totalCost, createdProducts } = await resolveItems(items, resolvedSupplierName);
+    const { resolvedItems, totalCost, createdProducts } = await resolveItems(items, resolvedSupplierName, purchaseDate);
 
     // New category/sub-category/color/size typed ad hoc on this purchase join
     // the managed catalog so they appear as real options everywhere next time.
@@ -178,7 +188,22 @@ exports.updatePurchase = async (req, res) => {
     purchase.supplier = resolvedSupplierName;
     purchase.supplierId = resolvedSupplierId;
     if (note !== undefined) purchase.note = note;
-    if (purchaseDate) purchase.purchaseDate = new Date(purchaseDate);
+
+    let purchaseDateChanged = false;
+    if (purchaseDate) {
+      const nd = new Date(purchaseDate);
+      purchaseDateChanged = +nd !== +new Date(purchase.purchaseDate);
+      purchase.purchaseDate = nd;
+    }
+
+    // Editing the purchase date re-bases Price Aging for every unit from this
+    // purchase (aging is measured from the purchase date).
+    if (purchaseDateChanged) {
+      const pids = purchase.items.map((it) => it.productId).filter(Boolean);
+      if (pids.length) {
+        await Product.updateMany({ _id: { $in: pids } }, { $set: { agingBaseDate: purchase.purchaseDate } });
+      }
+    }
 
     // Apply full item overrides to purchase items + underlying products
     if (itemOverrides && typeof itemOverrides === 'object') {
@@ -246,12 +271,32 @@ exports.updatePurchase = async (req, res) => {
           purchaseItem.price = Number(ov.price);
           product.price = Number(ov.price);
         }
+        // The override's discountPrice is the MANUAL (shop-set) discount.
         if (ov.discountPrice != null && ov.discountPrice !== '') {
           purchaseItem.discountPrice = Number(ov.discountPrice);
+          product.manualDiscountPrice = Number(ov.discountPrice);
           product.discountPrice = Number(ov.discountPrice);
+          product.isAged = false; // superseded until aging re-applies
         } else if (ov.discountPrice === '' || ov.discountPrice === null) {
           purchaseItem.discountPrice = null;
+          product.manualDiscountPrice = null;
           product.discountPrice = null;
+          product.isAged = false;
+        }
+        // Toggle Price Aging opt-in for this unit. Turning it OFF also clears
+        // any aging discount already applied — the unit reverts to its manual
+        // discount (or full price when it has none).
+        if (ov.agingEnabled !== undefined) {
+          const on = ov.agingEnabled === true || ov.agingEnabled === 'true';
+          product.agingEnabled = on;
+          if (!on && product.isAged) {
+            product.isAged = false;
+            product.discountPrice = product.manualDiscountPrice ?? null;
+          }
+        }
+        // Toggle Exchange/Replace eligibility for this unit.
+        if (ov.exchangeable !== undefined) {
+          product.exchangeable = ov.exchangeable === true || ov.exchangeable === 'true';
         }
         // Update product name/category/description/color/size
         if (ov.name?.trim()) product.name = ov.name.trim();
@@ -527,7 +572,7 @@ exports.getPurchase = async (req, res) => {
 
     // Annotate each item with isSold flag and fill barcode from product if not saved on item
     const productIds = purchase.items.map((it) => it.productId).filter(Boolean);
-    const products = await Product.find({ _id: { $in: productIds } }).select('_id quantity barcode');
+    const products = await Product.find({ _id: { $in: productIds } }).select('_id quantity barcode agingEnabled exchangeable');
     const productMap = {};
     products.forEach((p) => { productMap[String(p._id)] = p; });
 
@@ -538,6 +583,9 @@ exports.getPurchase = async (req, res) => {
         ...it,
         barcode: it.barcode || prod?.barcode || '',
         isSold: prod ? prod.quantity === 0 : false,
+        // Live from the product — the purchase-item snapshot doesn't store it.
+        agingEnabled: prod ? !!prod.agingEnabled : false,
+        exchangeable: prod ? prod.exchangeable !== false : true,
       };
     });
 

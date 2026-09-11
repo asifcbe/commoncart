@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, Suspense, lazy } from 'react';
-import { Plus, Search, Edit, Trash2, Eye, Image, ChevronLeft, ChevronRight, Globe, GlobeLock, AlertTriangle, Camera, Barcode, Printer } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Image, Images, ChevronLeft, ChevronRight, Globe, GlobeLock, AlertTriangle, Camera, Barcode, Printer, X, Clock, History } from 'lucide-react';
 import useProductStore from '../store/useProductStore';
 import useAuthStore from '../store/useAuthStore';
 import { canViewCostPrice, canManage } from '../config/permissions';
@@ -18,6 +18,190 @@ import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import { formatDateTime } from '../utils/date';
+
+// Lightbox showing every uploaded photo of a product, with prev/next when
+// there's more than one.
+function ImagePreviewModal({ product, onClose }) {
+  const imgs = product?.images || [];
+  const [idx, setIdx] = useState(0);
+
+  useEffect(() => { setIdx(0); }, [product?._id]);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === 'Escape') onClose();
+      if (e.key === 'ArrowRight') setIdx((i) => (i + 1) % Math.max(1, imgs.length));
+      if (e.key === 'ArrowLeft') setIdx((i) => (i - 1 + imgs.length) % Math.max(1, imgs.length));
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [imgs.length, onClose]);
+
+  return (
+    <Modal open onClose={onClose} title={`Photos — ${product?.name || ''}`} size="lg">
+      {imgs.length === 0 ? (
+        <div className="py-16 text-center text-gray-400">
+          <Image size={40} className="mx-auto mb-3 opacity-40" />
+          This product has no photos yet.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="relative bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center" style={{ minHeight: 360 }}>
+            <img
+              src={imgs[idx]}
+              alt={`${product.name} — ${idx + 1}`}
+              className="max-h-[70vh] max-w-full object-contain"
+            />
+            {imgs.length > 1 && (
+              <>
+                <button
+                  onClick={() => setIdx((i) => (i - 1 + imgs.length) % imgs.length)}
+                  className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"
+                  title="Previous"
+                >
+                  <ChevronLeft size={18} />
+                </button>
+                <button
+                  onClick={() => setIdx((i) => (i + 1) % imgs.length)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"
+                  title="Next"
+                >
+                  <ChevronRight size={18} />
+                </button>
+                <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-0.5 rounded-full">
+                  {idx + 1} / {imgs.length}
+                </span>
+              </>
+            )}
+          </div>
+          {imgs.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {imgs.map((src, i) => (
+                <button
+                  key={i}
+                  onClick={() => setIdx(i)}
+                  className={`h-16 w-16 rounded-md overflow-hidden border-2 flex-shrink-0 transition-colors ${i === idx ? 'border-blue-500' : 'border-transparent'}`}
+                >
+                  <img src={src} alt="" className="h-full w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// Read-only product overview shown from the row's eye (preview) button.
+function ProductDetailsModal({ product, onClose, onEdit, onHistory }) {
+  const showCost = canViewCostPrice(useAuthStore.getState().user);
+  const [idx, setIdx] = useState(0);
+  useEffect(() => { setIdx(0); }, [product?._id]);
+  if (!product) return null;
+  const p = product;
+  const imgs = p.images || [];
+
+  const money = (n) => (n == null || n === '' ? '—' : `₹${Number(n).toFixed(2)}`);
+  const avail = (p.quantity ?? 0) - (p.reservedQty ?? 0);
+  const hasDiscount = p.discountPrice != null && p.discountPrice > 0 && p.discountPrice < p.price;
+  const margin = showCost && p.costPrice > 0
+    ? (((hasDiscount ? p.discountPrice : p.price) - p.costPrice) / p.costPrice) * 100
+    : null;
+
+  const Row = ({ label, children }) => (
+    <div className="flex justify-between gap-4 py-2 border-b border-gray-100 last:border-0">
+      <span className="text-sm text-gray-500 shrink-0">{label}</span>
+      <span className="text-sm text-gray-900 text-right font-medium">{children}</span>
+    </div>
+  );
+
+  return (
+    <Modal open onClose={onClose} title={p.name} size="lg">
+      <div className="grid md:grid-cols-2 gap-5">
+        {/* Photo */}
+        <div>
+          <div className="relative bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center" style={{ minHeight: 240 }}>
+            {imgs.length ? (
+              <>
+                <img src={imgs[idx]} alt={p.name} className="max-h-[50vh] max-w-full object-contain" />
+                {imgs.length > 1 && (
+                  <>
+                    <button onClick={() => setIdx((i) => (i - 1 + imgs.length) % imgs.length)} className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"><ChevronLeft size={16} /></button>
+                    <button onClick={() => setIdx((i) => (i + 1) % imgs.length)} className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"><ChevronRight size={16} /></button>
+                    <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-0.5 rounded-full">{idx + 1} / {imgs.length}</span>
+                  </>
+                )}
+              </>
+            ) : (
+              <div className="py-12 text-center text-gray-400"><Image size={36} className="mx-auto mb-2 opacity-40" />No photos</div>
+            )}
+          </div>
+          {imgs.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1 mt-2">
+              {imgs.map((src, i) => (
+                <button key={i} onClick={() => setIdx(i)} className={`h-14 w-14 rounded-md overflow-hidden border-2 flex-shrink-0 ${i === idx ? 'border-blue-500' : 'border-transparent'}`}>
+                  <img src={src} alt="" className="h-full w-full object-cover" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Details */}
+        <div>
+          <div className="flex flex-wrap gap-2 mb-3">
+            {!p.isActive && <Badge variant="destructive">Inactive</Badge>}
+            {p.isWebVisible !== false ? <Badge variant="info">On web</Badge> : <Badge variant="secondary">Hidden from web</Badge>}
+            {p.agingEnabled && <Badge variant="warning">Price aging</Badge>}
+            {p.isAged && <Badge variant="warning">Aged discount</Badge>}
+            {hasDiscount && !p.isAged && <Badge variant="success">On discount</Badge>}
+          </div>
+
+          <Row label="Barcode">{p.barcode || '—'}</Row>
+          <Row label="SKU">{p.SKU || '—'}</Row>
+          <Row label="Category">{p.category}{p.subCategory ? ` · ${p.subCategory}` : ''}</Row>
+          <Row label="Colour / Size">{[p.color, p.size].filter(Boolean).join(' / ') || '—'}</Row>
+          <Row label="MRP">{money(p.price)}</Row>
+          <Row label="Discount price">
+            {hasDiscount
+              ? <span className="text-red-600">{money(p.discountPrice)}{p.isAged ? ' (aged)' : (p.manualDiscountPrice != null ? ' (manual)' : '')}</span>
+              : '—'}
+          </Row>
+          {showCost && <Row label="Cost price">{money(p.costPrice)}</Row>}
+          {margin != null && <Row label="Margin">{margin.toFixed(1)}%</Row>}
+          <Row label="Stock">{avail} available{p.reservedQty ? ` · ${p.reservedQty} reserved` : ''} · {p.quantity ?? 0} total</Row>
+          <Row label="Low-stock alert at">{p.lowStockThreshold ?? '—'}</Row>
+          <Row label="HSN code">{p.hsnCode || '—'}</Row>
+          <Row label="GST %">{p.gstPercent != null ? `${p.gstPercent}%` : 'Shop default'}</Row>
+          <Row label="Supplier">{p.supplier || '—'}</Row>
+          {p.location ? <Row label="Location">{p.location}</Row> : null}
+          <Row label="Added">{p.createdAt ? formatDateTime(p.createdAt) : '—'}</Row>
+          <Row label="Last updated">{p.updatedAt ? formatDateTime(p.updatedAt) : '—'}</Row>
+          {p.description ? (
+            <div className="pt-2">
+              <span className="text-sm text-gray-500 block mb-1">Description</span>
+              <p className="text-sm text-gray-700 whitespace-pre-wrap">{p.description}</p>
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex justify-end gap-2 pt-4 mt-4 border-t">
+        {onHistory && (
+          <Button variant="outline" onClick={() => { onClose(); onHistory(p); }}>
+            <History size={14} className="mr-1.5" /> Stock history
+          </Button>
+        )}
+        {onEdit && (
+          <Button variant="outline" onClick={() => { onClose(); onEdit(p); }}>
+            <Edit size={14} className="mr-1.5" /> Edit
+          </Button>
+        )}
+        <Button onClick={onClose}>Close</Button>
+      </div>
+    </Modal>
+  );
+}
 
 function DeleteConfirmModal({ product, onConfirm, onClose }) {
   const [confirming, setConfirming] = useState(false);
@@ -77,34 +261,60 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
     color: product?.color || '',
     size: product?.size || '',
     price: product?.price || '',
+    // The editable "Discount price" field is the MANUAL (shop-set) discount.
+    // Price Aging may push the live `discountPrice` lower on aged products —
+    // show the manual one here so a save doesn't freeze the aged price in.
+    discountPrice: product?.manualDiscountPrice != null ? String(product.manualDiscountPrice)
+      : (!product?.isAged && product?.discountPrice != null ? String(product.discountPrice) : ''),
     costPrice: product?.costPrice || '',
     quantity: product?.quantity || 0,
     supplier: product?.supplier || '',
     location: product?.location || '',
     // New products are hidden from the web store by default; editing keeps the saved value
     isWebVisible: product ? product.isWebVisible === true : false,
+    // Opt-in to Price Aging. Off by default; editing keeps the saved value.
+    agingEnabled: product ? product.agingEnabled === true : false,
     // Optional existing barcode (create only) — blank auto-generates one
     barcode: '',
   });
   const [files, setFiles] = useState([]);
+  // Existing images (edit mode) the user has chosen to keep.
+  const [keptImages, setKeptImages] = useState(product?.images || []);
   const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const { createProduct, updateProduct } = useProductStore();
 
+  const removeKeptImage = (path) => setKeptImages((imgs) => imgs.filter((p) => p !== path));
+
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  // Discount price must be a positive number below the MRP, if given.
+  const discountError = (() => {
+    if (form.discountPrice === '' || form.discountPrice == null) return null;
+    const d = Number(form.discountPrice), p = Number(form.price);
+    if (Number.isNaN(d) || d < 0) return 'Enter a valid amount';
+    if (d === 0) return null;
+    if (p > 0 && d >= p) return 'Must be less than MRP';
+    return null;
+  })();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (discountError) { toast({ message: `Discount price: ${discountError}`, type: 'error' }); return; }
     setSaving(true);
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([k, v]) => {
         // Don't send an empty barcode — let the backend auto-generate one
         if (k === 'barcode' && !String(v).trim()) return;
+        // Blank discount price → send empty so the backend clears it to null
         fd.append(k, v);
       });
       files.forEach((f) => fd.append('images', f));
       if (product) {
+        // Tell the backend which existing photos to keep (anything removed
+        // gets deleted from disk). Always sent in edit mode so a full clear works.
+        fd.append('keepImages', JSON.stringify(keptImages));
         await updateProduct(product._id, fd);
       } else {
         await createProduct(fd);
@@ -140,16 +350,27 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
           <label className="text-sm font-medium text-gray-700 block mb-1">GST % <span className="text-xs text-gray-400 font-normal">optional — uses shop default if blank</span></label>
           <Input type="number" min="0" max="100" step="0.01" value={form.gstPercent} onChange={set('gstPercent')} placeholder="e.g. 12" />
         </div>
-        <div>
-          <label className="text-sm font-medium text-gray-700 block mb-1">Price *</label>
-          <Input type="number" step="0.01" value={form.price} onChange={set('price')} required />
-        </div>
         {showCost && (
           <div>
-            <label className="text-sm font-medium text-gray-700 block mb-1">Cost Price</label>
+            <label className="text-sm font-medium text-gray-700 block mb-1">Cost Price (₹)</label>
             <Input type="number" step="0.01" value={form.costPrice} onChange={set('costPrice')} />
           </div>
         )}
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">Discount Price (₹) <span className="text-xs text-gray-400 font-normal">optional — strikes MRP on labels & web store</span></label>
+          <Input type="number" step="0.01" min="0" value={form.discountPrice} onChange={set('discountPrice')} placeholder="Leave blank for none"
+            className={discountError ? 'border-red-400' : ''} />
+          {discountError && <p className="text-xs text-red-500 mt-0.5">{discountError}</p>}
+          {product?.isAged && product?.discountPrice != null && product.discountPrice < (Number(form.discountPrice) || product.price) && (
+            <p className="text-xs text-amber-600 mt-0.5 flex items-center gap-1">
+              <Clock size={11} /> Price Aging currently sells this at ₹{product.discountPrice.toFixed(2)}. Saving here sets the manual discount; aging re-applies on the next run.
+            </p>
+          )}
+        </div>
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">MRP (₹) *</label>
+          <Input type="number" step="0.01" value={form.price} onChange={set('price')} required />
+        </div>
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-1">Initial Quantity</label>
           <Input type="number" value={form.quantity} onChange={set('quantity')} min="0" />
@@ -200,13 +421,42 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
         </div>
         <div className="col-span-2">
           <label className="text-sm font-medium text-gray-700 block mb-1">Images (up to 5)</label>
-          <input
-            type="file"
-            multiple
-            accept="image/*"
-            onChange={(e) => setFiles(Array.from(e.target.files).slice(0, 5))}
-            className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 file:text-sm file:font-medium hover:file:bg-blue-100"
-          />
+
+          {/* Existing photos (edit mode) — click × to remove */}
+          {keptImages.length > 0 && (
+            <div className="flex flex-wrap gap-2 mb-2">
+              {keptImages.map((src) => (
+                <div key={src} className="relative h-16 w-16 rounded-md overflow-hidden border group">
+                  <img src={src} alt="" className="h-full w-full object-cover" />
+                  <button
+                    type="button"
+                    onClick={() => removeKeptImage(src)}
+                    title="Remove photo"
+                    className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-600 text-white flex items-center justify-center shadow hover:bg-red-700"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* New file picker for adding photos */}
+          {(keptImages.length + files.length) < 5 && (
+            <input
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={(e) => setFiles(Array.from(e.target.files).slice(0, 5 - keptImages.length))}
+              className="text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:bg-blue-50 file:text-blue-700 file:text-sm file:font-medium hover:file:bg-blue-100"
+            />
+          )}
+          {files.length > 0 && (
+            <p className="text-xs text-gray-400 mt-1">{files.length} new photo{files.length > 1 ? 's' : ''} will be added on save.</p>
+          )}
+          {keptImages.length + files.length >= 5 && (
+            <p className="text-xs text-gray-400 mt-1">Maximum of 5 photos. Remove one to add another.</p>
+          )}
         </div>
         <div className="col-span-2">
           <label className="flex items-center gap-3 cursor-pointer select-none group">
@@ -227,6 +477,29 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
               </p>
             </div>
             {form.isWebVisible ? <Globe size={16} className="text-blue-500" /> : <GlobeLock size={16} className="text-gray-400" />}
+          </label>
+        </div>
+        <div className="col-span-2">
+          <label className="flex items-center gap-3 cursor-pointer select-none group">
+            <div className="relative">
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={form.agingEnabled}
+                onChange={(e) => setForm((f) => ({ ...f, agingEnabled: e.target.checked }))}
+              />
+              <div className={`w-10 h-5 rounded-full transition-colors ${form.agingEnabled ? 'bg-blue-600' : 'bg-gray-300'}`} />
+              <div className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${form.agingEnabled ? 'translate-x-5' : ''}`} />
+            </div>
+            <div>
+              <span className="text-sm font-medium text-gray-700">Enable aging</span>
+              <p className="text-xs text-gray-400">
+                {form.agingEnabled
+                  ? 'Included in Price Aging — auto-discounted by product age (Settings → Price Aging)'
+                  : 'Excluded from Price Aging'}
+              </p>
+            </div>
+            <Clock size={16} className={form.agingEnabled ? 'text-orange-500' : 'text-gray-400'} />
           </label>
         </div>
       </div>
@@ -304,14 +577,18 @@ export default function Products() {
   const [subCategory, setSubCategory] = useState('');
   const [variant, setVariant] = useState('');
   const [size, setSize] = useState('');
-  // Products deactivated (not deleted) because they were sold before their
-  // purchase was deleted — hidden by default so removed purchases don't leave
-  // visible clutter; toggle on to audit them.
-  const [showInactive, setShowInactive] = useState(false);
+  // Narrow the list to products currently visible on the web store.
+  const [webOnly, setWebOnly] = useState(false);
+  // Price-aging filter: '', 'enabled', 'aged', 'not-aged', or '<min>-<max>' /
+  // '<min>+' day windows built from the configured aging steps.
+  const [agingBucket, setAgingBucket] = useState('');
+  const [agingSteps, setAgingSteps] = useState([]);
   const [page, setPage] = useState(1);
   const [showForm, setShowForm] = useState(false);
   const [editProduct, setEditProduct] = useState(null);
   const [historyProduct, setHistoryProduct] = useState(null);
+  const [photoProduct, setPhotoProduct] = useState(null);
+  const [detailsProduct, setDetailsProduct] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [barcodeInput, setBarcodeInput] = useState('');
   const [barcodeSearching, setBarcodeSearching] = useState(false);
@@ -334,20 +611,38 @@ export default function Products() {
       setDefaultHsnCode(data.config?.defaultHsnCode || '');
       setDefaultGstPercent(data.config?.gstPercent != null ? String(data.config.gstPercent) : '');
     }).catch(() => {});
+    api.get('/settings/aging-config')
+      .then(({ data }) => setAgingSteps((data.config?.steps || []).slice().sort((a, b) => a.days - b.days)))
+      .catch(() => {});
   }, []);
 
-  const filters = { search, category, subCategory, color: variant, size, page, isActive: showInactive ? undefined : true };
+  // Filter options = the aging steps themselves (same bands the Aged Products
+  // page groups by): one option per step, covering [step.days, nextStep.days).
+  const agingBandOptions = agingSteps.map((s, i) => {
+    const next = agingSteps[i + 1];
+    const value = next ? `${s.days}-${next.days}` : `${s.days}+`;
+    const range = next ? `${s.days}–${next.days}d` : `${s.days}d+`;
+    const off = s.percent > 0 ? ` · −${s.percent}%` : '';
+    return { value, label: `${s.label} (${range}${off})` };
+  });
+
+  const filters = {
+    search, category, subCategory, color: variant, size, page,
+    isActive: true,
+    ...(webOnly ? { isWebVisible: true } : {}),
+    ...(agingBucket ? { agingBucket } : {}),
+  };
 
   useEffect(() => {
     clearTimeout(searchTimeout.current);
     searchTimeout.current = setTimeout(() => {
       fetchProducts(filters);
     }, 300);
-  }, [search, category, subCategory, variant, size, showInactive, page]);
+  }, [search, category, subCategory, variant, size, webOnly, agingBucket, page]);
 
   // Auto-refresh the list — but never while a form/modal is open or the user is searching
-  const isBusy = showForm || editProduct || historyProduct || deleteTarget || barcodeItem || bulkBarcodeOpen;
-  useAutoRefresh(() => { if (!isBusy) fetchProducts(filters); }, 30000, [search, category, subCategory, variant, size, showInactive, page, isBusy]);
+  const isBusy = showForm || editProduct || historyProduct || photoProduct || detailsProduct || deleteTarget || barcodeItem || bulkBarcodeOpen;
+  useAutoRefresh(() => { if (!isBusy) fetchProducts(filters); }, 30000, [search, category, subCategory, variant, size, webOnly, agingBucket, page, isBusy]);
 
   // Sub-categories available for the selected category (from the managed catalog)
   const subCategoryOptions = category
@@ -369,6 +664,7 @@ export default function Products() {
     setShowForm(false);
     setEditProduct(null);
     fetchProducts(filters);
+    fetchCategoryCatalog?.(); // pick up any category/sub-category the product just registered
     toast({ message: 'Product saved successfully', type: 'success' });
   };
 
@@ -487,18 +783,22 @@ export default function Products() {
               <option value="">All Sizes</option>
               {sizes.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
-            <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer whitespace-nowrap">
+            <Select value={agingBucket} onChange={(e) => { setAgingBucket(e.target.value); setPage(1); }} className="w-56" title="Filter by aging step">
+              <option value="">All aging steps</option>
+              {agingBandOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </Select>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer whitespace-nowrap">
               <input
                 type="checkbox"
-                checked={showInactive}
-                onChange={(e) => { setShowInactive(e.target.checked); setPage(1); }}
+                checked={webOnly}
+                onChange={(e) => { setWebOnly(e.target.checked); setPage(1); }}
                 className="rounded"
               />
-              Show deactivated
+              <Globe size={13} className="text-blue-500" /> Web store only
             </label>
-            {(category || subCategory || variant || size || showInactive) && (
+            {(category || subCategory || variant || size || webOnly || agingBucket) && (
               <button
-                onClick={() => { setCategory(''); setSubCategory(''); setVariant(''); setSize(''); setShowInactive(false); setPage(1); }}
+                onClick={() => { setCategory(''); setSubCategory(''); setVariant(''); setSize(''); setWebOnly(false); setAgingBucket(''); setPage(1); }}
                 className="text-xs text-gray-400 hover:text-red-500 underline"
               >
                 Clear filters
@@ -520,7 +820,7 @@ export default function Products() {
               <thead className="bg-gray-50 border-b">
                 <tr>
                   {barcodePrintMode && <th className="px-4 py-3 w-8" />}
-                  {['Product', 'SKU', 'Category', 'Price', 'Stock', 'Web', 'Status', 'Actions'].map((h) => (
+                  {['Product', 'SKU', 'Category', 'MRP / Discount', 'Stock', 'Web', 'Status', 'Actions'].map((h) => (
                     <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">{h}</th>
                   ))}
                 </tr>
@@ -543,7 +843,19 @@ export default function Products() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         {p.images?.[0] ? (
-                          <img src={p.images[0]} alt={p.name} className="h-9 w-9 rounded-md object-cover border" />
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setPhotoProduct(p); }}
+                            className="relative h-9 w-9 rounded-md overflow-hidden border group/thumb"
+                            title="View photos"
+                          >
+                            <img src={p.images[0]} alt={p.name} className="h-full w-full object-cover" />
+                            {p.images.length > 1 && (
+                              <span className="absolute bottom-0 right-0 text-[9px] leading-none bg-black/60 text-white px-1 py-0.5 rounded-tl">
+                                {p.images.length}
+                              </span>
+                            )}
+                            <span className="absolute inset-0 bg-black/0 group-hover/thumb:bg-black/25 transition-colors" />
+                          </button>
                         ) : (
                           <div className="h-9 w-9 rounded-md bg-gray-100 flex items-center justify-center">
                             <Image size={14} className="text-gray-400" />
@@ -560,10 +872,24 @@ export default function Products() {
                       {p.category}
                       {p.subCategory ? <div className="text-xs text-gray-400">{p.subCategory}</div> : null}
                     </td>
-                    <td className="px-4 py-3 font-medium">${p.price.toFixed(2)}</td>
+                    <td className="px-4 py-3 font-medium">
+                      {p.discountPrice != null && p.discountPrice > 0 && p.discountPrice < p.price ? (
+                        <div className="flex items-baseline gap-1.5">
+                          <span className="text-red-600">₹{p.discountPrice.toFixed(2)}</span>
+                          <span className="text-xs text-gray-400 line-through">₹{p.price.toFixed(2)}</span>
+                        </div>
+                      ) : (
+                        <>₹{p.price.toFixed(2)}</>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="font-medium">{p.quantity - p.reservedQty}</div>
                       <div className="text-xs text-gray-400">of {p.quantity} total</div>
+                      {p.agingEnabled && (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-orange-600 mt-0.5" title="Enrolled in Price Aging">
+                          <Clock size={11} /> aging
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       {p.isWebVisible !== false ? (
@@ -584,8 +910,14 @@ export default function Products() {
                             <Barcode size={15} />
                           </button>
                         )}
-                        <button onClick={() => setHistoryProduct(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="Stock history">
+                        <button onClick={() => setDetailsProduct(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="View details">
                           <Eye size={15} />
+                        </button>
+                        <button onClick={() => setPhotoProduct(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="View photos">
+                          <Images size={15} />
+                        </button>
+                        <button onClick={() => setHistoryProduct(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="Stock history">
+                          <History size={15} />
                         </button>
                         {allowManage && (
                           <>
@@ -641,6 +973,21 @@ export default function Products() {
           onClose={() => { setShowForm(false); setEditProduct(null); }}
         />
       </Modal>
+
+      {/* Product Details (eye / preview) */}
+      {detailsProduct && (
+        <ProductDetailsModal
+          product={detailsProduct}
+          onClose={() => setDetailsProduct(null)}
+          onEdit={allowManage ? ((p) => { setEditProduct(p); setShowForm(true); }) : undefined}
+          onHistory={(p) => setHistoryProduct(p)}
+        />
+      )}
+
+      {/* Photo Preview */}
+      {photoProduct && (
+        <ImagePreviewModal product={photoProduct} onClose={() => setPhotoProduct(null)} />
+      )}
 
       {/* Stock History Modal */}
       <Modal

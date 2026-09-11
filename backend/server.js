@@ -39,7 +39,14 @@ app.use(cors({ origin: allowedOrigins, credentials: true }));
 // Default 100kb body limit is too small for bulk purchase entries (100s–1000s of items).
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Product images are public assets — served with an open CORS header and a
+// long cache so the storefront (a different origin in production) can load
+// them directly via <img>.
+app.use('/uploads', (req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+  next();
+}, express.static(path.join(__dirname, 'uploads'), { maxAge: '7d', immutable: true }));
 
 // Attach io to every request
 app.use((req, _res, next) => {
@@ -69,6 +76,18 @@ app.use('/api/reports', reportsRoutes);
 app.use('/api/backup', backupRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', phase: 2 }));
+
+// Upload / image-processing errors → clean 4xx instead of a bare 500.
+app.use((err, _req, res, next) => {
+  if (!err) return next();
+  if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ message: 'Image is too large — please pick a file under 12MB.' });
+  }
+  if (err.name === 'MulterError' || /^(Only image files|Image processing failed)/.test(err.message || '')) {
+    return res.status(400).json({ message: err.message });
+  }
+  return res.status(500).json({ message: err.message || 'Server error' });
+});
 
 // Socket.IO — real-time sync hub
 io.on('connection', (socket) => {
