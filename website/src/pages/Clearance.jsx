@@ -1,14 +1,17 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Tag, Flame } from 'lucide-react';
+import { Tag, Sparkles, ChevronLeft, ChevronRight } from 'lucide-react';
 import api from '../utils/api';
 import useCartStore from '../store/useCartStore';
 import Img from '../components/ui/Img';
 
+const PAGE_SIZE = 24;
+
 function DiscountBadge({ percent }) {
   return (
-    <span className="absolute top-2 left-2 bg-red-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
-      -{percent}%
+    <span className="absolute top-3 left-3 text-white text-xs font-semibold px-2.5 py-1 rounded-full"
+      style={{ background: 'var(--color-primary)' }}>
+      −{percent}%
     </span>
   );
 }
@@ -25,42 +28,46 @@ function ProductCard({ product }) {
   const percent = product.effectiveDiscountPercent;
 
   return (
-    <div className="bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-md transition-shadow group relative">
+    <div className="card card-hover overflow-hidden group relative">
       <DiscountBadge percent={percent} />
-      <Link to={`/products/${product._id}`} className="block aspect-square bg-gray-50 overflow-hidden">
-        <Img src={image} alt={product.name} iconSize={48} className="w-full h-full"
-          imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+      <Link to={`/products/${product._id}`} className="block aspect-square overflow-hidden" style={{ background: 'var(--color-primary-light)' }}>
+        <Img src={image} alt={product.name} iconSize={44} className="w-full h-full"
+          imgClassName="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
       </Link>
-      <div className="p-3">
-        <p className="text-xs text-gray-400 mb-0.5">{product.category}</p>
-        <Link to={`/products/${product._id}`} className="font-medium text-gray-900 text-sm hover:text-red-600 line-clamp-2">{product.name}</Link>
+      <div className="p-4">
+        <p className="text-[0.65rem] font-semibold uppercase tracking-widest mb-1" style={{ color: 'var(--color-ink-soft)' }}>
+          {product.category}
+        </p>
+        <Link to={`/products/${product._id}`} className="font-medium text-sm hover:underline line-clamp-2 leading-snug" style={{ color: 'var(--color-ink)' }}>
+          {product.name}
+        </Link>
         {(product.color || product.size) && (
-          <p className="text-xs text-gray-400 mt-0.5">{[product.color, product.size].filter(Boolean).join(' / ')}</p>
+          <p className="text-xs mt-1" style={{ color: 'var(--color-ink-soft)' }}>{[product.color, product.size].filter(Boolean).join(' · ')}</p>
         )}
-        <div className="flex items-center gap-2 mt-2">
-          <span className="text-lg font-bold text-red-600">₹{displayPrice.toFixed(2)}</span>
+        <div className="flex items-baseline gap-2 mt-3">
+          <span className="text-lg font-semibold" style={{ color: 'var(--color-primary)' }}>₹{displayPrice.toFixed(2)}</span>
           {originalPrice && (
-            <span className="text-sm line-through text-gray-400">₹{originalPrice.toFixed(2)}</span>
+            <span className="text-sm line-through" style={{ color: 'var(--color-ink-soft)' }}>₹{originalPrice.toFixed(2)}</span>
           )}
         </div>
-        <div className="flex items-center justify-between mt-2">
-          <span className={`text-xs ${available > 0 ? 'text-green-600' : 'text-red-500'}`}>
+        <div className="flex items-center justify-between mt-3">
+          <span className="text-xs font-medium" style={{ color: available > 0 ? 'var(--color-secondary-dark)' : 'var(--color-danger)' }}>
             {available > 0 ? `${available} in stock` : 'Out of stock'}
           </span>
           <button
             disabled={available === 0 || inCart}
             onClick={() => addItem({ productId: product._id, name: product.name, price: displayPrice, image: image || '', availableQty: available })}
-            className={`text-xs px-3 py-1 rounded-lg font-medium transition-colors ${
-              inCart ? 'bg-green-100 text-green-700' :
-              available === 0 ? 'bg-gray-100 text-gray-400 cursor-not-allowed' :
-              'bg-red-500 hover:bg-red-600 text-white'
+            className={`text-xs px-3.5 py-1.5 rounded-lg font-medium transition-colors ${
+              inCart ? '' : available === 0 ? 'cursor-not-allowed' : ''
             }`}
+            style={
+              inCart ? { background: 'var(--color-secondary-light)', color: 'var(--color-secondary-dark)' } :
+              available === 0 ? { background: 'var(--color-toffee)', color: 'var(--color-ink-soft)' } :
+              { background: 'var(--color-primary)', color: '#fff' }
+            }
           >
             {inCart ? 'In Cart' : 'Add to Cart'}
           </button>
-        </div>
-        <div className="mt-1.5 text-[10px] text-gray-400 flex items-center gap-1">
-          <Tag size={9} /> {percent}% Off
         </div>
       </div>
     </div>
@@ -72,41 +79,27 @@ function ProductCard({ product }) {
 // same shop, not a bolted-on page.
 function FilterSection({ title, options, value, onChange, pills = false }) {
   if (!options.length) return null;
-  const Wrap = pills ? 'div' : 'ul';
-  const wrapClass = pills ? 'flex flex-wrap gap-2' : 'space-y-1';
-  const Item = pills ? 'button' : 'li';
   const itemBtnClass = (active) => pills
-    ? `px-3 py-1.5 rounded-lg text-sm border transition-colors ${active ? 'text-white border-transparent' : 'text-gray-600 border-gray-200 hover:bg-gray-50'}`
-    : `w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors ${active ? 'font-semibold text-white' : 'text-gray-600 hover:bg-gray-50'}`;
-  const itemBtnStyle = (active) => (active ? { background: 'var(--color-primary)' } : {});
+    ? `px-3 py-1.5 rounded-full text-sm border transition-colors`
+    : `w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors`;
+  const itemBtnStyle = (active) => active
+    ? { background: 'var(--color-primary)', color: '#fff', borderColor: 'var(--color-primary)' }
+    : pills
+      ? { color: 'var(--color-ink-soft)', borderColor: 'var(--color-toffee)' }
+      : { color: 'var(--color-ink-soft)' };
 
   return (
-    <>
-      <h3 className="font-semibold text-sm text-gray-700 mb-3 mt-6 first:mt-0">{title}</h3>
-      <Wrap className={wrapClass}>
-        {!pills && (
-          <li>
-            <button onClick={() => onChange('')} className={itemBtnClass(!value)} style={itemBtnStyle(!value)}>All</button>
-          </li>
-        )}
-        {pills && (
-          <button onClick={() => onChange('')} className={itemBtnClass(!value)} style={itemBtnStyle(!value)}>All</button>
-        )}
+    <div className="mt-6 first:mt-0">
+      <h3 className="font-semibold text-xs uppercase tracking-wider mb-3" style={{ color: 'var(--color-ink-soft)' }}>{title}</h3>
+      <div className={pills ? 'flex flex-wrap gap-2' : 'space-y-0.5'}>
+        <button onClick={() => onChange('')} className={itemBtnClass(!value)} style={itemBtnStyle(!value)}>All</button>
         {options.map(({ key, label }) => (
-          pills ? (
-            <button key={key} onClick={() => onChange(key)} className={itemBtnClass(value === key)} style={itemBtnStyle(value === key)}>
-              {label}
-            </button>
-          ) : (
-            <Item key={key}>
-              <button onClick={() => onChange(key)} className={itemBtnClass(value === key)} style={itemBtnStyle(value === key)}>
-                {label}
-              </button>
-            </Item>
-          )
+          <button key={key} onClick={() => onChange(key)} className={itemBtnClass(value === key)} style={itemBtnStyle(value === key)}>
+            {label}
+          </button>
         ))}
-      </Wrap>
-    </>
+      </div>
+    </div>
   );
 }
 
@@ -114,6 +107,7 @@ export default function Clearance() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
+  const [page, setPage] = useState(1);
 
   const [discount, setDiscount] = useState('');    // effectiveDiscountPercent, as a string
   const [category, setCategory] = useState('');
@@ -164,7 +158,7 @@ export default function Clearance() {
     return [...seen].sort().map((s) => ({ key: s, label: s }));
   }, [products]);
 
-  const handleCategory = (c) => { setCategory(c); setSubCategory(''); };
+  const handleCategory = (c) => { setCategory(c); setSubCategory(''); setPage(1); };
 
   const filtered = products.filter((p) =>
     (!discount || String(p.effectiveDiscountPercent) === discount) &&
@@ -174,70 +168,78 @@ export default function Clearance() {
     (!size || p.size === size)
   );
 
+  // A clearance sale can legitimately span thousands of aged-out units —
+  // paginate the (already-filtered) list instead of rendering it all in one
+  // giant grid, which is what made this page unusable at real-shop scale.
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageClamped = Math.min(page, pages);
+  const paged = filtered.slice((pageClamped - 1) * PAGE_SIZE, pageClamped * PAGE_SIZE);
+
   const hasActiveFilters = discount || category || subCategory || color || size;
-  const clearFilters = () => { setDiscount(''); setCategory(''); setSubCategory(''); setColor(''); setSize(''); };
+  const clearFilters = () => { setDiscount(''); setCategory(''); setSubCategory(''); setColor(''); setSize(''); setPage(1); };
+  const setFilterAndResetPage = (setter) => (v) => { setter(v); setPage(1); };
 
   if (!enabled && !loading) {
     return (
-      <div className="max-w-7xl mx-auto px-4 py-16 text-center">
-        <Flame size={48} className="mx-auto mb-4 text-gray-200" />
-        <h1 className="text-2xl font-bold text-gray-400">No Clearance Sale Right Now</h1>
-        <p className="text-gray-400 mt-2 text-sm">Check back soon for special offers.</p>
-        <Link to="/products" className="mt-6 inline-block text-sm text-blue-600 hover:underline">Browse all products →</Link>
+      <div className="max-w-7xl mx-auto px-4 py-20 text-center">
+        <Sparkles size={36} className="mx-auto mb-4" style={{ color: 'var(--color-toffee)' }} />
+        <h1 className="text-2xl" style={{ fontFamily: "'Fraunces', Georgia, serif", color: 'var(--color-ink)' }}>No Clearance Sale Right Now</h1>
+        <p className="mt-2 text-sm" style={{ color: 'var(--color-ink-soft)' }}>Check back soon for special offers.</p>
+        <Link to="/products" className="mt-6 inline-block text-sm font-medium" style={{ color: 'var(--color-primary-dark)' }}>Browse all products →</Link>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-8">
-      {/* Hero banner */}
-      <div className="rounded-2xl bg-gradient-to-r from-red-500 to-orange-500 text-white p-8 mb-8 flex items-center gap-6">
-        <Flame size={56} className="opacity-80 shrink-0" />
-        <div>
-          <h1 className="text-3xl font-extrabold">Clearance Sale</h1>
-          <p className="mt-1 text-red-100 text-sm">
-            Big discounts on select items — while stocks last.
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-10">
+      {/* Header */}
+      <div className="mb-10 pb-8 text-center border-b" style={{ borderColor: 'var(--color-toffee)' }}>
+        <p className="text-xs font-semibold tracking-[0.35em] uppercase mb-3" style={{ color: 'var(--color-primary-dark)' }}>Limited Time</p>
+        <h1 className="text-3xl sm:text-4xl" style={{ fontFamily: "'Fraunces', Georgia, serif", color: 'var(--color-ink)' }}>Clearance Sale</h1>
+        <p className="mt-3 text-sm max-w-md mx-auto" style={{ color: 'var(--color-ink-soft)' }}>
+          Thoughtfully reduced prices on select pieces — while stocks last.
+        </p>
+        {products.length > 0 && (
+          <p className="mt-3 text-xs font-medium" style={{ color: 'var(--color-ink-soft)' }}>
+            {products.length} piece{products.length !== 1 ? 's' : ''} on clearance right now
           </p>
-          {products.length > 0 && (
-            <p className="mt-2 text-white/80 text-xs">{products.length} product{products.length !== 1 ? 's' : ''} on clearance right now</p>
-          )}
-        </div>
+        )}
       </div>
 
       {loading ? (
         <div className="flex justify-center py-16">
-          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-red-500" />
+          <div className="animate-spin rounded-full h-8 w-8 border-2 border-t-transparent" style={{ borderColor: 'var(--color-primary)', borderTopColor: 'transparent' }} />
         </div>
       ) : products.length === 0 ? (
         <div className="text-center py-16">
-          <Tag size={40} className="mx-auto mb-4 text-gray-200" />
-          <p className="text-gray-400">No clearance products available right now.</p>
-          <Link to="/products" className="mt-4 inline-block text-sm text-blue-600 hover:underline">Browse all products →</Link>
+          <Tag size={32} className="mx-auto mb-4" style={{ color: 'var(--color-toffee)' }} />
+          <p style={{ color: 'var(--color-ink-soft)' }}>No clearance products available right now.</p>
+          <Link to="/products" className="mt-4 inline-block text-sm font-medium" style={{ color: 'var(--color-primary-dark)' }}>Browse all products →</Link>
         </div>
       ) : (
-        <div className="flex gap-6">
+        <div className="flex gap-8">
           {/* Sidebar filters */}
           <aside className="hidden md:block w-52 flex-shrink-0">
-            <div className="card p-4 sticky top-28">
+            <div className="sticky top-28">
               <div className="flex items-center justify-between mb-1">
-                <h2 className="font-bold text-sm text-gray-900">Filters</h2>
+                <h2 className="font-semibold text-sm" style={{ color: 'var(--color-ink)' }}>Filters</h2>
                 {hasActiveFilters && (
-                  <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-red-500 underline">Clear</button>
+                  <button onClick={clearFilters} className="text-xs underline" style={{ color: 'var(--color-ink-soft)' }}>Clear</button>
                 )}
               </div>
-              <FilterSection title="Discount" options={discountOptions} value={discount} onChange={setDiscount} />
+              <FilterSection title="Discount" options={discountOptions} value={discount} onChange={setFilterAndResetPage(setDiscount)} />
               <FilterSection title="Category" options={categoryOptions} value={category} onChange={handleCategory} />
-              <FilterSection title="Sub-category" options={subCategoryOptions} value={subCategory} onChange={setSubCategory} />
-              <FilterSection title="Variant" options={colorOptions} value={color} onChange={setColor} />
-              <FilterSection title="Size" options={sizeOptions} value={size} onChange={setSize} pills />
+              <FilterSection title="Sub-category" options={subCategoryOptions} value={subCategory} onChange={setFilterAndResetPage(setSubCategory)} />
+              <FilterSection title="Variant" options={colorOptions} value={color} onChange={setFilterAndResetPage(setColor)} />
+              <FilterSection title="Size" options={sizeOptions} value={size} onChange={setFilterAndResetPage(setSize)} pills />
             </div>
           </aside>
 
           <div className="flex-1 min-w-0">
             {/* Mobile filter row — same facets as the sidebar, as compact
                 selects (sidebar is desktop-only, hidden below md). */}
-            <div className="md:hidden flex gap-2 flex-wrap mb-4">
-              <select value={discount} onChange={(e) => setDiscount(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+            <div className="md:hidden flex gap-2 flex-wrap mb-6">
+              <select value={discount} onChange={(e) => setFilterAndResetPage(setDiscount)(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
                 <option value="">All discounts</option>
                 {discountOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
               </select>
@@ -248,37 +250,61 @@ export default function Clearance() {
                 </select>
               )}
               {subCategoryOptions.length > 0 && (
-                <select value={subCategory} onChange={(e) => setSubCategory(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                <select value={subCategory} onChange={(e) => setFilterAndResetPage(setSubCategory)(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
                   <option value="">All sub-categories</option>
                   {subCategoryOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               )}
               {colorOptions.length > 0 && (
-                <select value={color} onChange={(e) => setColor(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                <select value={color} onChange={(e) => setFilterAndResetPage(setColor)(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
                   <option value="">All variants</option>
                   {colorOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               )}
               {sizeOptions.length > 0 && (
-                <select value={size} onChange={(e) => setSize(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                <select value={size} onChange={(e) => setFilterAndResetPage(setSize)(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
                   <option value="">All sizes</option>
                   {sizeOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
                 </select>
               )}
               {hasActiveFilters && (
-                <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-red-500 underline shrink-0 self-center">Clear</button>
+                <button onClick={clearFilters} className="text-xs underline shrink-0 self-center" style={{ color: 'var(--color-ink-soft)' }}>Clear</button>
               )}
             </div>
 
             {filtered.length === 0 ? (
-              <div className="text-center py-16 text-gray-400">
+              <div className="text-center py-16" style={{ color: 'var(--color-ink-soft)' }}>
                 <p className="text-lg font-medium">No products match these filters</p>
-                <button onClick={clearFilters} className="mt-2 text-sm text-blue-600 hover:underline">Clear filters</button>
+                <button onClick={clearFilters} className="mt-2 text-sm font-medium" style={{ color: 'var(--color-primary-dark)' }}>Clear filters</button>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filtered.map((p) => <ProductCard key={p._id} product={p} />)}
-              </div>
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+                  {paged.map((p) => <ProductCard key={p._id} product={p} />)}
+                </div>
+
+                {pages > 1 && (
+                  <div className="flex items-center justify-center gap-3 mt-10">
+                    <button
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      disabled={pageClamped === 1}
+                      className="flex items-center gap-1 px-4 py-2 rounded-lg border text-sm font-medium disabled:opacity-40"
+                      style={{ borderColor: 'var(--color-toffee)', color: 'var(--color-ink)' }}
+                    >
+                      <ChevronLeft size={16} /> Prev
+                    </button>
+                    <span className="text-sm" style={{ color: 'var(--color-ink-soft)' }}>Page {pageClamped} of {pages}</span>
+                    <button
+                      onClick={() => setPage((p) => Math.min(pages, p + 1))}
+                      disabled={pageClamped === pages}
+                      className="flex items-center gap-1 px-4 py-2 rounded-lg border text-sm font-medium disabled:opacity-40"
+                      style={{ borderColor: 'var(--color-toffee)', color: 'var(--color-ink)' }}
+                    >
+                      Next <ChevronRight size={16} />
+                    </button>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

@@ -32,14 +32,16 @@ export default function Header() {
   };
 
   return (
-    <header className="bg-white sticky top-0 z-40 shadow-sm" style={{ borderBottom: '3px solid var(--color-toffee)' }}>
+    <header className="bg-white sticky top-0 z-40 shadow-sm" style={{ borderBottom: '1px solid var(--color-toffee)' }}>
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div className="flex items-center justify-between h-16 gap-4">
-          {/* Logo — one consistent mark at every screen size */}
+        <div className="flex items-center justify-between h-20 gap-6">
+          {/* Logo — one consistent mark at every screen size, sized to
+              actually anchor the header instead of disappearing next to
+              the search bar. */}
           <Link to="/" className="flex-shrink-0" aria-label={brand.name}>
             {brand.logoUrl
-              ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-9 w-auto" />
-              : <BrandLogo size={32} animated={false} showText />}
+              ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-12 sm:h-14 w-auto" />
+              : <BrandLogo size={48} animated={false} showText />}
           </Link>
 
           {/* Search — desktop */}
@@ -165,19 +167,19 @@ export default function Header() {
       {/* Category nav */}
       <nav style={{ background: 'var(--color-primary-light)', borderTop: '2px solid var(--color-toffee)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 flex gap-5 overflow-x-auto py-2 scrollbar-hide items-center">
-          <Link to="/products" className="text-sm font-extrabold whitespace-nowrap" style={{ color: 'var(--color-ink)' }}>
+          <Link to="/products" className="text-sm font-semibold whitespace-nowrap" style={{ color: 'var(--color-ink)' }}>
             All Outfits
           </Link>
-          <Link to="/" className="text-sm font-bold whitespace-nowrap" style={{ color: 'var(--color-ink-soft)' }}>
+          <Link to="/" className="text-sm font-medium whitespace-nowrap" style={{ color: 'var(--color-ink-soft)' }}>
             Home
           </Link>
-          <Link to="/clearance" className="text-sm font-extrabold whitespace-nowrap flex items-center gap-1"
+          <Link to="/clearance" className="text-sm font-semibold whitespace-nowrap flex items-center gap-1"
             style={{ color: 'var(--color-secondary-dark)' }}>
             <Heart size={14} /> Sale
           </Link>
           {shopConfig.contact.phone && (
             <a href={`tel:${shopConfig.contact.phone}`}
-              className="text-sm font-bold whitespace-nowrap ml-auto" style={{ color: 'var(--color-ink-soft)' }}>
+              className="text-sm font-medium whitespace-nowrap ml-auto" style={{ color: 'var(--color-ink-soft)' }}>
               {shopConfig.contact.phone}
             </a>
           )}

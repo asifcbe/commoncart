@@ -109,10 +109,10 @@ export default function BrandLogo({ size = 40, animated = true, showText = false
 
       {showText && (
         <span className="leading-none whitespace-nowrap">
-          <span className="block font-extrabold text-sm sm:text-base" style={{ color: 'var(--color-ink)' }}>
-            Tom <span style={{ color: 'var(--color-secondary)' }}>&amp;</span> Jerry
+          <span className="block font-semibold text-lg sm:text-xl" style={{ color: 'var(--color-ink)', fontFamily: "'Fraunces', Georgia, serif" }}>
+            Tom <span style={{ color: 'var(--color-primary)' }}>&amp;</span> Jerry
           </span>
-          <span className="block text-[10px] sm:text-[11px] font-bold tracking-widest uppercase" style={{ color: 'var(--color-ink-soft)' }}>
+          <span className="block text-[10px] sm:text-[11px] font-medium tracking-[0.3em] uppercase mt-0.5" style={{ color: 'var(--color-ink-soft)' }}>
             Kids Wear
           </span>
         </span>

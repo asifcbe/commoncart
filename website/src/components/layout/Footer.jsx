@@ -16,24 +16,19 @@ export default function Footer() {
   ].filter((s) => social[s.key]);
 
   return (
-    <footer className="mt-16" style={{ background: 'var(--color-ink)', color: '#EAD9C4' }}>
-      {/* scalloped top edge */}
-      <div className="h-4 w-full" style={{
-        background: 'radial-gradient(circle at 10px -2px, var(--color-bg) 12px, transparent 13px) repeat-x',
-        backgroundSize: '20px 20px',
-      }} />
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
+    <footer className="mt-24" style={{ background: 'var(--color-ink)', color: '#EAD9C4', borderTop: '1px solid rgba(255,255,255,.08)' }}>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           {/* Brand */}
           <div>
-            <div className="mb-3">
+            <div className="mb-4">
               {brand.logoUrl
-                ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-9" />
-                : <BrandLogo size={38} animated={false} />}
+                ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-14" />
+                : <BrandLogo size={52} animated={false} />}
             </div>
-            <p className="font-extrabold text-white text-lg leading-none">
-              Tom <span style={{ color: 'var(--color-secondary)' }}>&amp;</span> Jerry
-              <span className="block text-[0.6rem] font-bold tracking-[0.25em] uppercase mt-1" style={{ color: '#C9B49B' }}>Kids Wear</span>
+            <p className="text-xl leading-none" style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#fff' }}>
+              Tom <span style={{ color: 'var(--color-primary)' }}>&amp;</span> Jerry
+              <span className="block text-[0.62rem] font-medium tracking-[0.3em] uppercase mt-1.5" style={{ color: '#C9B49B' }}>Kids Wear</span>
             </p>
             <p className="text-sm mt-3 leading-relaxed" style={{ color: '#C9B49B' }}>{brand.description}</p>
             {socialLinks.length > 0 && (
