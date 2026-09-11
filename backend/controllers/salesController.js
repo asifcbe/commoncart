@@ -133,12 +133,17 @@ exports.processStoreSale = async (req, res) => {
     // from customer.creditPoints below — earned-and-redeemed-now points never
     // touched the balance, so they must not be subtracted from it too.
     let pointsRedeemedFromBalance = 0;
+    // ₹ discount from spending OLD balance points specifically — tracked apart
+    // from discountAmount so it can be excluded from the points-earning
+    // formula below (spending existing points shouldn't cost new ones).
+    let balancePointsDiscount = 0;
     if (customer && redeemPoints && Number(redeemPoints) > 0) {
       const pointsToRedeem = Math.min(Number(redeemPoints), customer.creditPoints);
       const pointDiscount = pointsToRedeem * creditConfig.pointValue;
       discountAmount += pointDiscount;
       pointsRedeemed = pointsToRedeem;
       pointsRedeemedFromBalance = pointsToRedeem;
+      balancePointsDiscount = pointDiscount;
     }
 
     // Manual discount (flat ₹ amount already computed on the frontend)
@@ -149,10 +154,14 @@ exports.processStoreSale = async (req, res) => {
     discountAmount = Math.min(discountAmount, totalAmount);
 
     // Points earned are based on what the customer actually pays for goods —
-    // coupon, points-redeemed(from balance), and manual discount all reduce
-    // the qualifying amount. Round-off/carry-forward don't (they're not goods
-    // value). Computed before the redeem-now discount below, which is itself
-    // derived from pointsEarned — including it here would be circular.
+    // coupon and manual discount reduce the qualifying amount. Round-off/
+    // carry-forward don't (they're not goods value). Computed before the
+    // redeem-now discount below, which is itself derived from pointsEarned —
+    // including it here would be circular.
+    //
+    // OLD balance-points redemption is deliberately excluded — spending
+    // points the customer already earned is not a "discount" for purposes of
+    // earning NEW points; it must not cost them points on this same bill.
     //
     // CLEARANCE (aged) items earn NO loyalty points — their full line value is
     // excluded from the qualifying amount, so a bill mixing clearance + normal
@@ -161,7 +170,12 @@ exports.processStoreSale = async (req, res) => {
       (s, it) => s + (it.isDiscounted ? it.price * it.qty : 0),
       0
     );
-    const pointQualifyingAmount = Math.max(0, totalAmount - clearanceGoods - discountAmount);
+    const nonClearanceGoods = Math.max(0, totalAmount - clearanceGoods);
+    // Clamped to nonClearanceGoods — if the OTHER discounts (coupon/manual)
+    // got capped down by the totalAmount clamp above, adding back
+    // balancePointsDiscount here must not let the qualifying amount exceed
+    // what the non-clearance goods were actually worth.
+    const pointQualifyingAmount = Math.min(nonClearanceGoods, Math.max(0, nonClearanceGoods - discountAmount + balancePointsDiscount));
     const pointsEarned = Math.floor(pointQualifyingAmount / creditConfig.rupeesPerPoint);
     // Opt-in: spend those just-earned points on this same bill instead of banking
     // them to the customer's balance for a future visit. They never touch

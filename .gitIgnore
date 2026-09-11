@@ -22,7 +22,10 @@ backend/connectionstring.txt
 
 # ─── Uploaded files (user content, not source) ───────────────
 backend/uploads/products/*
+backend/uploads/categories/*
+
 !backend/uploads/products/.gitkeep
+!backend/uploads/categories/.gitkeep
 
 # ─── Logs ────────────────────────────────────────────────────
 logs/

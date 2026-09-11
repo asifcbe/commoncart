@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Tag, Flame, Package } from 'lucide-react';
+import { Tag, Flame } from 'lucide-react';
 import api from '../utils/api';
 import useCartStore from '../store/useCartStore';
 import Img from '../components/ui/Img';
@@ -60,10 +60,53 @@ function ProductCard({ product }) {
           </button>
         </div>
         <div className="mt-1.5 text-[10px] text-gray-400 flex items-center gap-1">
-          <Tag size={9} /> {product.agingStep?.label} · {product.ageDays} days old
+          <Tag size={9} /> {percent}% Off
         </div>
       </div>
     </div>
+  );
+}
+
+// One filter section — a heading + a list of pickable values, "All" first.
+// Mirrors ProductListing.jsx's sidebar styling so Clearance feels like the
+// same shop, not a bolted-on page.
+function FilterSection({ title, options, value, onChange, pills = false }) {
+  if (!options.length) return null;
+  const Wrap = pills ? 'div' : 'ul';
+  const wrapClass = pills ? 'flex flex-wrap gap-2' : 'space-y-1';
+  const Item = pills ? 'button' : 'li';
+  const itemBtnClass = (active) => pills
+    ? `px-3 py-1.5 rounded-lg text-sm border transition-colors ${active ? 'text-white border-transparent' : 'text-gray-600 border-gray-200 hover:bg-gray-50'}`
+    : `w-full text-left px-3 py-1.5 rounded-lg text-sm transition-colors ${active ? 'font-semibold text-white' : 'text-gray-600 hover:bg-gray-50'}`;
+  const itemBtnStyle = (active) => (active ? { background: 'var(--color-primary)' } : {});
+
+  return (
+    <>
+      <h3 className="font-semibold text-sm text-gray-700 mb-3 mt-6 first:mt-0">{title}</h3>
+      <Wrap className={wrapClass}>
+        {!pills && (
+          <li>
+            <button onClick={() => onChange('')} className={itemBtnClass(!value)} style={itemBtnStyle(!value)}>All</button>
+          </li>
+        )}
+        {pills && (
+          <button onClick={() => onChange('')} className={itemBtnClass(!value)} style={itemBtnStyle(!value)}>All</button>
+        )}
+        {options.map(({ key, label }) => (
+          pills ? (
+            <button key={key} onClick={() => onChange(key)} className={itemBtnClass(value === key)} style={itemBtnStyle(value === key)}>
+              {label}
+            </button>
+          ) : (
+            <Item key={key}>
+              <button onClick={() => onChange(key)} className={itemBtnClass(value === key)} style={itemBtnStyle(value === key)}>
+                {label}
+              </button>
+            </Item>
+          )
+        ))}
+      </Wrap>
+    </>
   );
 }
 
@@ -71,30 +114,68 @@ export default function Clearance() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [enabled, setEnabled] = useState(true);
-  const [activeStep, setActiveStep] = useState('all');
-  const [steps, setSteps] = useState([]);
+
+  const [discount, setDiscount] = useState('');    // effectiveDiscountPercent, as a string
+  const [category, setCategory] = useState('');
+  const [subCategory, setSubCategory] = useState('');
+  const [color, setColor] = useState('');
+  const [size, setSize] = useState('');
 
   useEffect(() => {
     api.get('/settings/clearance')
       .then(({ data }) => {
         setEnabled(data.enabled);
-        if (data.products) {
-          setProducts(data.products);
-          // Extract unique step labels
-          const seen = new Set();
-          const uniqueSteps = [];
-          data.products.forEach((p) => {
-            const key = p.agingStep?.label;
-            if (key && !seen.has(key)) { seen.add(key); uniqueSteps.push(p.agingStep); }
-          });
-          setSteps(uniqueSteps.sort((a, b) => b.percent - a.percent));
-        }
+        if (data.products) setProducts(data.products);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = activeStep === 'all' ? products : products.filter((p) => p.agingStep?.label === activeStep);
+  // Facet options are built from whatever's actually on clearance right now,
+  // so a filter section simply doesn't render when it'd have nothing to
+  // narrow. Category clears sub-category when changed, same as ProductListing.
+  const discountOptions = useMemo(() => {
+    const seen = new Set();
+    products.forEach((p) => { if (p.effectiveDiscountPercent != null) seen.add(p.effectiveDiscountPercent); });
+    return [...seen].sort((a, b) => b - a).map((p) => ({ key: String(p), label: `${p}% Off` }));
+  }, [products]);
+
+  const categoryOptions = useMemo(() => {
+    const seen = new Set();
+    products.forEach((p) => { if (p.category) seen.add(p.category); });
+    return [...seen].sort().map((c) => ({ key: c, label: c }));
+  }, [products]);
+
+  const subCategoryOptions = useMemo(() => {
+    const seen = new Set();
+    products.forEach((p) => { if ((!category || p.category === category) && p.subCategory) seen.add(p.subCategory); });
+    return [...seen].sort().map((s) => ({ key: s, label: s }));
+  }, [products, category]);
+
+  const colorOptions = useMemo(() => {
+    const seen = new Set();
+    products.forEach((p) => { if (p.color) seen.add(p.color); });
+    return [...seen].sort().map((c) => ({ key: c, label: c }));
+  }, [products]);
+
+  const sizeOptions = useMemo(() => {
+    const seen = new Set();
+    products.forEach((p) => { if (p.size) seen.add(p.size); });
+    return [...seen].sort().map((s) => ({ key: s, label: s }));
+  }, [products]);
+
+  const handleCategory = (c) => { setCategory(c); setSubCategory(''); };
+
+  const filtered = products.filter((p) =>
+    (!discount || String(p.effectiveDiscountPercent) === discount) &&
+    (!category || p.category === category) &&
+    (!subCategory || p.subCategory === subCategory) &&
+    (!color || p.color === color) &&
+    (!size || p.size === size)
+  );
+
+  const hasActiveFilters = discount || category || subCategory || color || size;
+  const clearFilters = () => { setDiscount(''); setCategory(''); setSubCategory(''); setColor(''); setSize(''); };
 
   if (!enabled && !loading) {
     return (
@@ -115,7 +196,7 @@ export default function Clearance() {
         <div>
           <h1 className="text-3xl font-extrabold">Clearance Sale</h1>
           <p className="mt-1 text-red-100 text-sm">
-            Big discounts on select items — while stocks last. Prices automatically reduced by age.
+            Big discounts on select items — while stocks last.
           </p>
           {products.length > 0 && (
             <p className="mt-2 text-white/80 text-xs">{products.length} product{products.length !== 1 ? 's' : ''} on clearance right now</p>
@@ -134,35 +215,73 @@ export default function Clearance() {
           <Link to="/products" className="mt-4 inline-block text-sm text-blue-600 hover:underline">Browse all products →</Link>
         </div>
       ) : (
-        <>
-          {/* Step filter tabs */}
-          {steps.length > 1 && (
-            <div className="flex gap-2 flex-wrap mb-6">
-              <button
-                onClick={() => setActiveStep('all')}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${activeStep === 'all' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-              >
-                All ({products.length})
-              </button>
-              {steps.map((s) => {
-                const count = products.filter((p) => p.agingStep?.label === s.label).length;
-                return (
-                  <button
-                    key={s.label}
-                    onClick={() => setActiveStep(s.label)}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${activeStep === s.label ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                  >
-                    {s.label} · -{s.percent}% ({count})
-                  </button>
-                );
-              })}
+        <div className="flex gap-6">
+          {/* Sidebar filters */}
+          <aside className="hidden md:block w-52 flex-shrink-0">
+            <div className="card p-4 sticky top-28">
+              <div className="flex items-center justify-between mb-1">
+                <h2 className="font-bold text-sm text-gray-900">Filters</h2>
+                {hasActiveFilters && (
+                  <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-red-500 underline">Clear</button>
+                )}
+              </div>
+              <FilterSection title="Discount" options={discountOptions} value={discount} onChange={setDiscount} />
+              <FilterSection title="Category" options={categoryOptions} value={category} onChange={handleCategory} />
+              <FilterSection title="Sub-category" options={subCategoryOptions} value={subCategory} onChange={setSubCategory} />
+              <FilterSection title="Variant" options={colorOptions} value={color} onChange={setColor} />
+              <FilterSection title="Size" options={sizeOptions} value={size} onChange={setSize} pills />
             </div>
-          )}
+          </aside>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {filtered.map((p) => <ProductCard key={p._id} product={p} />)}
+          <div className="flex-1 min-w-0">
+            {/* Mobile filter row — same facets as the sidebar, as compact
+                selects (sidebar is desktop-only, hidden below md). */}
+            <div className="md:hidden flex gap-2 flex-wrap mb-4">
+              <select value={discount} onChange={(e) => setDiscount(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                <option value="">All discounts</option>
+                {discountOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+              </select>
+              {categoryOptions.length > 0 && (
+                <select value={category} onChange={(e) => handleCategory(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                  <option value="">All categories</option>
+                  {categoryOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              )}
+              {subCategoryOptions.length > 0 && (
+                <select value={subCategory} onChange={(e) => setSubCategory(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                  <option value="">All sub-categories</option>
+                  {subCategoryOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              )}
+              {colorOptions.length > 0 && (
+                <select value={color} onChange={(e) => setColor(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                  <option value="">All variants</option>
+                  {colorOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              )}
+              {sizeOptions.length > 0 && (
+                <select value={size} onChange={(e) => setSize(e.target.value)} className="input h-9 text-sm flex-1 min-w-[7rem]">
+                  <option value="">All sizes</option>
+                  {sizeOptions.map((o) => <option key={o.key} value={o.key}>{o.label}</option>)}
+                </select>
+              )}
+              {hasActiveFilters && (
+                <button onClick={clearFilters} className="text-xs text-gray-400 hover:text-red-500 underline shrink-0 self-center">Clear</button>
+              )}
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="text-center py-16 text-gray-400">
+                <p className="text-lg font-medium">No products match these filters</p>
+                <button onClick={clearFilters} className="mt-2 text-sm text-blue-600 hover:underline">Clear filters</button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                {filtered.map((p) => <ProductCard key={p._id} product={p} />)}
+              </div>
+            )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );

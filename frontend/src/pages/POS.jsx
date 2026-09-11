@@ -911,11 +911,13 @@ export default function POS() {
     ? Math.min(cartTotal, (Number(discountInput) || 0) / 100 * cartTotal)
     : Math.min(cartTotal, Number(discountInput) || 0);
   // Points this bill qualifies for — based on what the customer actually pays
-  // (cart total minus points-from-balance/manual discounts), mirroring
-  // the backend calc. Excludes the redeem-now discount itself (circular).
+  // (cart total minus the manual discount), mirroring the backend calc.
+  // Excludes the redeem-now discount itself (circular) AND excludes
+  // pointsDiscount (redeeming OLD balance points) — spending points the
+  // customer already earned must not cost them points on this same bill.
   // CLEARANCE (aged) items earn NO points — their full line value is excluded.
   const clearanceGoods = cart.reduce((sum, i) => sum + (i.isDiscounted ? i.price * i.qty : 0), 0);
-  const preEarnDiscount = pointsDiscount + manualDiscount;
+  const preEarnDiscount = manualDiscount;
   const pointsEarnedThisBill = Math.floor(Math.max(0, cartTotal - clearanceGoods - preEarnDiscount) / (creditConfig.rupeesPerPoint || 1000));
   const earnedNowDiscount = (loyaltyCustomer && redeemEarnedNow) ? pointsEarnedThisBill * (creditConfig.pointValue || 1) : 0;
   const totalDiscount = pointsDiscount + manualDiscount + earnedNowDiscount;

@@ -942,27 +942,33 @@ exports.getClearanceProducts = async (_req, res) => {
     const now = new Date();
 
     const allProducts = await Product.find({ isActive: true, isWebVisible: true, agingEnabled: true })
-      .select('name description category SKU barcode price costPrice discountPrice images quantity reservedQty color size createdAt agingBaseDate')
+      .select('name description category subCategory SKU barcode price discountPrice images quantity reservedQty color size createdAt agingBaseDate')
       .lean();
 
+    // Product age and the admin's internal aging-step label (Settings →
+    // Price Aging, e.g. "Slow-moving (60 days)") are inventory-management
+    // details, not something a shopper should ever see — kept out of the
+    // response entirely (used only here, locally, to pick the discount % and
+    // sort). Only `effectiveDiscountPercent` — a clean number — goes out.
     const clearance = [];
     for (const p of allProducts) {
       const ageDays = agingAgeDays(p, now);
       const step = sortedSteps.find((s) => ageDays >= s.days);
       if (!step) continue;
 
+      const { agingBaseDate, createdAt, ...rest } = p;
       clearance.push({
-        ...p,
+        ...rest,
         availableQty: Math.max(0, p.quantity - p.reservedQty),
-        ageDays: Math.floor(ageDays),
-        agingStep: step,
         effectiveDiscountPercent: step.percent,
+        _ageDays: ageDays, // sort key only — stripped before responding
       });
     }
 
     // Sort by discount percent desc, then age desc
-    clearance.sort((a, b) => b.effectiveDiscountPercent - a.effectiveDiscountPercent || b.ageDays - a.ageDays);
-    res.json({ products: clearance, enabled: true });
+    clearance.sort((a, b) => b.effectiveDiscountPercent - a.effectiveDiscountPercent || b._ageDays - a._ageDays);
+    const products = clearance.map(({ _ageDays, ...p }) => p);
+    res.json({ products, enabled: true });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

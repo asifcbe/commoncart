@@ -25,8 +25,18 @@ const Customer = require('./models/Customer');
 const Order = require('./models/Order');
 const Coupon = require('./models/Coupon');
 const AppSettings = require('./models/AppSettings');
+const Attendance = require('./models/Attendance');
+const SalaryPayment = require('./models/SalaryPayment');
 const { makeProductPhoto } = require('./scripts/kidsPhotos');
 const { makeCategoryPhoto } = require('./scripts/categoryPhotos');
+// Return/Exchange/Replace and Purchase Return go through the real
+// controllers (in-process, not over HTTP) instead of hand-building
+// CreditNote/ReplacementNote/Settlement docs here — that math (GST
+// itemization, netPayableRatio, points clawback, stock movements) is
+// intricate and already correct in the controllers; duplicating it in the
+// seed would just be a second place for it to drift out of sync.
+const { processReturnSession } = require('./controllers/returnSessionController');
+const { createPurchaseReturn } = require('./controllers/purchaseReturnController');
 
 // ── helpers ──────────────────────────────────────────────────
 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
@@ -34,6 +44,21 @@ const pick = (arr) => arr[rand(0, arr.length - 1)];
 const chance = (p) => Math.random() < p;
 const id6 = () => uuidv4().slice(0, 6).toUpperCase();
 const DAY = 86400000;
+
+// Minimal mock (req, res) so a real Express controller can be called
+// in-process. `res.json`/`res.status().json()` resolves the returned promise
+// with { statusCode, body } instead of writing to a socket.
+function callController(fn, { body, user, io = { emit() {} } }) {
+  return new Promise((resolve, reject) => {
+    const req = { body, user, io };
+    let statusCode = 200;
+    const res = {
+      status(code) { statusCode = code; return this; },
+      json(payload) { resolve({ statusCode, body: payload }); },
+    };
+    Promise.resolve(fn(req, res)).catch(reject);
+  });
+}
 let barcodeSeq = 4200000;
 const nextBarcode = () => String(++barcodeSeq).padStart(7, '0');
 let skuByCat = {};
@@ -175,18 +200,22 @@ async function seed() {
   }
   console.log('Cleared (data + product & category photos).\n');
 
-  // ── users ─────────────────────────────────────────────────
+  // ── users / staff ─────────────────────────────────────────
   const adminHash = await bcrypt.hash('Admin@123', 12);
   const staffHash = await bcrypt.hash('Staff@123', 12);
   const admin = await User.findOneAndUpdate(
     { email: 'admin@commoncart.com' },
-    { name: 'Store Admin', passwordHash: adminHash, role: 'ADMIN', isActive: true },
+    {
+      name: 'Store Admin', passwordHash: adminHash, role: 'ADMIN', isActive: true,
+      phone: '9900011111', monthlySalary: 45000, joinDate: new Date(Date.now() - 900 * 86400000),
+    },
     { new: true, upsert: true }
   );
   const staff = await User.findOneAndUpdate(
     { email: 'staff@commoncart.com' },
     {
       name: 'Shop Staff', passwordHash: staffHash, role: 'STAFF', isActive: true,
+      phone: '9900022222', monthlySalary: 18000, joinDate: new Date(Date.now() - 400 * 86400000),
       permissions: {
         sections: ['dashboard', 'pos', 'products', 'purchases', 'suppliers', 'inventory', 'sales', 'web-orders', 'customers'],
         viewCostPrice: false, canManage: true,
@@ -194,7 +223,40 @@ async function seed() {
     },
     { new: true, upsert: true }
   );
-  console.log('Users:  admin@commoncart.com / Admin@123   ·   staff@commoncart.com / Staff@123');
+  // A few more staff — varied roles/permissions/tenure so Staff, Attendance
+  // and Salary screens all have more than one person to show.
+  const STAFF_DEFS = [
+    {
+      email: 'cashier@commoncart.com', name: 'Priya Cashier', phone: '9900033333',
+      monthlySalary: 15000, joinDateDaysAgo: 250,
+      permissions: { sections: ['dashboard', 'pos', 'sales'], viewCostPrice: false, canManage: false },
+    },
+    {
+      email: 'inventory@commoncart.com', name: 'Arjun Stock Keeper', phone: '9900044444',
+      monthlySalary: 20000, joinDateDaysAgo: 600,
+      permissions: { sections: ['dashboard', 'products', 'purchases', 'suppliers', 'inventory', 'aged-products'], viewCostPrice: true, canManage: true },
+    },
+    {
+      email: 'exstaff@commoncart.com', name: 'Vikram Former Staff', phone: '9900055555',
+      monthlySalary: 16000, joinDateDaysAgo: 500, isActive: false,
+      permissions: { sections: ['dashboard', 'pos'], viewCostPrice: false, canManage: false },
+    },
+  ];
+  const extraStaff = [];
+  for (const s of STAFF_DEFS) {
+    const u = await User.findOneAndUpdate(
+      { email: s.email },
+      {
+        name: s.name, passwordHash: staffHash, role: 'STAFF', isActive: s.isActive !== false,
+        phone: s.phone, monthlySalary: s.monthlySalary, joinDate: new Date(Date.now() - s.joinDateDaysAgo * DAY),
+        permissions: s.permissions,
+      },
+      { new: true, upsert: true }
+    );
+    extraStaff.push(u);
+  }
+  const allStaff = [staff, ...extraStaff]; // admin excluded — attendance/salary are staff-only concepts here
+  console.log('Users:  admin@commoncart.com / Admin@123   ·   staff@commoncart.com / Staff@123   ·   3 more staff / Staff@123 (one inactive)');
 
   // ── settings ──────────────────────────────────────────────
   console.log('\nSettings…');
@@ -247,6 +309,7 @@ async function seed() {
   // ── products + purchases + photos ────────────────────────
   console.log('\nProducts, purchases & photos…');
   const allUnitProducts = [];   // every qty:1 unit-product doc
+  const allPurchases = [];      // every created Purchase doc, for Purchase Returns later
   let purchaseCount = 0;
   let photoCount = 0;
   const nowTs = Date.now();
@@ -262,6 +325,8 @@ async function seed() {
     const purchaseDate = new Date(nowTs - ageDays * DAY);
     // ~45% of lines opt into Price Aging.
     const agingEnabled = chance(0.45);
+    // ~10% of lines are marked "No Exchange" at purchase-entry time.
+    const exchangeable = !chance(0.10);
 
     // Generate ONE photo per (line, colour) — shared across its size variants.
     const photoByColor = {};
@@ -302,6 +367,7 @@ async function seed() {
             manualDiscountPrice: null,
             agingEnabled,
             agingBaseDate: purchaseDate,
+            exchangeable,
           });
         }
       }
@@ -334,12 +400,13 @@ async function seed() {
     }
     const totalCost = purchaseItems.reduce((s, it) => s + it.qty * it.costPrice, 0);
     const purchaseId = `PUR-${String(purchaseDate.getFullYear()).slice(2)}${String(purchaseDate.getMonth() + 1).padStart(2, '0')}-${String(++purchaseCount).padStart(4, '0')}`;
-    await Purchase.create({
+    const purchaseDoc = await Purchase.create({
       purchaseId, supplierId: supplier._id, supplier: supplier.name,
       purchaseDate, items: purchaseItems, totalCost,
       note: `Stock intake — ${line.name}`, purchasedBy: admin._id,
       createdAt: purchaseDate, updatedAt: purchaseDate,
     });
+    allPurchases.push(purchaseDoc);
     await Supplier.findByIdAndUpdate(supplier._id, { $inc: { balance: totalCost } });
     for (const it of purchaseItems) {
       await StockMovement.create({
@@ -433,8 +500,12 @@ async function seed() {
   // ── POS sales (last 21 days) ─────────────────────────────
   console.log('\nPOS sales…');
   const shopGst = { enabled: true, percent: 5, inclusive: true, cgstPercent: 2.5, sgstPercent: 2.5, igstPercent: 0, gstin: '29ABCDE1234F1Z5', stateName: 'Karnataka' };
+  const CUSTOM_ITEM_DEFS = [
+    { name: 'Gift Wrap', price: 49 }, { name: 'Alteration Charge', price: 99 }, { name: 'Loyalty Gift Card', price: 200 },
+  ];
   let saleCount = 0;
   let saleLineSeq = 0;
+  const allSales = []; // every created SaleTransaction doc, for Return/Exchange/Replace sessions later
   for (let d = 21; d >= 0; d--) {
     for (let s = 0, n = rand(2, 7); s < n; s++) {
       // Pull DISTINCT in-stock unit-products
@@ -453,9 +524,20 @@ async function seed() {
           productId: fresh._id, custom: false, lineId: `Lseed${++saleLineSeq}`,
           barcode: fresh.barcode, name: `${fresh.name} (${fresh.color}/${fresh.size})`,
           qty: 1, price: unit, isDiscounted: fresh.discountPrice != null,
+          noExchange: fresh.exchangeable === false,
           hsnCode: fresh.hsnCode || '6111', gstPercent: null,
         });
         p.quantity = 0; // local bookkeeping so we don't pick it again this run
+      }
+      // ~15% of sales also ring up a custom, no-barcode POS line (e.g. gift
+      // wrap) — untracked stock, still taxed, still earns points.
+      if (chance(0.15)) {
+        const c = pick(CUSTOM_ITEM_DEFS);
+        lines.push({
+          productId: null, custom: true, lineId: `Lseed${++saleLineSeq}c`,
+          barcode: '', name: c.name, qty: 1, price: c.price, mrp: c.price,
+          isDiscounted: false, noExchange: false, hsnCode: '', gstPercent: null,
+        });
       }
       if (!lines.length) continue;
 
@@ -464,7 +546,7 @@ async function seed() {
       const cust = chance(0.55) ? pick(customers) : null;
       const txnId = `INV-${String(txnDate.getFullYear()).slice(2)}${String(txnDate.getMonth() + 1).padStart(2, '0')}${String(++saleCount).padStart(4, '0')}`;
 
-      await SaleTransaction.create({
+      const saleDoc = await SaleTransaction.create({
         transactionId: txnId, channel: 'STORE', items: lines, totalAmount: goods,
         paymentMethod: pick(['CASH', 'CARD', 'UPI', 'UPI', 'CASH']), status: 'COMPLETED',
         soldBy: chance(0.6) ? staff._id : admin._id,
@@ -473,7 +555,9 @@ async function seed() {
         creditPointsEarned: Math.floor(goods / 200), creditPointsRedeemed: 0,
         note: '', gst: shopGst, createdAt: txnDate, updatedAt: txnDate,
       });
+      allSales.push(saleDoc);
       for (const l of lines) {
+        if (!l.productId) continue; // custom line — no stock to move
         await Product.updateOne({ _id: l.productId }, { $inc: { quantity: -l.qty } });
         await StockMovement.create({
           productId: l.productId, type: 'SALE', channel: 'STORE', quantityChanged: -l.qty,
@@ -541,6 +625,136 @@ async function seed() {
     { code: 'DIWALI25',  description: 'Expired festive 25% off', type: 'PERCENTAGE', value: 25, minOrderAmount: 999, maxDiscountAmount: 500, maxUses: 100, usedCount: 100, isActive: false, createdBy: admin._id, expiresAt: new Date(nowTs - 12 * DAY) },
   ]);
 
+  // ── staff attendance (last 30 days) ──────────────────────
+  console.log('\nStaff attendance…');
+  // CLAUDE.md: Absent was removed as a status — only these three remain settable.
+  const ATTENDANCE_STATUSES = ['PRESENT', 'PRESENT', 'PRESENT', 'PRESENT', 'HALF_DAY', 'LEAVE'];
+  let attendanceCount = 0;
+  for (const member of allStaff) {
+    // An inactive (former) staff member only has attendance up to ~2 months
+    // ago, when they were still around — not right up to today.
+    const daysBack = member.isActive ? 30 : rand(45, 75);
+    const startOffset = member.isActive ? 0 : rand(15, 30);
+    for (let d = daysBack; d >= startOffset; d--) {
+      // Skip Sundays (weekly off) — mirrors a typical retail shop schedule.
+      const date = new Date(nowTs - d * DAY);
+      if (date.getDay() === 0) continue;
+      const status = pick(ATTENDANCE_STATUSES);
+      const dateStr = date.toISOString().slice(0, 10);
+      const checkIn = status === 'LEAVE' ? '' : `${String(rand(9, 10)).padStart(2, '0')}:${String(rand(0, 59)).padStart(2, '0')}`;
+      const checkOut = status === 'LEAVE' ? '' : status === 'HALF_DAY'
+        ? `${String(rand(13, 14)).padStart(2, '0')}:${String(rand(0, 59)).padStart(2, '0')}`
+        : `${String(rand(19, 21)).padStart(2, '0')}:${String(rand(0, 59)).padStart(2, '0')}`;
+      await Attendance.create({
+        userId: member._id, date: dateStr, status, checkIn, checkOut,
+        note: status === 'LEAVE' ? pick(['Sick leave', 'Personal work', 'Family function', '']) : '',
+        markedBy: admin._id, createdAt: date, updatedAt: date,
+      });
+      attendanceCount++;
+    }
+  }
+  console.log(`  ${attendanceCount} attendance records across ${allStaff.length} staff`);
+
+  // ── staff salary payments ────────────────────────────────
+  console.log('\nSalary payments…');
+  let salaryCount = 0;
+  for (const member of allStaff) {
+    // One SALARY payout per month the staff member has been active for
+    // (capped to the last 4 months so the seed stays fast), each a few days
+    // into the following month like a real payroll run.
+    const monthsBack = member.isActive ? 4 : 2;
+    for (let m = monthsBack; m >= 1; m--) {
+      const payDate = new Date(nowTs); payDate.setDate(1); payDate.setMonth(payDate.getMonth() - m + 1, rand(1, 5));
+      if (payDate.getTime() > nowTs) continue;
+      const periodDate = new Date(payDate); periodDate.setMonth(periodDate.getMonth() - 1);
+      const periodLabel = periodDate.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
+      await SalaryPayment.create({
+        userId: member._id, amount: member.monthlySalary, periodLabel,
+        method: pick(['BANK_TRANSFER', 'BANK_TRANSFER', 'CASH', 'UPI']), type: 'SALARY',
+        note: `Salary for ${periodLabel}`, paidBy: admin._id, createdAt: payDate, updatedAt: payDate,
+      });
+      salaryCount++;
+    }
+    // A one-off advance or bonus for a couple of staff, for variety.
+    if (chance(0.4)) {
+      const extraDate = new Date(nowTs - rand(5, 25) * DAY);
+      const isBonus = chance(0.5);
+      await SalaryPayment.create({
+        userId: member._id, amount: isBonus ? rand(500, 2000) : rand(1000, 3000),
+        periodLabel: '', method: pick(['CASH', 'UPI']), type: isBonus ? 'BONUS' : 'ADVANCE',
+        note: isBonus ? 'Festive bonus' : 'Salary advance requested', paidBy: admin._id,
+        createdAt: extraDate, updatedAt: extraDate,
+      });
+      salaryCount++;
+    }
+  }
+  console.log(`  ${salaryCount} salary/advance/bonus payments`);
+
+  // ── purchase returns ──────────────────────────────────────
+  // Goes through the real createPurchaseReturn controller — it decrements
+  // stock and adjusts the supplier balance itself.
+  console.log('\nPurchase returns…');
+  let purchaseReturnCount = 0;
+  {
+    const candidates = allPurchases.slice(0, 3);
+    for (const purchase of candidates) {
+      const item = purchase.items[0];
+      const fresh = await Product.findById(item.productId);
+      if (!fresh || fresh.quantity < 1) continue;
+      try {
+        await callController(createPurchaseReturn, {
+          user: admin,
+          body: {
+            purchaseId: purchase._id,
+            items: [{ productId: fresh._id, qty: 1, costPrice: fresh.costPrice }],
+            reason: pick(['Damaged on arrival', 'Wrong size shipped', 'Quality defect']),
+            note: 'Seed data — sent back to supplier',
+          },
+        });
+        purchaseReturnCount++;
+      } catch { /* stock may have moved — skip */ }
+    }
+  }
+  console.log(`  ${purchaseReturnCount} purchase returns`);
+
+  // ── return / exchange / replace sessions ─────────────────
+  // Goes through the real processReturnSession controller (see the
+  // require() comment near the top) so CreditNote/ReplacementNote/Settlement
+  // math, stock movements and points reversal are all correct by construction.
+  console.log('\nReturn / Exchange / Replace sessions…');
+  let returnSessionCount = 0;
+  {
+    // A handful of completed, non-custom-only sales to act on — oldest first
+    // so the "days since sale" on each looks realistic for a return.
+    const candidates = allSales
+      .filter((s) => s.status === 'COMPLETED' && s.items.some((it) => !it.custom))
+      .slice(0, 6);
+    const SESSION_KINDS = ['RETURN', 'EXCHANGE', 'REPLACE'];
+    for (let i = 0; i < candidates.length; i++) {
+      const sale = candidates[i];
+      const line = sale.items.find((it) => !it.custom);
+      if (!line || line.noExchange || line.isDiscounted) continue; // mirrors the app's own eligibility rule
+      const kind = SESSION_KINDS[i % SESSION_KINDS.length];
+      const actor = chance(0.5) ? staff : admin;
+      try {
+        await callController(processReturnSession, {
+          user: actor,
+          body: {
+            saleId: sale._id,
+            actions: [{
+              lineKey: line.lineId || String(line.productId), action: kind, qty: 1,
+              reason: pick(['Customer changed mind', 'Wrong size', 'Defective item', 'Not as described']),
+            }],
+            settlement: kind === 'REPLACE' ? undefined : { method: pick(['CASH', 'CARD', 'STORE_CREDIT']) },
+            note: 'Seed data',
+          },
+        });
+        returnSessionCount++;
+      } catch { /* line may have shifted since candidates was built — skip */ }
+    }
+  }
+  console.log(`  ${returnSessionCount} return/exchange/replace sessions`);
+
   // ── summary ───────────────────────────────────────────────
   const [pTotal, pWeb, pAging, pAged, pPromo] = await Promise.all([
     Product.countDocuments({}), Product.countDocuments({ isWebVisible: true }),
@@ -551,7 +765,7 @@ async function seed() {
   console.log('  TOM & JERRY KIDS WEAR — SEED COMPLETE');
   console.log('='.repeat(58));
   console.log('  Admin:    admin@commoncart.com / Admin@123');
-  console.log('  Staff:    staff@commoncart.com / Staff@123');
+  console.log('  Staff:    staff@commoncart.com / Staff@123   (+3 more staff, same password, 1 inactive)');
   console.log('  Customer: any of the 10 emails / Customer@123');
   console.log('  Coupons:  FIRSTSTEP · BABY100 · BUNDLE20 · WINTER10  (DIWALI25 expired)');
   console.log('  ─────────────────────────────────────────────────────');
@@ -561,6 +775,8 @@ async function seed() {
   console.log(`  Purchases:         ${purchaseCount}  (backdated 8–800 days for aging buckets)`);
   console.log(`  Suppliers:         ${suppliers.length}   ·  Customers: ${customers.length}`);
   console.log(`  POS sales:         ${saleCount}   ·  Web orders: ${orderCount}`);
+  console.log(`  Staff:             ${allStaff.length}   ·  Attendance: ${attendanceCount}   ·  Salary/advance/bonus: ${salaryCount}`);
+  console.log(`  Purchase returns:  ${purchaseReturnCount}   ·  Return/Exchange/Replace sessions: ${returnSessionCount}`);
   console.log('='.repeat(58));
 
   await mongoose.disconnect();
