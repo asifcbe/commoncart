@@ -916,7 +916,8 @@ export default function POS() {
   // pointsDiscount (redeeming OLD balance points) — spending points the
   // customer already earned must not cost them points on this same bill.
   // CLEARANCE (aged) items earn NO points — their full line value is excluded.
-  const clearanceGoods = cart.reduce((sum, i) => sum + (i.isDiscounted ? i.price * i.qty : 0), 0);
+  // Same for No Exchange items (Product.exchangeable: false).
+  const clearanceGoods = cart.reduce((sum, i) => sum + ((i.isDiscounted || i.noExchange) ? i.price * i.qty : 0), 0);
   const preEarnDiscount = manualDiscount;
   const pointsEarnedThisBill = Math.floor(Math.max(0, cartTotal - clearanceGoods - preEarnDiscount) / (creditConfig.rupeesPerPoint || 1000));
   const earnedNowDiscount = (loyaltyCustomer && redeemEarnedNow) ? pointsEarnedThisBill * (creditConfig.pointValue || 1) : 0;
@@ -1239,7 +1240,7 @@ export default function POS() {
                 <div className="flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                   <div className="text-base text-amber-800">
                     Earns <strong>{pointsEarnedThisBill} pts</strong> on this bill
-                    {clearanceGoods > 0 && <span className="text-amber-600 text-sm"> (clearance items excluded)</span>}
+                    {clearanceGoods > 0 && <span className="text-amber-600 text-sm"> (clearance / no-exchange items excluded)</span>}
                     {redeemEarnedNow && <span className="text-green-600"> · redeeming now = -₹{earnedNowDiscount.toFixed(2)}</span>}
                   </div>
                   <label className="flex items-center gap-1.5 text-base text-amber-800 cursor-pointer whitespace-nowrap">

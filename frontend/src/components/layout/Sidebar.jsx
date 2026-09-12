@@ -1,13 +1,19 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Package, ShoppingCart,
   Warehouse, Receipt, Settings, LogOut, Store,
-  ShoppingBag, Globe, Users, Tag, Truck, Clock, UserCog, BookOpen,
+  ShoppingBag, Globe, Users, Tag, Truck, Clock, UserCog, BookOpen, DownloadCloud,
 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import { canAccess } from '../../config/permissions';
 import { cn } from '../../utils/cn';
+import Modal from '../ui/Modal';
+import Button from '../ui/Button';
+import Spinner from '../ui/Spinner';
+import { useToast } from '../ui/Toast';
+import api from '../../utils/api';
 
 // `section` maps to a grantable permission key (admins see all regardless).
 const navItems = [
@@ -27,8 +33,59 @@ const navItems = [
   { to: '/settings', icon: Settings, label: 'Settings' },
 ];
 
+// Backup download is admin-only (see routes/backup.js) — only admins get
+// asked; staff sign out immediately.
+function LogoutConfirmModal({ onClose, onLogout }) {
+  const toast = useToast();
+  const [downloading, setDownloading] = useState(false);
+
+  const downloadThenLogout = async () => {
+    setDownloading(true);
+    try {
+      const { data } = await api.get('/backup/download', { responseType: 'blob' });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const url = URL.createObjectURL(data);
+      const a = document.createElement('a');
+      a.href = url; a.download = `commoncart-backup-${stamp}.ndjson.gz`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast({ message: 'Backup downloaded', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Failed to create backup', type: 'error' });
+      // Still log out — a failed backup shouldn't trap the user on this screen.
+    } finally {
+      setDownloading(false);
+      onLogout();
+    }
+  };
+
+  return (
+    <Modal open onClose={onClose} title="Download a backup before signing out?" size="sm">
+      <p className="text-sm text-gray-600 mb-5">
+        You can download a full data backup now, or just sign out without one.
+      </p>
+      <div className="flex justify-end gap-2">
+        <Button variant="outline" onClick={onLogout} disabled={downloading}>
+          Sign out without backup
+        </Button>
+        <Button onClick={downloadThenLogout} disabled={downloading}>
+          {downloading ? <Spinner size="sm" className="mr-2" /> : <DownloadCloud size={14} className="mr-2" />}
+          {downloading ? 'Preparing…' : 'Backup & sign out'}
+        </Button>
+      </div>
+    </Modal>
+  );
+}
+
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+
+  const handleSignOutClick = () => {
+    // Only admins can download a backup at all — staff just sign out.
+    if (user?.role === 'ADMIN') setShowLogoutConfirm(true);
+    else logout();
+  };
 
   return (
     <aside className="flex flex-col w-64 h-full shrink-0 bg-gray-900 text-white">
@@ -78,12 +135,21 @@ export default function Sidebar() {
           </div>
         </div>
         <button
-          onClick={logout}
+          onClick={handleSignOutClick}
           className="flex items-center gap-2 w-full text-sm text-gray-400 hover:text-red-400 transition-colors"
         >
           <LogOut size={16} /> Sign out
         </button>
       </div>
+
+      {showLogoutConfirm && createPortal(
+        // Portalled to <body> — rendering it here inside the sidebar's own
+        // <aside className="... text-white"> would leak that white text
+        // color into the modal via ordinary CSS inheritance (position:fixed
+        // takes it out of layout, not out of the DOM tree).
+        <LogoutConfirmModal onClose={() => setShowLogoutConfirm(false)} onLogout={logout} />,
+        document.body
+      )}
     </aside>
   );
 }

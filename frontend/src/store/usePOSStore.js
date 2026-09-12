@@ -101,6 +101,10 @@ const usePOSStore = create((set, get) => ({
               // isDiscounted flags aged/clearance items only → drives the "(Discounted)"
               // label and the non-exchangeable footer note. Manual discounts stay unflagged.
               isDiscounted: !!product.isAged,
+              // Snapshotted from Product.exchangeable — a unit purchased with
+              // "Exchange/Replace Eligible" off. Same points-earning exclusion
+              // as isDiscounted (see pointsEarnedThisBill in POS.jsx).
+              noExchange: product.exchangeable === false,
               barcode: product.barcode,
               maxQty,
               qty,
@@ -124,6 +128,7 @@ const usePOSStore = create((set, get) => ({
       price: Number(price) || 0,
       originalPrice: Number(price) || 0,
       isDiscounted: false,
+      noExchange: false,
       barcode: '',
       hsnCode: (hsnCode || '').trim(),
       gstPercent: gstPercent === '' || gstPercent == null ? null : Number(gstPercent),

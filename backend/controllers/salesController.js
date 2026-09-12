@@ -165,9 +165,12 @@ exports.processStoreSale = async (req, res) => {
     //
     // CLEARANCE (aged) items earn NO loyalty points — their full line value is
     // excluded from the qualifying amount, so a bill mixing clearance + normal
-    // items only accrues points on the normal items.
+    // items only accrues points on the normal items. Same rule for No Exchange
+    // items (Product.exchangeable: false, snapshotted per line as noExchange)
+    // — a unit the shop marked ineligible for return/exchange/replace at
+    // purchase-entry time earns no loyalty points either.
     const clearanceGoods = resolvedItems.reduce(
-      (s, it) => s + (it.isDiscounted ? it.price * it.qty : 0),
+      (s, it) => s + ((it.isDiscounted || it.noExchange) ? it.price * it.qty : 0),
       0
     );
     const nonClearanceGoods = Math.max(0, totalAmount - clearanceGoods);
