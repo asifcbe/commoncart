@@ -9,6 +9,7 @@ import { formatPrice, applyMeta, priceInfo } from '../utils/theme';
 import { burstConfetti } from '../utils/confetti';
 import Img from '../components/ui/Img';
 import CandySky from '../components/ui/CandySky';
+import RulerOverlay from '../components/ui/RulerOverlay';
 import { connectSocket } from '../utils/socket';
 
 export default function ProductDetail() {
@@ -117,30 +118,51 @@ export default function ProductDetail() {
       </nav>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-        {/* Images */}
+        {/* Images — when the product has both dimensions set, an extra
+            gallery slot shows the SAME first photo again with a ruler
+            overlay drawn on top client-side; no second image is stored. */}
         <div className="space-y-3">
-          <div className="sheen aspect-square rounded-3xl overflow-hidden card p-0">
-            <Img
-              src={product.images?.[activeImg]}
-              alt={product.name}
-              iconSize={60}
-              className="h-full w-full"
-              imgClassName="h-full w-full object-cover"
-            />
-          </div>
-          {product.images?.length > 1 && (
-            <div className="flex gap-2 overflow-x-auto">
-              {product.images.map((img, i) => (
-                <button
-                  key={i}
-                  onClick={() => setActiveImg(i)}
-                  className={`h-16 w-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${activeImg === i ? 'border-[var(--color-primary)]' : 'border-transparent'}`}
-                >
-                  <Img src={img} alt="" iconSize={18} className="h-full w-full" imgClassName="h-full w-full object-cover" />
-                </button>
-              ))}
-            </div>
-          )}
+          {(() => {
+            const baseImages = product.images || [];
+            const hasDims = product.widthInches > 0 && product.heightInches > 0;
+            const galleryItems = [
+              ...baseImages.map((src) => ({ src, ruler: false })),
+              ...(hasDims && baseImages[0] ? [{ src: baseImages[0], ruler: true }] : []),
+            ];
+            const active = galleryItems[activeImg] || galleryItems[0];
+
+            return (
+              <>
+                <div className="sheen aspect-square rounded-3xl overflow-hidden card p-0 relative">
+                  <Img
+                    src={active?.src}
+                    alt={product.name}
+                    iconSize={60}
+                    className="h-full w-full"
+                    imgClassName="h-full w-full object-cover"
+                  />
+                  {active?.ruler && (
+                    <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />
+                  )}
+                </div>
+                {galleryItems.length > 1 && (
+                  <div className="flex gap-2 overflow-x-auto">
+                    {galleryItems.map((item, i) => (
+                      <button
+                        key={i}
+                        onClick={() => setActiveImg(i)}
+                        className={`relative h-16 w-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${activeImg === i ? 'border-[var(--color-primary)]' : 'border-transparent'}`}
+                        title={item.ruler ? `${product.widthInches} in × ${product.heightInches} in` : undefined}
+                      >
+                        <Img src={item.src} alt="" iconSize={18} className="h-full w-full" imgClassName="h-full w-full object-cover" />
+                        {item.ruler && <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </>
+            );
+          })()}
         </div>
 
         {/* Info */}

@@ -14,15 +14,23 @@ import { Card, CardContent } from '../components/ui/Card';
 import CategoryFields from '../components/CategoryFields';
 import ManagedSelect from '../components/ManagedSelect';
 import { BarcodeDialog, BulkBarcodeDialog } from '../components/BarcodeLabelPrintDialog';
+import RulerOverlay from '../components/ui/RulerOverlay';
 import api from '../utils/api';
 const CameraScanner = lazy(() => import('../components/CameraScanner'));
 import useAutoRefresh from '../hooks/useAutoRefresh';
 import { formatDateTime } from '../utils/date';
 
 // Lightbox showing every uploaded photo of a product, with prev/next when
-// there's more than one.
+// there's more than one. When the product has both Width and Height set, an
+// extra slot shows that SAME first photo again with a ruler overlay drawn on
+// top client-side (RulerOverlay) — no second image is ever generated/stored.
 function ImagePreviewModal({ product, onClose }) {
-  const imgs = product?.images || [];
+  const baseImgs = product?.images || [];
+  const hasDims = product?.widthInches > 0 && product?.heightInches > 0;
+  const imgs = [
+    ...baseImgs.map((src) => ({ src, ruler: false })),
+    ...(hasDims && baseImgs[0] ? [{ src: baseImgs[0], ruler: true }] : []),
+  ];
   const [idx, setIdx] = useState(0);
 
   useEffect(() => { setIdx(0); }, [product?._id]);
@@ -36,6 +44,8 @@ function ImagePreviewModal({ product, onClose }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [imgs.length, onClose]);
 
+  const active = imgs[idx];
+
   return (
     <Modal open onClose={onClose} title={`Photos — ${product?.name || ''}`} size="lg">
       {imgs.length === 0 ? (
@@ -46,42 +56,33 @@ function ImagePreviewModal({ product, onClose }) {
       ) : (
         <div className="space-y-3">
           <div className="relative bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center" style={{ minHeight: 360 }}>
-            <img
-              src={imgs[idx]}
-              alt={`${product.name} — ${idx + 1}`}
-              className="max-h-[70vh] max-w-full object-contain"
-            />
+            <div className="relative inline-block max-h-[70vh] max-w-full">
+              <img
+                src={active.src}
+                alt={`${product.name} — ${idx + 1}`}
+                className="max-h-[70vh] max-w-full object-contain block"
+              />
+              {active.ruler && (
+                <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />
+              )}
+            </div>
             {imgs.length > 1 && (
-              <>
-                <button
-                  onClick={() => setIdx((i) => (i - 1 + imgs.length) % imgs.length)}
-                  className="absolute left-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"
-                  title="Previous"
-                >
-                  <ChevronLeft size={18} />
-                </button>
-                <button
-                  onClick={() => setIdx((i) => (i + 1) % imgs.length)}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 h-9 w-9 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"
-                  title="Next"
-                >
-                  <ChevronRight size={18} />
-                </button>
-                <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-0.5 rounded-full">
-                  {idx + 1} / {imgs.length}
-                </span>
-              </>
+              <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-0.5 rounded-full">
+                {idx + 1} / {imgs.length}
+              </span>
             )}
           </div>
           {imgs.length > 1 && (
             <div className="flex gap-2 overflow-x-auto pb-1">
-              {imgs.map((src, i) => (
+              {imgs.map((item, i) => (
                 <button
                   key={i}
                   onClick={() => setIdx(i)}
-                  className={`h-16 w-16 rounded-md overflow-hidden border-2 flex-shrink-0 transition-colors ${i === idx ? 'border-blue-500' : 'border-transparent'}`}
+                  className={`relative h-16 w-16 rounded-md overflow-hidden border-2 flex-shrink-0 transition-colors ${i === idx ? 'border-blue-500' : 'border-transparent'}`}
+                  title={item.ruler ? `${product.widthInches} in × ${product.heightInches} in` : undefined}
                 >
-                  <img src={src} alt="" className="h-full w-full object-cover" />
+                  <img src={item.src} alt="" className="h-full w-full object-cover" />
+                  {item.ruler && <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />}
                 </button>
               ))}
             </div>
@@ -125,11 +126,7 @@ function ProductDetailsModal({ product, onClose, onEdit, onHistory }) {
               <>
                 <img src={imgs[idx]} alt={p.name} className="max-h-[50vh] max-w-full object-contain" />
                 {imgs.length > 1 && (
-                  <>
-                    <button onClick={() => setIdx((i) => (i - 1 + imgs.length) % imgs.length)} className="absolute left-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"><ChevronLeft size={16} /></button>
-                    <button onClick={() => setIdx((i) => (i + 1) % imgs.length)} className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 rounded-full bg-white/90 shadow flex items-center justify-center hover:bg-white"><ChevronRight size={16} /></button>
-                    <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-0.5 rounded-full">{idx + 1} / {imgs.length}</span>
-                  </>
+                  <span className="absolute bottom-2 right-2 text-xs bg-black/60 text-white px-2 py-0.5 rounded-full">{idx + 1} / {imgs.length}</span>
                 )}
               </>
             ) : (
@@ -270,6 +267,11 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
     quantity: product?.quantity || 0,
     supplier: product?.supplier || '',
     location: product?.location || '',
+    // Garment dimensions in inches — optional. When both are set, the
+    // gallery shows an extra view of the first photo with a ruler overlay
+    // drawn on top of it (client-side — no separate image is stored).
+    widthInches: product?.widthInches != null ? String(product.widthInches) : '',
+    heightInches: product?.heightInches != null ? String(product.heightInches) : '',
     // New products are hidden from the web store by default; editing keeps the saved value
     isWebVisible: product ? product.isWebVisible === true : false,
     // Opt-in to Price Aging. Off by default; editing keeps the saved value.
@@ -382,6 +384,15 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-1">Shelf / Location</label>
           <Input value={form.location} onChange={set('location')} placeholder="e.g. A3-B2" />
+        </div>
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">Width (in) <span className="text-xs text-gray-400 font-normal">optional</span></label>
+          <Input type="number" step="0.1" min="0" value={form.widthInches} onChange={set('widthInches')} placeholder="e.g. 14" />
+        </div>
+        <div>
+          <label className="text-sm font-medium text-gray-700 block mb-1">Height (in) <span className="text-xs text-gray-400 font-normal">optional</span></label>
+          <Input type="number" step="0.1" min="0" value={form.heightInches} onChange={set('heightInches')} placeholder="e.g. 22" />
+          <p className="text-[11px] text-gray-400 mt-1">When both are set, the gallery shows the first photo with a ruler overlay too.</p>
         </div>
         <ManagedSelect
           label="Variant"

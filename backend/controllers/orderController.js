@@ -410,7 +410,7 @@ exports.publicProductDetail = async (req, res) => {
     // `supplier` / internal `location` are deliberately NOT selected — they
     // must never reach the storefront.
     const product = await Product.findOne({ _id: req.params.id, isActive: true, isWebVisible: true })
-      .select('name description category subCategory color size SKU barcode price discountPrice images quantity reservedQty lowStockThreshold');
+      .select('name description category subCategory color size SKU barcode price discountPrice images quantity reservedQty lowStockThreshold widthInches heightInches');
     if (!product) return res.status(404).json({ message: 'Product not found' });
     const data = product.toObject();
     data.availableQty = Math.max(0, product.quantity - product.reservedQty);

@@ -312,8 +312,8 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [prodCostPrice, setProdCostPrice] = useState('');
   const [prodPrice, setProdPrice] = useState('');
   const [prodDiscountPrice, setProdDiscountPrice] = useState('');
-  // Opt every unit of this product into the Price Aging system. Default OFF.
-  const [prodAgingEnabled, setProdAgingEnabled] = useState(false);
+  // Opt every unit of this product into the Price Aging system. Default ON.
+  const [prodAgingEnabled, setProdAgingEnabled] = useState(true);
   // Exchange/Replace eligibility for every unit of this product. Default ON —
   // turning it off behaves like an aged/clearance item (blocked in
   // returnSessionController) and prints "No Exchange" on the barcode label.
@@ -815,6 +815,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     type="checkbox"
                     checked={prodAgingEnabled}
                     onChange={(e) => setProdAgingEnabled(e.target.checked)}
+                    onKeyDown={productStepEnterNav}
                     className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
                   <span>
@@ -830,6 +831,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     type="checkbox"
                     checked={prodExchangeable}
                     onChange={(e) => setProdExchangeable(e.target.checked)}
+                    onKeyDown={productStepEnterNav}
                     className="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
                   <span>

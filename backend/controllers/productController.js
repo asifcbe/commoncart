@@ -4,6 +4,14 @@ const generateSKU = require('../utils/generateSKU');
 const { generateEAN13 } = require('../utils/generateBarcode');
 const { deleteProductImageFiles } = require('../utils/productImages');
 
+// Parses a form dimension field ('' / undefined / a number string) into
+// Number|null the way Product.widthInches/heightInches expect.
+function parseDimension(v) {
+  if (v === '' || v == null) return null;
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 // Turn an "age is between minDays and maxDays old" window into a Mongo filter
 // on the product's aging base date (agingBaseDate, falling back to createdAt).
 // older  ⇢ smaller date;  age ≥ minDays  ⇢  baseDate ≤ (now - minDays)
@@ -76,7 +84,7 @@ exports.listProducts = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, category, subCategory, color, size, price, discountPrice, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, agingEnabled, hsnCode, gstPercent } = req.body;
+    const { name, description, category, subCategory, color, size, price, discountPrice, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, agingEnabled, hsnCode, gstPercent, widthInches, heightInches } = req.body;
     const providedBarcode = (req.body.barcode || '').trim();
     const providedSKU = (req.body.SKU || '').trim();
 
@@ -105,6 +113,8 @@ exports.createProduct = async (req, res) => {
     }
 
     const images = req.files ? req.files.map((f) => `/uploads/products/${f.filename}`) : [];
+    const widthIn = parseDimension(widthInches);
+    const heightIn = parseDimension(heightInches);
 
     const product = await Product.create({
       name, description, category, subCategory: (subCategory || '').trim(),
@@ -127,6 +137,7 @@ exports.createProduct = async (req, res) => {
       agingEnabled: agingEnabled === true || agingEnabled === 'true',
       hsnCode: (hsnCode || '').trim(),
       gstPercent: gstPercent === '' || gstPercent == null ? null : Math.max(0, Math.min(100, Number(gstPercent))),
+      widthInches: widthIn, heightInches: heightIn,
       SKU, barcode, images,
     });
 
@@ -187,6 +198,9 @@ exports.updateProduct = async (req, res) => {
     if ('isWebVisible' in updates) {
       updates.isWebVisible = updates.isWebVisible === true || updates.isWebVisible === 'true';
     }
+
+    if ('widthInches' in updates) updates.widthInches = parseDimension(updates.widthInches);
+    if ('heightInches' in updates) updates.heightInches = parseDimension(updates.heightInches);
 
     // ── Images ──────────────────────────────────────────────
     // The form may send `keepImages` — a JSON array of existing image paths

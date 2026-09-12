@@ -26,6 +26,13 @@ const productSchema = new mongoose.Schema(
     // availableQty. No write-off/restock UI yet; the counter just accumulates.
     damagedQty: { type: Number, default: 0, min: 0 },
     images: [{ type: String }],
+    // Garment dimensions in inches, admin-entered. Optional — null means "not
+    // measured". Used purely as display data: when both are set, the
+    // frontend renders a second gallery entry that's the SAME first photo
+    // (images[0]) with a ruler overlay drawn on top of it in HTML/SVG at
+    // view time — no extra image file is ever generated or stored for this.
+    widthInches: { type: Number, default: null, min: 0 },
+    heightInches: { type: Number, default: null, min: 0 },
     supplier: { type: String, default: '' },
     location: { type: String, default: '' },
     lowStockThreshold: { type: Number, default: 10 },
