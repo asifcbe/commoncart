@@ -316,7 +316,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   const [prodAgingEnabled, setProdAgingEnabled] = useState(true);
   // Exchange/Replace eligibility for every unit of this product. Default ON —
   // turning it off behaves like an aged/clearance item (blocked in
-  // returnSessionController) and prints "No Exchange" on the barcode label.
+  // returnSessionController).
   const [prodExchangeable, setProdExchangeable] = useState(true);
   const [totalQty, setTotalQty] = useState('');
   // variantRows: filled rows { color, size, qty, costPrice, price, discountPrice, barcodes: string[] }
@@ -838,7 +838,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     <span className="text-sm font-medium text-gray-700">Exchange/Replace Eligible</span>
                     <span className="block text-[11px] text-gray-400">
                       Off behaves like an aged/clearance item — these units can't be returned, exchanged or replaced in
-                      Sales History, and the barcode label prints "No Exchange".
+                      Sales History.
                     </span>
                   </span>
                 </label>
@@ -1162,8 +1162,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                         <span>
                           <span className="text-sm font-medium text-gray-700">Exchange/Replace Eligible</span>
                           <span className="block text-[11px] text-gray-400">
-                            Off behaves like an aged/clearance item — blocked from return/exchange/replace, and the
-                            barcode label prints "No Exchange".
+                            Off behaves like an aged/clearance item — blocked from return/exchange/replace.
                           </span>
                         </span>
                       </label>

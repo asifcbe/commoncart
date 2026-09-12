@@ -32,7 +32,6 @@ export const ALL_LABEL_FIELDS = [
   { key: 'showBarcode',      defaultLabel: 'Barcode Strip' },
   { key: 'showBarcodeNumber',defaultLabel: 'Code Number' },
   { key: 'showExtraFields',  defaultLabel: 'Extra Fields' },
-  { key: 'showNoExchange',   defaultLabel: 'No Exchange Notice' },
 ];
 
 // size variant → font-size multiplier relative to the label's base fontSize
@@ -76,7 +75,7 @@ export const DEFAULT_ZONE_LAYOUT = {
   left: ['showItemCode', 'showSize'],
   center: [CODE_KEY],
   right: ['showVariant', 'showCategory'],
-  bottom: ['showMrp', 'showSalePrice', 'showBarcodeNumber', 'showNoExchange'],
+  bottom: ['showMrp', 'showSalePrice', 'showBarcodeNumber'],
 };
 
 const ALL_ZONE_ITEM_KEYS = () => [CODE_KEY, ...ALL_LABEL_FIELDS.filter((f) => f.key !== 'showBarcode').map((f) => f.key)];
@@ -294,11 +293,6 @@ export const DEFAULT_BARCODE_LABEL = {
   showSize: false,
   showVariant: false,
   showExtraFields: true,
-  // On by default — a "No Exchange" line only ever draws for a product with
-  // exchangeable:false (see renderLabelField's 'showNoExchange' case), so
-  // there's no downside to always including the chip; turning this off hides
-  // the notice shop-wide even on non-exchangeable items.
-  showNoExchange: true,
   defaultLabelSize: 'standard',
   // Layout settings
   codePosition: 'top',          // 'top' | 'middle' | 'bottom' | 'left' | 'right'
@@ -452,9 +446,6 @@ export function productToLabelItem(p, businessName) {
     mrp: list || '',
     salePrice: disc != null ? disc : (list || ''),
     barcodeExtraFields: p.barcodeExtraFields || [],
-    // Explicit false only — undefined (item shape doesn't carry it, e.g. an
-    // older cached preview) must never read as "no exchange".
-    noExchange: p.exchangeable === false,
     _businessName: businessName || '',
   };
 }

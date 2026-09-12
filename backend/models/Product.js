@@ -66,7 +66,7 @@ const productSchema = new mongoose.Schema(
     // Per-unit Exchange/Replace eligibility, set at purchase-entry time via
     // the "Exchange/Replace Eligible" checkbox (default ON). OFF behaves like
     // an aged/clearance item — returnSessionController blocks RETURN/EXCHANGE/
-    // REPLACE against it — and the barcode label prints a "No Exchange" line.
+    // REPLACE against it.
     exchangeable: { type: Boolean, default: true },
     // Timestamp of when available stock first hit zero. Set when availableQty
     // drops to 0, cleared on restock. Used by the auto-delete sweep to measure

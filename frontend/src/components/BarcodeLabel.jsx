@@ -237,21 +237,6 @@ function renderLabelField(key, { item, lbl, fontSize, smallFontSize, zoneKeys = 
         </p>
       );
     }
-    case 'showNoExchange': {
-      // Data-driven: only ever draws for an item whose product was purchased
-      // with "Exchange/Replace Eligible" unchecked (see productToLabelItem's
-      // `noExchange` mapping) — the field toggle just lets a shop hide the
-      // notice everywhere, not opt individual products in.
-      if (!show(key) || !item?.noExchange) return null;
-      const st = fStyle(key, smallFontSize);
-      const prefix = fLabel(key);
-      const text = prefix != null ? prefix : 'No Exchange';
-      return (
-        <p key={key} style={{ margin: '0 0 1px', fontWeight: 700, ...st }}>
-          {text}
-        </p>
-      );
-    }
     case 'showExtraFields':
       return show(key) ? (
         (item?.barcodeExtraFields || []).filter((f) => f.label || f.value).map((f, i) => {
