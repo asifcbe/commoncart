@@ -313,7 +313,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
       ) : (
         <div className="space-y-4">
           {/* Sale meta */}
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">ID:</span> <span className="font-mono font-medium">{sale.transactionId}</span></div>
             <div><span className="text-gray-500">Date:</span> {formatDateTime(sale.createdAt)}</div>
             <div><span className="text-gray-500">Channel:</span> <Badge variant={sale.channel === 'STORE' ? 'info' : 'secondary'}>{sale.channel}</Badge></div>
@@ -328,7 +328,7 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
                 <div><span className="text-gray-500">Staff:</span> {sale.soldBy?.name || '—'}</div>
                 <div><span className="text-gray-500">Status:</span> <Badge variant={sale.status === 'COMPLETED' ? 'success' : sale.status === 'VOIDED' ? 'destructive' : 'warning'}>{sale.status}</Badge></div>
                 {sale.status === 'VOIDED' && sale.voidReason && (
-                  <div className="col-span-2 text-xs text-red-600">Void reason: {sale.voidReason}</div>
+                  <div className="sm:col-span-2 text-xs text-red-600">Void reason: {sale.voidReason}</div>
                 )}
                 <div>
                   <span className="text-gray-500">Customer:</span>{' '}
@@ -383,8 +383,8 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
           {/* Items — per-item Keep/Return/Exchange (hidden while editing) */}
           {!editing && (
           <>
-          <div className="flex gap-1 items-center">
-            <div className="relative flex-1 min-w-48 max-w-xs">
+          <div className="flex gap-1 items-center flex-wrap">
+            <div className="relative flex-1 min-w-[140px] max-w-xs">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <Input
                 className="pl-8 font-mono text-sm"
@@ -612,8 +612,8 @@ function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
           })()}
           {!editing && sale.note && <div className="text-sm text-gray-500">Note: {sale.note}</div>}
 
-          <div className="flex justify-between items-center pt-2 border-t">
-            <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 pt-2 border-t">
+            <div className="flex gap-2 flex-wrap">
               {!isOrder && !editing && allowManage && sale.status !== 'VOIDED' && (
                 <Button variant="outline" size="sm" onClick={startEdit} className="text-blue-600 border-blue-300 hover:bg-blue-50">
                   <Edit2 size={13} className="mr-1.5" /> Edit Details
@@ -1128,10 +1128,10 @@ export default function SalesHistory() {
         <p className="text-gray-500 text-sm mt-1">{tab === 'sales' ? `${total} total transactions` : ''}</p>
       </div>
 
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto">
         {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {t.label}
           </button>
         ))}
@@ -1142,11 +1142,11 @@ export default function SalesHistory() {
           {/* Scan a bill or item barcode to open the bill (for quick return / exchange) */}
           <Card className="border-blue-200 bg-blue-50/40">
             <CardContent className="pt-4">
-              <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
                 <div className="flex items-center gap-2 text-blue-700 text-sm font-medium shrink-0">
                   <ScanLine size={18} /> Scan Barcode
                 </div>
-                <div className="relative flex-1 min-w-56">
+                <div className="relative flex-1 min-w-0 sm:min-w-56">
                   <ScanLine size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <Input
                     autoFocus
@@ -1168,8 +1168,8 @@ export default function SalesHistory() {
 
           <Card>
             <CardContent className="pt-4">
-              <div className="flex flex-wrap gap-3">
-                <div className="relative w-56">
+              <div className="flex flex-col sm:flex-row flex-wrap gap-3">
+                <div className="relative w-full sm:w-56">
                   <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                   <Input
                     className="pl-8"
@@ -1178,15 +1178,15 @@ export default function SalesHistory() {
                     onChange={(e) => setSearchInput(e.target.value)}
                   />
                 </div>
-                <Select value={channel} onChange={(e) => { setChannel(e.target.value); setPage(1); }} className="w-40">
+                <Select value={channel} onChange={(e) => { setChannel(e.target.value); setPage(1); }} className="w-full sm:w-40">
                   <option value="">All Channels</option>
                   <option value="STORE">Store (POS)</option>
                   <option value="WEB">Web Orders</option>
                 </Select>
                 <div className="flex items-center gap-2">
-                  <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-40" />
+                  <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-full sm:w-40" />
                   <span className="text-gray-400 text-sm">to</span>
-                  <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-40" />
+                  <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-full sm:w-40" />
                 </div>
                 {(channel || searchInput || startDate !== toDateInput() || endDate !== toDateInput()) && (
                   <Button variant="ghost" size="sm" onClick={() => { setChannel(''); setStartDate(toDateInput()); setEndDate(toDateInput()); setSearchInput(''); setPage(1); }}>Reset to today</Button>
@@ -1194,7 +1194,7 @@ export default function SalesHistory() {
                 {(startDate || endDate) && (
                   <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate(''); setPage(1); }}>Show all dates</Button>
                 )}
-                <Button variant="outline" size="sm" className="ml-auto" onClick={fetchSales} disabled={loading}>
+                <Button variant="outline" size="sm" className="sm:ml-auto" onClick={fetchSales} disabled={loading}>
                   <RefreshCw size={13} className={`mr-1.5 ${loading ? 'animate-spin' : ''}`} /> Refresh
                 </Button>
               </div>
@@ -1203,7 +1203,7 @@ export default function SalesHistory() {
 
           {/* Selection / bulk-export toolbar */}
           {selected.size > 0 && (
-            <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-blue-200 bg-blue-50">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-blue-200 bg-blue-50">
               <span className="text-sm text-blue-800 font-medium">
                 {selected.size} bill{selected.size !== 1 ? 's' : ''} selected
                 {exporting && <Spinner size="sm" className="ml-2 inline-block align-middle" />}

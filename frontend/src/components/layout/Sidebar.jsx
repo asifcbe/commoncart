@@ -4,7 +4,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutDashboard, Package, ShoppingCart,
   Warehouse, Receipt, Settings, LogOut, Store,
-  ShoppingBag, Globe, Users, Tag, Truck, Clock, UserCog, BookOpen, DownloadCloud,
+  ShoppingBag, Globe, Users, Tag, Truck, Clock, UserCog, BookOpen, DownloadCloud, X,
 } from 'lucide-react';
 import useAuthStore from '../../store/useAuthStore';
 import { canAccess } from '../../config/permissions';
@@ -77,7 +77,7 @@ function LogoutConfirmModal({ onClose, onLogout }) {
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({ open = false, onClose = () => {} }) {
   const { user, logout } = useAuthStore();
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
@@ -88,68 +88,96 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="flex flex-col w-64 h-full shrink-0 bg-gray-900 text-white">
-      <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-700">
-        <Store size={24} className="text-blue-400" />
-        <div>
-          <div className="font-bold text-sm">CommonCart</div>
-          <div className="text-xs text-gray-400">Inventory System</div>
-        </div>
-      </div>
-
-      <nav className="flex-1 py-4 overflow-y-auto">
-        {navItems.filter((item) => {
-          // Settings is visible to everyone (it contains "My Profile")
-          if (item.to === '/settings') return true;
-          if (item.adminOnly) return user?.role === 'ADMIN';
-          // Section-gated items: admins see all, staff see only granted sections
-          return item.section ? canAccess(user, item.section) : true;
-        }).map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 px-6 py-3 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-300 hover:bg-gray-800 hover:text-white'
-              )
-            }
-          >
-            <Icon size={18} />
-            {label}
-          </NavLink>
-        ))}
-      </nav>
-
-      <div className="border-t border-gray-700 p-4">
-        <div className="flex items-center gap-3 mb-3">
-          <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-sm font-bold">
-            {user?.name?.charAt(0).toUpperCase()}
-          </div>
-          <div className="min-w-0">
-            <div className="text-sm font-medium truncate">{user?.name}</div>
-            <div className="text-xs text-gray-400">{user?.role}</div>
-          </div>
-        </div>
-        <button
-          onClick={handleSignOutClick}
-          className="flex items-center gap-2 w-full text-sm text-gray-400 hover:text-red-400 transition-colors"
-        >
-          <LogOut size={16} /> Sign out
-        </button>
-      </div>
-
-      {showLogoutConfirm && createPortal(
-        // Portalled to <body> — rendering it here inside the sidebar's own
-        // <aside className="... text-white"> would leak that white text
-        // color into the modal via ordinary CSS inheritance (position:fixed
-        // takes it out of layout, not out of the DOM tree).
-        <LogoutConfirmModal onClose={() => setShowLogoutConfirm(false)} onLogout={logout} />,
-        document.body
+    <>
+      {/* Mobile scrim — click to close. Hidden on md+ where the sidebar is
+          always docked in the flex row instead of overlaying content. */}
+      {open && (
+        <div
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+          onClick={onClose}
+          aria-hidden="true"
+        />
       )}
-    </aside>
+
+      <aside
+        className={cn(
+          'flex flex-col w-64 shrink-0 bg-gray-900 text-white',
+          // Mobile: fixed off-canvas drawer that slides in. md+: static, always visible.
+          'fixed inset-y-0 left-0 z-40 h-full transition-transform duration-200 ease-in-out',
+          'md:static md:translate-x-0 md:z-auto',
+          open ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        <div className="flex items-center gap-3 px-6 py-5 border-b border-gray-700">
+          <Store size={24} className="text-blue-400" />
+          <div className="flex-1 min-w-0">
+            <div className="font-bold text-sm">CommonCart</div>
+            <div className="text-xs text-gray-400">Inventory System</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="md:hidden p-1 text-gray-400 hover:text-white"
+            aria-label="Close menu"
+          >
+            <X size={20} />
+          </button>
+        </div>
+
+        <nav className="flex-1 py-4 overflow-y-auto">
+          {navItems.filter((item) => {
+            // Settings is visible to everyone (it contains "My Profile")
+            if (item.to === '/settings') return true;
+            if (item.adminOnly) return user?.role === 'ADMIN';
+            // Section-gated items: admins see all, staff see only granted sections
+            return item.section ? canAccess(user, item.section) : true;
+          }).map(({ to, icon: Icon, label }) => (
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/'}
+              onClick={onClose}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 px-6 py-3 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-blue-600 text-white'
+                    : 'text-gray-300 hover:bg-gray-800 hover:text-white'
+                )
+              }
+            >
+              <Icon size={18} />
+              {label}
+            </NavLink>
+          ))}
+        </nav>
+
+        <div className="border-t border-gray-700 p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-sm font-bold">
+              {user?.name?.charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="text-sm font-medium truncate">{user?.name}</div>
+              <div className="text-xs text-gray-400">{user?.role}</div>
+            </div>
+          </div>
+          <button
+            onClick={handleSignOutClick}
+            className="flex items-center gap-2 w-full text-sm text-gray-400 hover:text-red-400 transition-colors"
+          >
+            <LogOut size={16} /> Sign out
+          </button>
+        </div>
+
+        {showLogoutConfirm && createPortal(
+          // Portalled to <body> — rendering it here inside the sidebar's own
+          // <aside className="... text-white"> would leak that white text
+          // color into the modal via ordinary CSS inheritance (position:fixed
+          // takes it out of layout, not out of the DOM tree).
+          <LogoutConfirmModal onClose={() => setShowLogoutConfirm(false)} onLogout={logout} />,
+          document.body
+        )}
+      </aside>
+    </>
   );
 }

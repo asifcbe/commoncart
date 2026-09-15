@@ -869,7 +869,7 @@ export default function Settings() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
           <p className="text-gray-500 text-sm mt-1">Manage users and system preferences</p>
@@ -1584,7 +1584,7 @@ export default function Settings() {
               <div className="space-y-5">
                 <div>
                   <label className="text-sm font-medium block mb-1">Start numbering barcodes from</label>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 flex-wrap">
                     <Input
                       type="number"
                       min="100000"
@@ -1811,7 +1811,7 @@ export default function Settings() {
               <form onSubmit={handleSaveCreditConfig} className="space-y-5">
                 <div>
                   <label className="text-sm font-medium block mb-1">Earning Rate</label>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm text-gray-600">Earn</span>
                     <Input
                       type="number"
@@ -1960,7 +1960,7 @@ export default function Settings() {
                     Products aged ≥ a step's days but &lt; the next step get that step's discount applied.
                     Add only the steps you want; set a percent to 0 for an age band that should get no discount.
                   </p>
-                  <div className="border rounded-lg overflow-hidden">
+                  <div className="border rounded-lg overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-gray-50 border-b">
                         <tr>
@@ -2073,7 +2073,7 @@ export default function Settings() {
               {backupSummary && (
                 <div className="text-xs text-gray-500 border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
                   <p className="font-semibold text-gray-600 mb-1">Included ({backupSummary.collections.length} collections):</p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5">
                     {backupSummary.collections.map((c) => (
                       <div key={c.name} className="flex justify-between">
                         <span>{c.name}</span>
@@ -2124,7 +2124,7 @@ export default function Settings() {
                   <p className="font-semibold text-green-700 mb-1">
                     Restored {restoreResult.restoredFrom ? `from ${formatDate(restoreResult.restoredFrom)}` : ''}
                   </p>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-gray-600">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-0.5 text-gray-600">
                     {restoreResult.collections.map((c) => (
                       <div key={c.collection} className="flex justify-between">
                         <span>{c.collection}</span>

@@ -118,7 +118,7 @@ function ProductDetailsModal({ product, onClose, onEdit, onHistory }) {
 
   return (
     <Modal open onClose={onClose} title={p.name} size="lg">
-      <div className="grid md:grid-cols-2 gap-5">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Photo */}
         <div>
           <div className="relative bg-gray-50 rounded-lg overflow-hidden flex items-center justify-center" style={{ minHeight: 240 }}>
@@ -331,8 +331,8 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
-        <div className="col-span-2">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="sm:col-span-2">
           <label className="text-sm font-medium text-gray-700 block mb-1">Product Name *</label>
           <Input value={form.name} onChange={set('name')} required />
         </div>
@@ -422,7 +422,7 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
             <p className="text-[11px] text-gray-400 mt-1">Leave blank to auto-generate. Enter an existing barcode to match a pre-labelled product.</p>
           </div>
         )}
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="text-sm font-medium text-gray-700 block mb-1">Description</label>
           <textarea
             value={form.description}
@@ -430,7 +430,7 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
             className="w-full rounded-md border border-input px-3 py-2 text-sm resize-none h-20 focus:outline-none focus:ring-2 focus:ring-ring"
           />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="text-sm font-medium text-gray-700 block mb-1">Images (up to 5)</label>
 
           {/* Existing photos (edit mode) — click × to remove */}
@@ -469,7 +469,7 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
             <p className="text-xs text-gray-400 mt-1">Maximum of 5 photos. Remove one to add another.</p>
           )}
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="flex items-center gap-3 cursor-pointer select-none group">
             <div className="relative">
               <input
@@ -490,7 +490,7 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
             {form.isWebVisible ? <Globe size={16} className="text-blue-500" /> : <GlobeLock size={16} className="text-gray-400" />}
           </label>
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="flex items-center gap-3 cursor-pointer select-none group">
             <div className="relative">
               <input
@@ -710,12 +710,12 @@ export default function Products() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Products</h1>
           <p className="text-gray-500 text-sm mt-1">{total} products total</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Button
             variant={barcodePrintMode ? 'default' : 'outline'}
             onClick={() => { setBarcodePrintMode((v) => !v); setCheckedIds(new Set()); }}
@@ -730,9 +730,9 @@ export default function Products() {
 
       {/* Barcode print selection bar */}
       {barcodePrintMode && (
-        <div className="flex items-center gap-3 p-3 rounded-lg border-2" style={{ background: 'rgba(13,148,136,0.07)', borderColor: 'rgba(13,148,136,0.3)' }}>
+        <div className="flex flex-wrap items-center gap-3 p-3 rounded-lg border-2" style={{ background: 'rgba(13,148,136,0.07)', borderColor: 'rgba(13,148,136,0.3)' }}>
           <Printer size={16} style={{ color: '#0d9488' }} />
-          <p className="flex-1 text-sm font-bold" style={{ color: '#0d9488' }}>
+          <p className="flex-1 min-w-[140px] text-sm font-bold" style={{ color: '#0d9488' }}>
             {checkedIds.size === 0 ? 'Click items to select for printing' : `${checkedIds.size} item${checkedIds.size > 1 ? 's' : ''} selected`}
           </p>
           {checkedIds.size > 0 && (
@@ -754,8 +754,8 @@ export default function Products() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-4 space-y-3">
-          <div className="flex gap-3 flex-wrap">
-            <div className="relative flex-1 min-w-48">
+          <div className="flex flex-col sm:flex-row gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-0 sm:min-w-48">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <Input className="pl-9" placeholder="Search products…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
             </div>
@@ -765,7 +765,7 @@ export default function Products() {
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleBarcodeSearch(); }}
-                className="w-48 font-mono text-sm"
+                className="w-full sm:w-48 font-mono text-sm"
               />
               <Button size="sm" variant="outline" onClick={() => handleBarcodeSearch()} disabled={barcodeSearching || !barcodeInput.trim()}>
                 {barcodeSearching ? <Spinner size="sm" /> : <Search size={14} />}
@@ -773,28 +773,28 @@ export default function Products() {
             </div>
           </div>
           <div className="flex gap-3 flex-wrap items-center">
-            <Select value={category} onChange={(e) => { setCategory(e.target.value); setSubCategory(''); setPage(1); }} className="w-44">
+            <Select value={category} onChange={(e) => { setCategory(e.target.value); setSubCategory(''); setPage(1); }} className="w-[calc(50%-0.375rem)] sm:w-44">
               <option value="">All Categories</option>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </Select>
             <Select
               value={subCategory}
               onChange={(e) => { setSubCategory(e.target.value); setPage(1); }}
-              className="w-44"
+              className="w-[calc(50%-0.375rem)] sm:w-44"
               disabled={!category || subCategoryOptions.length === 0}
             >
               <option value="">{category ? 'All Sub-categories' : 'Select category first'}</option>
               {subCategoryOptions.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
-            <Select value={variant} onChange={(e) => { setVariant(e.target.value); setPage(1); }} className="w-40">
+            <Select value={variant} onChange={(e) => { setVariant(e.target.value); setPage(1); }} className="w-[calc(50%-0.375rem)] sm:w-40">
               <option value="">All Variants</option>
               {variants.map((v) => <option key={v} value={v}>{v}</option>)}
             </Select>
-            <Select value={size} onChange={(e) => { setSize(e.target.value); setPage(1); }} className="w-36">
+            <Select value={size} onChange={(e) => { setSize(e.target.value); setPage(1); }} className="w-[calc(50%-0.375rem)] sm:w-36">
               <option value="">All Sizes</option>
               {sizes.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
-            <Select value={agingBucket} onChange={(e) => { setAgingBucket(e.target.value); setPage(1); }} className="w-56" title="Filter by aging step">
+            <Select value={agingBucket} onChange={(e) => { setAgingBucket(e.target.value); setPage(1); }} className="w-full sm:w-56" title="Filter by aging step">
               <option value="">All aging steps</option>
               {agingBandOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </Select>

@@ -61,7 +61,7 @@ function CouponForm({ coupon, onSave, onClose }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <label className="text-sm font-medium block mb-1">Coupon Code *</label>
           <Input value={form.code} onChange={set('code')} placeholder="e.g. SAVE20" required className="uppercase" style={{ textTransform: 'uppercase' }} />
@@ -103,7 +103,7 @@ function CouponForm({ coupon, onSave, onClose }) {
           <label className="text-sm font-medium block mb-1">Expiry Date</label>
           <Input type="date" value={form.expiresAt} onChange={set('expiresAt')} />
         </div>
-        <div className="col-span-2">
+        <div className="sm:col-span-2">
           <label className="text-sm font-medium block mb-1">Description</label>
           <Input value={form.description} onChange={set('description')} placeholder="Internal note about this coupon" />
         </div>
@@ -174,7 +174,7 @@ export default function Coupons() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Tag size={22} className="text-purple-500" /> Discount Coupons

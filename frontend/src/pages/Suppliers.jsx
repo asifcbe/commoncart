@@ -72,8 +72,8 @@ function SupplierFormModal({ supplier, onClose, onSaved }) {
   return (
     <Modal open onClose={onClose} title={supplier ? 'Edit Supplier' : 'New Supplier'} size="lg">
       <form onSubmit={handleSubmit} className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <div className="col-span-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="sm:col-span-2">
             <label className="text-xs font-medium text-gray-600 block mb-1">Supplier Name *</label>
             <Input value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="e.g. ABC Textiles" required />
           </div>
@@ -93,11 +93,11 @@ function SupplierFormModal({ supplier, onClose, onSaved }) {
             <label className="text-xs font-medium text-gray-600 block mb-1">GSTIN</label>
             <Input value={form.gstin} onChange={(e) => set('gstin', e.target.value)} placeholder="22AAAAA0000A1Z5" />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="text-xs font-medium text-gray-600 block mb-1">Address</label>
             <Input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Full address" />
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="text-xs font-medium text-gray-600 block mb-1">Note</label>
             <Input value={form.note} onChange={(e) => set('note', e.target.value)} placeholder="Optional internal note" />
           </div>
@@ -149,7 +149,7 @@ function AddPaymentModal({ supplier, onClose, onSaved }) {
         </div>
         <div>
           <label className="text-xs font-medium text-gray-600 block mb-1">Payment Method</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
             {PAYMENT_METHODS.map((m) => (
               <button key={m} type="button" onClick={() => set('method', m)}
                 className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${form.method === m ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-200 hover:border-gray-300 text-gray-600'}`}>
@@ -260,7 +260,7 @@ function SupplierAccount({ supplierId, onBack }) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center gap-3 flex-wrap">
+      <div className="flex items-start sm:items-center gap-3 flex-wrap">
         <button onClick={onBack} className="p-2 rounded-lg hover:bg-gray-100 text-gray-500 shrink-0">
           <ArrowLeft size={18} />
         </button>
@@ -304,7 +304,7 @@ function SupplierAccount({ supplierId, onBack }) {
           </div>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-y-3 gap-x-6 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-y-3 gap-x-6 text-sm">
             {supplier.contactPerson && (
               <div>
                 <p className="text-xs text-gray-400 mb-0.5">Contact Person</p>
@@ -330,19 +330,19 @@ function SupplierAccount({ supplierId, onBack }) {
               </div>
             )}
             {supplier.address && (
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <p className="text-xs text-gray-400 mb-0.5 flex items-center gap-1"><MapPin size={10} /> Address</p>
                 <p className="text-gray-700">{supplier.address}</p>
               </div>
             )}
             {supplier.note && (
-              <div className="col-span-3">
+              <div className="sm:col-span-2 md:col-span-3">
                 <p className="text-xs text-gray-400 mb-0.5">Note</p>
                 <p className="text-gray-500 text-xs">{supplier.note}</p>
               </div>
             )}
             {!supplier.contactPerson && !supplier.phone && !supplier.email && !supplier.address && !supplier.gstin && (
-              <p className="text-sm text-gray-400 col-span-3">No contact info added yet. <button onClick={() => setShowEdit(true)} className="text-blue-600 hover:underline">Edit supplier</button> to add details.</p>
+              <p className="text-sm text-gray-400 sm:col-span-2 md:col-span-3">No contact info added yet. <button onClick={() => setShowEdit(true)} className="text-blue-600 hover:underline">Edit supplier</button> to add details.</p>
             )}
           </div>
         </CardContent>
@@ -532,7 +532,7 @@ export default function Suppliers() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Suppliers</h1>
           <p className="text-gray-500 text-sm mt-1">{total} supplier{total !== 1 ? 's' : ''}</p>
@@ -558,7 +558,7 @@ export default function Suppliers() {
             placeholder="Search suppliers by name…"
             value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-            className="max-w-sm"
+            className="w-full max-w-sm"
           />
         </CardContent>
       </Card>

@@ -54,7 +54,7 @@ function HRModal({ staff, onClose, onSaved }) {
   return (
     <Modal open onClose={onClose} title={`Edit — ${staff.name}`} size="lg">
       <div className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label className="text-xs font-medium text-gray-600 block mb-1">Name</label>
             <Input value={form.name} onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))} placeholder="Full name" />
@@ -347,10 +347,10 @@ function SalaryTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-2">
           <label className="text-sm text-gray-600">Staff:</label>
-          <Select value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)} className="w-48">
+          <Select value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)} className="w-full sm:w-48">
             <option value="">All staff</option>
             {staff.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
           </Select>
@@ -401,7 +401,7 @@ function SalaryTab() {
                 {staff.map((s) => <option key={s._id} value={s._id}>{s.name}</option>)}
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Amount (₹) *</label>
                 <Input type="number" min="1" value={form.amount} onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))} placeholder="0" />
@@ -413,7 +413,7 @@ function SalaryTab() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="text-xs font-medium text-gray-600 block mb-1">Period</label>
                 <Input value={form.periodLabel} onChange={(e) => setForm((f) => ({ ...f, periodLabel: e.target.value }))} placeholder="e.g. June 2026" />
@@ -459,11 +459,11 @@ function SalesByStaffTab() {
   return (
     <div className="space-y-4">
       <Card>
-        <CardContent className="pt-4 flex items-center gap-3 flex-wrap">
+        <CardContent className="pt-4 flex flex-col sm:flex-row sm:items-center gap-3 flex-wrap">
           <label className="text-sm text-gray-600">From:</label>
-          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-40" />
+          <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full sm:w-40" />
           <label className="text-sm text-gray-600">To:</label>
-          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-40" />
+          <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full sm:w-40" />
           {(startDate || endDate) && <Button variant="ghost" size="sm" onClick={() => { setStartDate(''); setEndDate(''); }}>Clear</Button>}
         </CardContent>
       </Card>
@@ -520,10 +520,10 @@ export default function Staff() {
         <p className="text-gray-500 text-sm mt-1">Manage staff, attendance, salary, and sales performance</p>
       </div>
 
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto">
         {tabs.map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors flex items-center gap-1.5 whitespace-nowrap shrink-0 ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             <t.icon size={14} /> {t.label}
           </button>
         ))}

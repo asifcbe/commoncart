@@ -218,7 +218,7 @@ function SupplierSelector({ value, onChange, onKeyDown, autoFocus }) {
       {showCreate && (
         <div className="border rounded-lg p-3 bg-blue-50 space-y-2">
           <p className="text-xs font-medium text-blue-700">Quick-create supplier</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Supplier name *" className="text-sm" />
             <Input value={newPhone} onChange={(e) => setNewPhone(e.target.value)} placeholder="Phone (optional)" className="text-sm" />
           </div>
@@ -686,7 +686,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   return (
     <div className="space-y-6" ref={formRef}>
       {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-xl font-bold text-gray-900">{isEdit ? `Edit Purchase — ${existingPurchase?.purchaseId}` : 'New Purchase Entry'}</h2>
           <p className="text-sm text-gray-500 mt-0.5">
@@ -776,7 +776,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
             <Card ref={productStepRef}>
               <CardHeader className="pb-2"><CardTitle className="text-sm">Step 2 — Product Details</CardTitle></CardHeader>
               <CardContent className="space-y-4">
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">Product Name *</label>
                     <Input value={prodName} onChange={(e) => setProdName(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. Cotton T-Shirt" autoFocus /></div>
                   <CategoryFields
@@ -790,7 +790,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     labelClass="text-xs font-medium text-gray-600 block mb-1"
                   />
                 </div>
-                <div className="grid grid-cols-6 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">HSN Code <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
                     <Input value={prodHsnCode} onChange={(e) => setProdHsnCode(e.target.value)} onKeyDown={productStepEnterNav} placeholder="e.g. 6109" /></div>
                   <div><label className="text-xs font-medium text-gray-600 block mb-1">GST % <span className="text-[10px] text-gray-400 font-normal">optional</span></label>
@@ -1122,7 +1122,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                   <Card>
                     <CardHeader className="pb-2"><CardTitle className="text-sm">Step 1 — Product Details</CardTitle></CardHeader>
                     <CardContent className="space-y-4">
-                      <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
                         <div><label className="text-xs font-medium text-gray-600 block mb-1">Product Name *</label>
                           <Input value={name} onChange={(e) => setAllField('name', e.target.value)} onKeyDown={enterNav} /></div>
                         <CategoryFields
@@ -1453,12 +1453,12 @@ function PurchaseDetailModal({ purchaseId, onClose }) {
         <div className="text-center text-gray-400">Not found</div>
       ) : (
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">Purchase ID:</span> <span className="font-mono font-medium">{purchase.purchaseId}</span></div>
             <div><span className="text-gray-500">Date:</span> {formatDateTime(purchase.purchaseDate || purchase.createdAt)}</div>
             <div><span className="text-gray-500">Supplier:</span> {purchase.supplierId?.name || purchase.supplier || '—'}</div>
             <div><span className="text-gray-500">Recorded by:</span> {purchase.purchasedBy?.name || '—'}</div>
-            {purchase.note && <div className="col-span-2"><span className="text-gray-500">Note:</span> {purchase.note}</div>}
+            {purchase.note && <div className="sm:col-span-2"><span className="text-gray-500">Note:</span> {purchase.note}</div>}
           </div>
           <div className="border rounded-lg overflow-x-auto">
             <table className="w-full text-sm">
@@ -1770,13 +1770,13 @@ export default function Purchase() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Purchases</h1>
           <p className="text-gray-500 text-sm mt-1">{tab === 'purchases' ? `${total} purchase records` : 'Purchase returns'}</p>
         </div>
         {tab === 'purchases' && (
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             {allowManage && (
               <Button variant="outline" onClick={() => setShowScanDelete((v) => !v)}>
                 <ScanLine size={16} className="mr-2" /> Scan &amp; Delete Units
@@ -1788,10 +1788,10 @@ export default function Purchase() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto">
         {[{ id: 'purchases', label: 'All Purchases' }, { id: 'returns', label: 'Purchase Returns' }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
             {t.label}
           </button>
         ))}
@@ -1818,7 +1818,7 @@ export default function Purchase() {
                 value={scanDeleteInput}
                 onChange={(e) => setScanDeleteInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleScanDeleteAdd(); }}
-                className="font-mono text-sm flex-1"
+                className="font-mono text-sm flex-1 min-w-0"
               />
               <Button size="sm" variant="outline" onClick={() => handleScanDeleteAdd()} disabled={scanDeleteLooking || !scanDeleteInput.trim()}>
                 {scanDeleteLooking ? <Spinner size="sm" /> : <Plus size={14} />}
@@ -1860,7 +1860,7 @@ export default function Purchase() {
               </div>
             )}
 
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="text-xs text-gray-500">{scanDeleteQueue.length} unit{scanDeleteQueue.length !== 1 ? 's' : ''} queued</span>
               <div className="flex gap-2">
                 {scanDeleteQueue.length > 0 && (
@@ -1892,23 +1892,23 @@ export default function Purchase() {
         <>
       <Card>
         <CardContent className="pt-4">
-          <div className="flex flex-wrap gap-3 items-center">
-            <Input placeholder="Search supplier…" value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setPage(1); }} className="w-48" />
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:items-center">
+            <Input placeholder="Search supplier…" value={supplierFilter} onChange={(e) => { setSupplierFilter(e.target.value); setPage(1); }} className="w-full sm:w-48" />
             <div className="flex items-center gap-2">
-              <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-40" />
+              <Input type="date" value={startDate} onChange={(e) => { setStartDate(e.target.value); setPage(1); }} className="w-full sm:w-40" />
               <span className="text-gray-400 text-sm">to</span>
-              <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-40" />
+              <Input type="date" value={endDate} onChange={(e) => { setEndDate(e.target.value); setPage(1); }} className="w-full sm:w-40" />
             </div>
             {(supplierFilter || startDate || endDate) && (
               <Button variant="ghost" size="sm" onClick={() => { setSupplierFilter(''); setStartDate(''); setEndDate(''); setPage(1); }}>Clear filters</Button>
             )}
-            <div className="flex gap-1 items-center ml-auto">
+            <div className="flex gap-1 items-center sm:ml-auto">
               <Input
                 placeholder="Scan / enter barcode…"
                 value={barcodeInput}
                 onChange={(e) => setBarcodeInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleBarcodeSearch(); }}
-                className="w-48 font-mono text-sm"
+                className="w-full sm:w-48 font-mono text-sm"
               />
               <Button size="sm" variant="outline" onClick={() => handleBarcodeSearch()} disabled={barcodeSearching || !barcodeInput.trim()}>
                 {barcodeSearching ? <Spinner size="sm" /> : <ChevronRight size={14} />}
@@ -1920,7 +1920,7 @@ export default function Purchase() {
 
       {/* Selection / bulk-export toolbar */}
       {selected.size > 0 && (
-        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-blue-200 bg-blue-50">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-2.5 rounded-lg border border-blue-200 bg-blue-50">
           <span className="text-sm text-blue-800 font-medium">
             {selected.size} purchase{selected.size !== 1 ? 's' : ''} selected
             {exporting && <Spinner size="sm" className="ml-2 inline-block align-middle" />}

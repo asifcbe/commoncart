@@ -301,12 +301,12 @@ export default function Inventory() {
       </div>
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b">
+      <div className="flex gap-1 border-b overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors whitespace-nowrap shrink-0 ${tab === t.id ? 'border-blue-500 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
           >
             {t.label}
           </button>
@@ -318,13 +318,13 @@ export default function Inventory() {
           {/* Filters */}
           <Card>
             <CardContent className="pt-4">
-              <div className="flex flex-wrap gap-3 items-end">
+              <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:items-end">
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Category</label>
                   <Select
                     value={ovCategory}
                     onChange={(e) => { setOvCategory(e.target.value); setOvSubCategory(''); }}
-                    className="w-48 h-9 text-sm"
+                    className="w-full sm:w-48 h-9 text-sm"
                   >
                     <option value="">All Categories</option>
                     {ovCategories.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -335,7 +335,7 @@ export default function Inventory() {
                   <Select
                     value={ovSubCategory}
                     onChange={(e) => setOvSubCategory(e.target.value)}
-                    className="w-48 h-9 text-sm"
+                    className="w-full sm:w-48 h-9 text-sm"
                   >
                     <option value="">All Sub-categories</option>
                     {ovSubCategories.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -343,7 +343,7 @@ export default function Inventory() {
                 </div>
                 <div>
                   <label className="text-xs font-medium text-gray-600 block mb-1">Stock Status</label>
-                  <Select value={ovStockStatus} onChange={(e) => setOvStockStatus(e.target.value)} className="w-44 h-9 text-sm">
+                  <Select value={ovStockStatus} onChange={(e) => setOvStockStatus(e.target.value)} className="w-full sm:w-44 h-9 text-sm">
                     <option value="">All</option>
                     <option value="in">In Stock</option>
                     <option value="out">Out of Stock</option>
@@ -355,7 +355,7 @@ export default function Inventory() {
                     Clear filters
                   </Button>
                 )}
-                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 h-9 ml-auto">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 h-9 sm:ml-auto">
                   <input type="checkbox" checked={ovSplitVariant} onChange={(e) => setOvSplitVariant(e.target.checked)} className="rounded" />
                   Split by variant &amp; size
                 </label>
@@ -473,7 +473,7 @@ export default function Inventory() {
             outOfStockProducts.map((p) => (
               <Card key={p._id} className="border-red-200">
                 <CardContent className="pt-4">
-                  <div className="flex items-center justify-between flex-wrap gap-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between flex-wrap gap-4">
                     <div className="flex items-center gap-3">
                       <AlertTriangle size={18} className="text-red-500" />
                       <div>
@@ -481,7 +481,7 @@ export default function Inventory() {
                         <div className="text-xs text-gray-500">SKU: {p.SKU}</div>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-4 flex-wrap">
                       <Badge variant="destructive">Out of Stock</Badge>
                       <Button size="sm" variant="success" onClick={() => setRestockProduct(p)}>
                         <Plus size={14} className="mr-1" /> Restock
@@ -501,7 +501,7 @@ export default function Inventory() {
       {tab === 'all' && (
         <Card>
           <CardHeader className="pb-2">
-            <div className="relative w-64">
+            <div className="relative w-full sm:w-64">
               <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <Input className="pl-8 h-8 text-xs" placeholder="Search products…" value={search} onChange={(e) => setSearch(e.target.value)} />
             </div>
@@ -553,9 +553,9 @@ export default function Inventory() {
       {tab === 'movements' && (
         <Card>
           <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <CardTitle className="text-base">Stock Movement Log</CardTitle>
-              <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-40 h-8 text-xs">
+              <Select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} className="w-full sm:w-40 h-8 text-xs">
                 <option value="">All Types</option>
                 <option value="SALE">Sale</option>
                 <option value="RESTOCK">Restock</option>

@@ -989,14 +989,14 @@ export default function POS() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between flex-wrap gap-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between flex-wrap gap-2">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Point of Sale</h1>
           <p className="text-gray-500 text-sm mt-1">In-store sales terminal</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           {!locked && (
-            <div className="flex items-center gap-1.5 text-xs text-gray-400">
+            <div className="hidden md:flex items-center gap-1.5 text-xs text-gray-400">
               <Keyboard size={13} />
               <span><kbd className="px-1.5 py-0.5 bg-gray-100 rounded border text-gray-600">Enter</kbd> Next step</span>
               <span className="text-gray-300">·</span>
@@ -1097,8 +1097,8 @@ export default function POS() {
               <div className="flex items-center gap-2 font-semibold text-blue-900 mb-3">
                 <ScanLine size={16} /> Step 2 — Scan Items
               </div>
-              <div className="flex gap-3">
-                <div className="relative flex-1">
+              <div className="flex flex-col sm:flex-row gap-3">
+                <div className="relative flex-1 min-w-0">
                   <ScanLine size={20} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-blue-400" />
                   <Input
                     ref={scanRef}
@@ -1110,24 +1110,26 @@ export default function POS() {
                     onKeyDown={handleScanKeyDown}
                   />
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowCameraScanner(true)}
-                  title="Scan with device camera"
-                  className="h-14 px-5"
-                >
-                  <Camera size={20} />
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setShowCustomItem(true)}
-                  title="Add an item that has no barcode"
-                  className="h-14 px-4"
-                >
-                  <Plus size={18} className="mr-1.5" /> No barcode
-                </Button>
+                <div className="flex gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowCameraScanner(true)}
+                    title="Scan with device camera"
+                    className="h-14 px-5 flex-1 sm:flex-none"
+                  >
+                    <Camera size={20} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowCustomItem(true)}
+                    title="Add an item that has no barcode"
+                    className="h-14 px-4 flex-1 sm:flex-none"
+                  >
+                    <Plus size={18} className="mr-1.5" /> No barcode
+                  </Button>
+                </div>
               </div>
               <div className="flex justify-between items-center mt-3">
                 <Button size="sm" variant="ghost" onClick={() => setStep('customer')}>Back</Button>
@@ -1158,8 +1160,8 @@ export default function POS() {
               ) : (
                 <div className="divide-y">
                   {cart.map((item, i) => (
-                    <div key={item.productId} className="p-3 flex items-center gap-3">
-                      <div className="flex-1 min-w-0">
+                    <div key={item.productId} className="p-3 flex items-center gap-3 flex-wrap">
+                      <div className="flex-1 min-w-[140px]">
                         <div className="text-lg font-medium truncate">
                           {i + 1}. {item.name}
                           {item.isDiscounted && <span className="ml-1 text-base text-red-500">(Clearance)</span>}
@@ -1186,7 +1188,7 @@ export default function POS() {
                           <Plus size={16} />
                         </button>
                       </div>
-                      <span className="text-lg font-bold w-28 text-right shrink-0">₹{(item.price * item.qty).toFixed(2)}</span>
+                      <span className="text-lg font-bold w-20 sm:w-28 text-right shrink-0">₹{(item.price * item.qty).toFixed(2)}</span>
                       <button onClick={() => removeFromCart(item.productId)} className="text-gray-400 hover:text-red-500 shrink-0">
                         <X size={20} />
                       </button>
@@ -1488,7 +1490,7 @@ export default function POS() {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-4 gap-1.5" ref={paymentGroupRef}>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5" ref={paymentGroupRef}>
                       {paymentModes.map((m, i) => (
                         <button
                           key={m.key}

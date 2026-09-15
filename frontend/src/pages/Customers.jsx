@@ -188,7 +188,7 @@ export default function Customers() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Users size={22} className="text-blue-500" /> Customers
@@ -203,8 +203,8 @@ export default function Customers() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="relative flex-1 min-w-48">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:items-center">
+            <div className="relative flex-1 min-w-0 sm:min-w-48">
               <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <Input
                 className="pl-9"
@@ -213,7 +213,7 @@ export default function Customers() {
                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
               />
             </div>
-            <Select value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }} className="w-36">
+            <Select value={source} onChange={(e) => { setSource(e.target.value); setPage(1); }} className="w-full sm:w-36">
               <option value="">All Sources</option>
               <option value="WEB">Web</option>
               <option value="POS">POS</option>

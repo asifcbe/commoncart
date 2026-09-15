@@ -92,7 +92,7 @@ function OrderDetailModal({ orderId, onClose, onUpdated }) {
       ) : (
         <div className="space-y-5">
           {/* Header info */}
-          <div className="grid grid-cols-2 gap-3 text-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
             <div><span className="text-gray-500">Order ID:</span> <span className="font-mono font-medium">{order.orderId}</span></div>
             <div><span className="text-gray-500">Date:</span> {formatDateTime(order.createdAt)}</div>
             <div>
@@ -104,7 +104,7 @@ function OrderDetailModal({ orderId, onClose, onUpdated }) {
           </div>
 
           {/* Status controls */}
-          <div className="grid grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
             <div>
               <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Fulfillment Status</p>
               <div className="flex items-center gap-2 mb-2">
@@ -197,14 +197,14 @@ function OrderDetailModal({ orderId, onClose, onUpdated }) {
           {order.note && <div className="text-sm text-gray-500">Note: {order.note}</div>}
 
           {/* Actions */}
-          <div className="flex justify-between items-center pt-2 border-t">
+          <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 pt-2 border-t">
             {order.fulfillmentStatus !== 'CANCELLED' && order.fulfillmentStatus !== 'DELIVERED' && (
               <Button variant="outline" onClick={cancelOrder} className="text-red-600 border-red-300 hover:bg-red-50">
                 <XCircle size={14} className="mr-2" /> Cancel Order
               </Button>
             )}
-            <div className="ml-auto">
-              <Button variant="outline" onClick={onClose}>Close</Button>
+            <div className="sm:ml-auto">
+              <Button variant="outline" onClick={onClose} className="w-full sm:w-auto">Close</Button>
             </div>
           </div>
         </div>
@@ -273,12 +273,12 @@ export default function WebOrders() {
       {/* Filters */}
       <Card>
         <CardContent className="pt-4">
-          <div className="flex flex-wrap gap-3 items-center">
-            <Select value={fulfillmentStatus} onChange={(e) => { setFulfillmentStatus(e.target.value); setPage(1); }} className="w-44">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:items-center">
+            <Select value={fulfillmentStatus} onChange={(e) => { setFulfillmentStatus(e.target.value); setPage(1); }} className="w-full sm:w-44">
               <option value="">All Fulfillment</option>
               {FULFILLMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
-            <Select value={paymentStatus} onChange={(e) => { setPaymentStatus(e.target.value); setPage(1); }} className="w-40">
+            <Select value={paymentStatus} onChange={(e) => { setPaymentStatus(e.target.value); setPage(1); }} className="w-full sm:w-40">
               <option value="">All Payments</option>
               {PAYMENT_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
             </Select>
