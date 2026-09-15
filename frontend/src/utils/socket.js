@@ -4,7 +4,8 @@ let socket = null;
 
 export const getSocket = () => {
   if (!socket) {
-    socket = io('http://localhost:5001', { autoConnect: false });
+    const url = import.meta.env.PROD ? window.location.origin : 'http://localhost:5001';
+    socket = io(url, { autoConnect: false });
   }
   return socket;
 };

@@ -130,8 +130,11 @@ const shopConfig = {
 
   // ─── API ──────────────────────────────────────────────────────
   api: {
-    baseUrl: 'http://localhost:5001',   // Change this when deploying
-    socketUrl: 'http://localhost:5001',
+    // Dev: localhost backend. Prod: same origin as the site itself, since
+    // Nginx proxies /api and /socket.io/ to the backend on that host — see
+    // DEPLOYMENT.md Part 6.
+    baseUrl: import.meta.env.PROD ? window.location.origin : 'http://localhost:5001',
+    socketUrl: import.meta.env.PROD ? window.location.origin : 'http://localhost:5001',
   },
 };
 
