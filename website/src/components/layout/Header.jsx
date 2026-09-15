@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ShoppingCart, User, Search, Menu, X, LogOut, Package, Heart } from 'lucide-react';
+import { ShoppingCart, User, Search, Menu, X, LogOut, Package } from 'lucide-react';
 import shopConfig from '../../config/shop.config';
 import useCartStore from '../../store/useCartStore';
 import useCustomerStore from '../../store/useCustomerStore';
@@ -173,9 +173,9 @@ export default function Header() {
           <Link to="/" className="text-sm font-medium whitespace-nowrap" style={{ color: 'var(--color-ink-soft)' }}>
             Home
           </Link>
-          <Link to="/clearance" className="text-sm font-semibold whitespace-nowrap flex items-center gap-1"
+          <Link to="/clearance" className="text-sm font-semibold whitespace-nowrap"
             style={{ color: 'var(--color-secondary-dark)' }}>
-            <Heart size={14} /> Sale
+            Clearance Sale
           </Link>
           {shopConfig.contact.phone && (
             <a href={`tel:${shopConfig.contact.phone}`}

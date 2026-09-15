@@ -31,6 +31,10 @@ const DEFAULT_BUSINESS = {
 const CATEGORY_KEY = 'CATEGORY_CONFIG';
 const DEFAULT_CATEGORIES = { categories: [] };
 
+// Storefront homepage hero carousel. Shape: { slides: [{ id, image, title, description, linkUrl, order }] }
+const CAROUSEL_KEY = 'CAROUSEL_CONFIG';
+const DEFAULT_CAROUSEL = { slides: [] };
+
 // Auto-delete out-of-stock products. enabled + days (after continuously
 // out of stock) before the product is permanently removed.
 const AUTO_DELETE_KEY = 'AUTO_DELETE_CONFIG';
@@ -465,6 +469,57 @@ exports.updateCategoryConfig = async (req, res) => {
   try {
     const config = normalizeCategories(req.body?.categories);
     await AppSettings.set(CATEGORY_KEY, config);
+    res.json({ config });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// ─── Storefront hero carousel ─────────────────────────────────
+
+const cleanLink = (v) => {
+  const s = (v ?? '').toString().trim();
+  return s.length > 300 ? '' : s;
+};
+
+function normalizeCarousel(raw) {
+  const list = Array.isArray(raw) ? raw : [];
+  const slides = list.map((s, i) => ({
+    id: (s?.id ?? '').toString().trim() || `${Date.now()}-${i}`,
+    image: cleanImg(s?.image),
+    title: (s?.title ?? '').toString().trim().slice(0, 120),
+    description: (s?.description ?? '').toString().trim().slice(0, 300),
+    linkUrl: cleanLink(s?.linkUrl),
+    order: i,
+  })).filter((s) => s.image);
+  return { slides };
+}
+
+exports.getCarouselConfig = async (_req, res) => {
+  try {
+    const saved = await AppSettings.get(CAROUSEL_KEY, DEFAULT_CAROUSEL);
+    res.json({ config: normalizeCarousel(saved?.slides) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// POST /settings/carousel-image (multipart, field name "image")
+exports.uploadCarouselImage = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
+    const { compressToFile } = require('../utils/imageCompress');
+    const { filename } = await compressToFile(req.file.buffer, 'carousel');
+    res.json({ url: `/uploads/carousel/${filename}` });
+  } catch (err) {
+    res.status(500).json({ message: `Image processing failed: ${err.message}` });
+  }
+};
+
+exports.updateCarouselConfig = async (req, res) => {
+  try {
+    const config = normalizeCarousel(req.body?.slides);
+    await AppSettings.set(CAROUSEL_KEY, config);
     res.json({ config });
   } catch (err) {
     res.status(500).json({ message: err.message });

@@ -1,31 +1,16 @@
 import React, { useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Truck, Shield, RefreshCw, Headphones, ArrowRight, ShoppingBag, Star, ArrowUpRight } from 'lucide-react';
+import { Truck, Shield, RefreshCw, Headphones, ArrowRight, ArrowUpRight } from 'lucide-react';
 import shopConfig from '../config/shop.config';
 import useShopStore from '../store/useShopStore';
 import ProductCard from '../components/ui/ProductCard';
-import BrandLogo from '../components/ui/BrandLogo';
+import HeroCarousel from '../components/HeroCarousel';
 import GuidedFilter from '../components/GuidedFilter';
 import Spinner from '../components/ui/Spinner';
 import Img from '../components/ui/Img';
 import { applyMeta } from '../utils/theme';
 
 const featureIcons = { truck: Truck, shield: Shield, refresh: RefreshCw, headphones: Headphones };
-
-// Soft, static blurred color fields behind the hero — decorative depth
-// without the old bouncing/spinning "candy" motion.
-function HeroGlow() {
-  return (
-    <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden" aria-hidden>
-      <span className="absolute rounded-full blur-3xl opacity-40"
-        style={{ width: 420, height: 420, left: '-8%', top: '-15%', background: 'var(--color-primary-light)' }} />
-      <span className="absolute rounded-full blur-3xl opacity-40"
-        style={{ width: 360, height: 360, right: '-6%', top: '5%', background: 'var(--color-secondary-light)' }} />
-      <span className="absolute rounded-full blur-3xl opacity-30"
-        style={{ width: 280, height: 280, left: '38%', bottom: '-12%', background: '#FFF3D6' }} />
-    </div>
-  );
-}
 
 export default function Home() {
   const { products, categories, categoryCards, loading, fetchProducts } = useShopStore();
@@ -42,67 +27,14 @@ export default function Home() {
 
   return (
     <div className="overflow-x-hidden">
-      {/* ── Hero ─────────────────────────────────────────────── */}
-      <section className="relative border-b" style={{ borderColor: 'var(--color-toffee)' }}>
-        <div
-          className="absolute inset-0 -z-20"
-          style={{ background: 'linear-gradient(180deg, var(--color-primary-light) 0%, var(--color-bg) 100%)' }}
-        />
-        <HeroGlow />
+      {/* ── Hero carousel (admin-managed, Settings → Homepage Carousel) ── */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 pt-6 pb-2 md:pt-8">
+        <HeroCarousel />
+      </section>
 
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-16 pb-14 md:pt-20 md:pb-16">
-          <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-14 items-center">
-            {/* Left: copy */}
-            <div className="anim-rise text-center lg:text-left">
-              <p className="text-xs font-semibold tracking-[0.35em] uppercase mb-5" style={{ color: 'var(--color-primary-dark)' }}>
-                New arrivals every week
-              </p>
-              <h1 className="text-4xl md:text-5xl xl:text-6xl leading-[1.1]" style={{ fontFamily: "'Fraunces', Georgia, serif", color: 'var(--color-ink)' }}>
-                {homepage.hero.title}
-              </h1>
-              {homepage.hero.subtitle && (
-                <p className="mt-5 text-base md:text-lg max-w-lg mx-auto lg:mx-0" style={{ color: 'var(--color-ink-soft)' }}>
-                  {homepage.hero.subtitle}
-                </p>
-              )}
-              <div className="mt-9 flex flex-col sm:flex-row items-center gap-5 justify-center lg:justify-start">
-                <Link to="/products" className="btn-primary group text-base px-8 py-3.5">
-                  <ShoppingBag size={18} />
-                  {homepage.hero.ctaText}
-                  <ArrowRight size={18} className="transition-transform group-hover:translate-x-1" />
-                </Link>
-                <div className="flex items-center gap-2 text-sm" style={{ color: 'var(--color-ink-soft)' }}>
-                  <span className="flex" style={{ color: 'var(--color-accent)' }}>
-                    {Array.from({ length: 5 }).map((_, i) => <Star key={i} size={14} fill="currentColor" strokeWidth={0} />)}
-                  </span>
-                  <span className="font-medium" style={{ color: 'var(--color-ink)' }}>4.8/5</span>
-                  loved by parents
-                </div>
-              </div>
-            </div>
-
-            {/* Right: brand mark card */}
-            <div className="anim-rise flex justify-center lg:justify-end">
-              <div className="card p-10 sm:p-14 flex flex-col items-center gap-5"
-                style={{ background: '#fff', maxWidth: 340 }}>
-                <BrandLogo size={84} animated={false} />
-                <div className="text-center">
-                  <p className="text-2xl" style={{ fontFamily: "'Fraunces', Georgia, serif", color: 'var(--color-ink)' }}>
-                    Tom <span style={{ color: 'var(--color-primary)' }}>&amp;</span> Jerry
-                  </p>
-                  <p className="text-xs font-medium tracking-[0.3em] uppercase mt-1.5" style={{ color: 'var(--color-ink-soft)' }}>
-                    Kids Wear
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* ── Guided flow: Category → Sub → Size ── */}
-          <div className="mt-14 max-w-4xl mx-auto">
-            <GuidedFilter />
-          </div>
-        </div>
+      {/* ── Guided flow: Category → Sub → Size ── */}
+      <section className="max-w-4xl mx-auto px-4 sm:px-6 pt-8 pb-2">
+        <GuidedFilter />
       </section>
 
       {/* ── Features strip ───────────────────────────────────── */}

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Plus, Trash2, Edit2, UserCog, AlertTriangle, ShieldAlert, Eye, EyeOff, Star, Clock, Zap,
   Building2, FolderTree, PackageX, X, Printer, Palette, User, Hash, Receipt,
-  ChevronRight, Menu, Wallet, DownloadCloud, ImagePlus,
+  ChevronRight, Menu, Wallet, DownloadCloud, ImagePlus, GalleryHorizontal, ArrowUp, ArrowDown,
 } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 import { useToast } from '../components/ui/Toast';
@@ -369,6 +369,11 @@ export default function Settings() {
   const [newSub, setNewSub] = useState({}); // { [catIndex]: 'sub name' }
   const [catImgBusy, setCatImgBusy] = useState(''); // key of the image slot currently uploading
 
+  // Homepage hero carousel: [{ id, image, title, description, linkUrl }]
+  const [carouselSlides, setCarouselSlides] = useState([]);
+  const [savingCarousel, setSavingCarousel] = useState(false);
+  const [carouselImgBusy, setCarouselImgBusy] = useState(''); // slide id currently uploading
+
   const [autoDelete, setAutoDelete] = useState({ enabled: false, days: 3 });
   const [savingAutoDelete, setSavingAutoDelete] = useState(false);
   const [runningAutoDelete, setRunningAutoDelete] = useState(false);
@@ -442,6 +447,7 @@ export default function Settings() {
     api.get('/settings/aging-config').then(({ data }) => setAgingConfig(data.config)).catch(() => {});
     api.get('/settings/business-config').then(({ data }) => setBusiness(data.config)).catch(() => {});
     api.get('/settings/category-config').then(({ data }) => setCategories(data.config?.categories || [])).catch(() => {});
+    api.get('/settings/carousel-config').then(({ data }) => setCarouselSlides(data.config?.slides || [])).catch(() => {});
     api.get('/settings/auto-delete-config').then(({ data }) => setAutoDelete(data.config)).catch(() => {});
     api.get('/settings/label-print-config').then(({ data }) => {
       const c = { ...DEFAULT_BARCODE_LABEL, ...data.config };
@@ -686,6 +692,53 @@ export default function Settings() {
     } finally { setSavingCategories(false); }
   };
 
+  // ─── Homepage carousel handlers ───
+  const addCarouselSlide = () => {
+    setCarouselSlides((prev) => [...prev, {
+      id: `new-${Date.now()}`, image: '', title: '', description: '', linkUrl: '',
+    }]);
+  };
+
+  const updateCarouselSlide = (id, field, value) =>
+    setCarouselSlides((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
+
+  const removeCarouselSlide = (id) => setCarouselSlides((prev) => prev.filter((s) => s.id !== id));
+
+  const moveCarouselSlide = (id, dir) => setCarouselSlides((prev) => {
+    const idx = prev.findIndex((s) => s.id === id);
+    const to = idx + dir;
+    if (idx === -1 || to < 0 || to >= prev.length) return prev;
+    const next = [...prev];
+    [next[idx], next[to]] = [next[to], next[idx]];
+    return next;
+  });
+
+  const uploadCarouselImg = async (id, file) => {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { toast({ message: 'Please choose an image file', type: 'warning' }); return; }
+    setCarouselImgBusy(id);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const { data } = await api.post('/settings/carousel-image', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      updateCarouselSlide(id, 'image', data.url);
+      toast({ message: 'Image uploaded — remember to Save', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Upload failed', type: 'error' });
+    } finally { setCarouselImgBusy(''); }
+  };
+
+  const handleSaveCarousel = async () => {
+    setSavingCarousel(true);
+    try {
+      const { data } = await api.put('/settings/carousel-config', { slides: carouselSlides });
+      setCarouselSlides(data.config?.slides || []);
+      toast({ message: 'Carousel saved', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Failed to save', type: 'error' });
+    } finally { setSavingCarousel(false); }
+  };
+
   // ─── Auto-delete handlers ───
   const handleSaveAutoDelete = async () => {
     setSavingAutoDelete(true);
@@ -841,6 +894,7 @@ export default function Settings() {
         { id: 'variants', label: 'Sizes', icon: Palette },
         { id: 'barcodes', label: 'Barcode Numbering', icon: Hash },
         { id: 'labels', label: 'Label Printing', icon: Printer },
+        { id: 'carousel', label: 'Homepage Carousel', icon: GalleryHorizontal },
       ],
     }] : []),
     ...(isAdmin ? [{
@@ -1253,6 +1307,116 @@ export default function Settings() {
                 <Button onClick={handleSaveCategories} disabled={savingCategories}>
                   {savingCategories ? <Spinner size="sm" className="mr-2" /> : null}
                   Save Categories
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {tab === 'carousel' && (
+        <div className="max-w-3xl">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <GalleryHorizontal size={16} className="text-indigo-500" /> Homepage Carousel
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-gray-500 mb-4">
+                Manage the rotating banner shown at the top of the storefront home page.
+                Each slide needs an image; title, description and link are optional.
+                Slides play in the order listed below. Slides with no image are dropped on save.
+              </p>
+
+              {carouselSlides.length === 0 ? (
+                <div className="text-center text-gray-400 py-8 text-sm border rounded-lg">
+                  No slides yet. Add one below to get started.
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {carouselSlides.map((slide, idx) => (
+                    <div key={slide.id} className="border rounded-lg p-3">
+                      <div className="flex items-start gap-3">
+                        <div className="shrink-0">
+                          <span className="relative inline-flex items-center justify-center h-20 w-32 rounded-lg overflow-hidden border border-dashed border-gray-300 bg-gray-50">
+                            {carouselImgBusy === slide.id ? (
+                              <Spinner size="sm" />
+                            ) : slide.image ? (
+                              <img src={slide.image} alt="" className="h-full w-full object-cover" />
+                            ) : (
+                              <ImagePlus size={18} className="text-gray-400" />
+                            )}
+                          </span>
+                          <label className="block mt-1 text-center">
+                            <span className="text-[11px] font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
+                              {slide.image ? 'Change' : 'Upload'}
+                            </span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => uploadCarouselImg(slide.id, e.target.files?.[0])}
+                            />
+                          </label>
+                        </div>
+
+                        <div className="flex-1 min-w-0 space-y-2">
+                          <Input
+                            value={slide.title}
+                            onChange={(e) => updateCarouselSlide(slide.id, 'title', e.target.value)}
+                            placeholder="Slide title (optional)"
+                          />
+                          <Input
+                            value={slide.description}
+                            onChange={(e) => updateCarouselSlide(slide.id, 'description', e.target.value)}
+                            placeholder="Short description (optional)"
+                          />
+                          <Input
+                            value={slide.linkUrl}
+                            onChange={(e) => updateCarouselSlide(slide.id, 'linkUrl', e.target.value)}
+                            placeholder="Link (optional) — e.g. /products?category=Frocks"
+                          />
+                        </div>
+
+                        <div className="flex flex-col items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => moveCarouselSlide(slide.id, -1)}
+                            disabled={idx === 0}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                            title="Move up"
+                          >
+                            <ArrowUp size={14} />
+                          </button>
+                          <button
+                            onClick={() => moveCarouselSlide(slide.id, 1)}
+                            disabled={idx === carouselSlides.length - 1}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-gray-700 disabled:opacity-30"
+                            title="Move down"
+                          >
+                            <ArrowDown size={14} />
+                          </button>
+                          <button
+                            onClick={() => removeCarouselSlide(slide.id)}
+                            className="p-1 rounded hover:bg-gray-100 text-gray-400 hover:text-red-500"
+                            title="Remove slide"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-between items-center mt-4 pt-3 border-t">
+                <Button type="button" variant="outline" onClick={addCarouselSlide}>
+                  <Plus size={16} className="mr-1" /> Add Slide
+                </Button>
+                <Button onClick={handleSaveCarousel} disabled={savingCarousel}>
+                  {savingCarousel ? <Spinner size="sm" className="mr-2" /> : null}
+                  Save Carousel
                 </Button>
               </div>
             </CardContent>

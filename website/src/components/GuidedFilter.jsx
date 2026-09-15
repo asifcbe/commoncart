@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, RotateCcw, Sparkles, Shirt, Layers, Ruler } from 'lucide-react';
+import { ArrowRight, Check, RotateCcw, Sparkles } from 'lucide-react';
 import api from '../utils/api';
 import Img from './ui/Img';
 
@@ -12,14 +12,14 @@ import Img from './ui/Img';
  */
 const STEPS = ['category', 'subCategory', 'size'];
 
-// Per-step identity — label, icon, prompt, and a colour token used for the
-// rail node, tiles, and the prompt gradient so each step feels distinct.
+// Per-step identity — label, prompt, and a colour token used for the rail
+// node, tiles, and the prompt gradient so each step feels distinct.
 const STEP_META = {
-  category:    { label: 'Style', Icon: Shirt,  prompt: () => 'What are we shopping for?',
+  category:    { label: 'Style', prompt: () => 'What are we shopping for?',
                  color: 'var(--color-primary)',   dark: 'var(--color-primary-dark)',   light: 'var(--color-primary-light)' },
-  subCategory: { label: 'Type',  Icon: Layers, prompt: (p) => `Which kind of ${p.category || 'outfit'}?`,
+  subCategory: { label: 'Type',  prompt: (p) => `Which kind of ${p.category || 'outfit'}?`,
                  color: 'var(--color-accent)',    dark: '#E0A500',                     light: '#FFF3D6' },
-  size:        { label: 'Size',  Icon: Ruler,  prompt: () => 'And the size?',
+  size:        { label: 'Size',  prompt: () => 'And the size?',
                  color: 'var(--color-secondary)', dark: 'var(--color-secondary-dark)', light: 'var(--color-secondary-light)' },
 };
 
@@ -122,58 +122,6 @@ export default function GuidedFilter() {
       <span className="pointer-events-none absolute -bottom-12 -left-12 h-44 w-44 rounded-full anim-blob opacity-15"
         style={{ background: meta.color, animationDelay: '1.5s' }} />
 
-      {/* ── Step rail ─────────────────────────────────── */}
-      <div className="relative flex items-center justify-center gap-3 sm:gap-6 mb-7">
-        {STEPS.map((k, i) => {
-          const m = STEP_META[k];
-          const done = i < step || (picked[k] && i !== step);
-          const active = i === step;
-          return (
-            <React.Fragment key={k}>
-              <button
-                onClick={() => i <= step && setStep(i)}
-                disabled={i > step}
-                className="group flex flex-col items-center gap-1.5 disabled:cursor-default"
-              >
-                <span
-                  className={`relative h-12 w-12 sm:h-14 sm:w-14 rounded-2xl flex items-center justify-center border-[3px]
-                              transition-all duration-200 ${active ? 'anim-bob' : ''} ${i <= step ? 'group-hover:-translate-y-0.5' : ''}`}
-                  style={{
-                    background: active ? m.color : done ? 'var(--color-success)' : '#fff',
-                    borderColor: active ? m.dark : done ? 'var(--color-success)' : 'var(--color-toffee)',
-                    color: active || done ? '#fff' : 'var(--color-ink-soft)',
-                    boxShadow: active ? `0 6px 0 0 ${m.dark}` : 'none',
-                  }}
-                >
-                  {done ? <Check size={22} strokeWidth={3} /> : <m.Icon size={22} />}
-                  <span className="absolute -top-2 -right-2 h-5 w-5 rounded-full text-[10px] font-extrabold flex items-center justify-center border-2 border-white"
-                    style={{ background: active ? m.dark : 'var(--color-toffee)', color: active ? '#fff' : 'var(--color-ink-soft)' }}>
-                    {i + 1}
-                  </span>
-                </span>
-                <span
-                  className="text-xs sm:text-sm font-extrabold text-center leading-tight"
-                  style={{ color: active ? m.dark : 'var(--color-ink-soft)' }}
-                >
-                  {m.label}
-                  {picked[k] && (
-                    <span className="block text-[11px] font-bold truncate max-w-[80px]" style={{ color: m.color }}>
-                      {picked[k]}
-                    </span>
-                  )}
-                </span>
-              </button>
-              {i < STEPS.length - 1 && (
-                <span
-                  className="h-1.5 w-8 sm:w-14 rounded-full self-start mt-6 transition-colors"
-                  style={{ background: i < step ? 'var(--color-success)' : 'var(--color-toffee)' }}
-                />
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
-
       {/* ── Prompt ────────────────────────────────────── */}
       <p key={currentKey} className="anim-pop text-center font-extrabold text-2xl sm:text-3xl mb-6 text-candy">
         {meta.prompt(picked)}
@@ -204,12 +152,6 @@ export default function GuidedFilter() {
                   boxShadow: on ? `0 4px 0 0 ${meta.dark}` : 'none',
                 }}
               >
-                <div
-                  className="px-2 pt-2.5 pb-2 text-center font-extrabold text-sm truncate"
-                  style={on ? { background: `linear-gradient(180deg, ${meta.color} 0%, ${meta.dark} 100%)`, color: '#fff' } : { color: 'var(--color-ink)' }}
-                >
-                  {o}
-                </div>
                 <div className="aspect-square w-full overflow-hidden" style={{ background: meta.light }}>
                   {img ? (
                     <Img
@@ -224,6 +166,12 @@ export default function GuidedFilter() {
                       {o}
                     </div>
                   )}
+                </div>
+                <div
+                  className="px-2 pt-2.5 pb-2 text-center font-extrabold text-sm truncate"
+                  style={on ? { background: `linear-gradient(180deg, ${meta.color} 0%, ${meta.dark} 100%)`, color: '#fff' } : { color: 'var(--color-ink)' }}
+                >
+                  {o}
                 </div>
                 {on && (
                   <span className="absolute top-1.5 right-1.5 h-6 w-6 rounded-full flex items-center justify-center border-2 border-white"

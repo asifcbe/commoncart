@@ -16,6 +16,7 @@ const {
   getInvoiceConfig, updateInvoiceConfig,
   getDocNumberingConfig, updateDocNumberingConfig,
   uploadCategoryImage,
+  getCarouselConfig, updateCarouselConfig, uploadCarouselImage,
 } = require('../controllers/settingsController');
 const { protect, adminOnly, manageOnly } = require('../middleware/auth');
 const upload = require('../utils/multerConfig');
@@ -79,7 +80,13 @@ router.put('/invoice-config', protect, adminOnly, updateInvoiceConfig);
 router.get('/doc-numbering-config', protect, getDocNumberingConfig);
 router.put('/doc-numbering-config', protect, adminOnly, updateDocNumberingConfig);
 
-// Public (storefront clearance page — no auth needed)
+// Homepage hero carousel — readable by any logged-in user (Settings admin UI), writable by admin
+router.get('/carousel-config', protect, getCarouselConfig);
+router.put('/carousel-config', protect, adminOnly, updateCarouselConfig);
+router.post('/carousel-image', protect, adminOnly, upload.single('image'), uploadCarouselImage);
+
+// Public (storefront clearance page / hero carousel — no auth needed)
 router.get('/clearance', getClearanceProducts);
+router.get('/carousel', getCarouselConfig);
 
 module.exports = router;
