@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, Suspense, lazy } from 'react';
-import { Plus, Search, Edit, Trash2, Eye, Image, Images, ChevronLeft, ChevronRight, Globe, GlobeLock, AlertTriangle, Camera, Barcode, Printer, X, Clock, History } from 'lucide-react';
+import { Plus, Search, Edit, Trash2, Eye, Image, Images, ChevronLeft, ChevronRight, Globe, GlobeLock, AlertTriangle, Camera, Barcode, Printer, X, Clock, History, LayoutGrid, List } from 'lucide-react';
 import useProductStore from '../store/useProductStore';
 import useAuthStore from '../store/useAuthStore';
 import { canViewCostPrice, canManage } from '../config/permissions';
@@ -27,10 +27,22 @@ import { formatDateTime } from '../utils/date';
 function ImagePreviewModal({ product, onClose }) {
   const baseImgs = product?.images || [];
   const hasDims = product?.widthInches > 0 && product?.heightInches > 0;
-  const imgs = [
-    ...baseImgs.map((src) => ({ src, ruler: false })),
-    ...(hasDims && baseImgs[0] ? [{ src: baseImgs[0], ruler: true }] : []),
-  ];
+  // Sets (e.g. shirt + trouser) show the ruler IN PLACE on the 2nd/3rd photos
+  // instead of appending a duplicate: photo 1 as uploaded, photo 2 gets the
+  // 1st item's ruler drawn on it, photo 3 gets the 2nd item's ruler. A photo
+  // with no matching dimensions just renders plain — no overlay, no duplicate.
+  const imgs = product?.isSet
+    ? baseImgs.map((src, i) => {
+        if (i === 1 && hasDims) return { src, ruler: true, w: product.widthInches, h: product.heightInches };
+        if (i === 2 && product?.set2WidthInches > 0 && product?.set2HeightInches > 0) {
+          return { src, ruler: true, w: product.set2WidthInches, h: product.set2HeightInches };
+        }
+        return { src, ruler: false };
+      })
+    : [
+        ...baseImgs.map((src) => ({ src, ruler: false })),
+        ...(hasDims && baseImgs[0] ? [{ src: baseImgs[0], ruler: true, w: product.widthInches, h: product.heightInches }] : []),
+      ];
   const [idx, setIdx] = useState(0);
 
   useEffect(() => { setIdx(0); }, [product?._id]);
@@ -63,7 +75,7 @@ function ImagePreviewModal({ product, onClose }) {
                 className="max-h-[70vh] max-w-full object-contain block"
               />
               {active.ruler && (
-                <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />
+                <RulerOverlay widthInches={active.w} heightInches={active.h} />
               )}
             </div>
             {imgs.length > 1 && (
@@ -79,10 +91,10 @@ function ImagePreviewModal({ product, onClose }) {
                   key={i}
                   onClick={() => setIdx(i)}
                   className={`relative h-16 w-16 rounded-md overflow-hidden border-2 flex-shrink-0 transition-colors ${i === idx ? 'border-blue-500' : 'border-transparent'}`}
-                  title={item.ruler ? `${product.widthInches} in × ${product.heightInches} in` : undefined}
+                  title={item.ruler ? `${item.w} in × ${item.h} in` : undefined}
                 >
                   <img src={item.src} alt="" className="h-full w-full object-cover" />
-                  {item.ruler && <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />}
+                  {item.ruler && <RulerOverlay widthInches={item.w} heightInches={item.h} />}
                 </button>
               ))}
             </div>
@@ -272,6 +284,11 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
     // drawn on top of it (client-side — no separate image is stored).
     widthInches: product?.widthInches != null ? String(product.widthInches) : '',
     heightInches: product?.heightInches != null ? String(product.heightInches) : '',
+    // A "Set" (e.g. shirt + trouser) gets a second ruler, overlaid on the
+    // second uploaded photo with its own width/height.
+    isSet: product?.isSet === true,
+    set2WidthInches: product?.set2WidthInches != null ? String(product.set2WidthInches) : '',
+    set2HeightInches: product?.set2HeightInches != null ? String(product.set2HeightInches) : '',
     // New products are hidden from the web store by default; editing keeps the saved value
     isWebVisible: product ? product.isWebVisible === true : false,
     // Opt-in to Price Aging. Off by default; editing keeps the saved value.
@@ -285,6 +302,15 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
   const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const { createProduct, updateProduct } = useProductStore();
+
+  // Local preview URLs for newly-picked (not yet uploaded) files — created
+  // once per `files` change and revoked on cleanup so they don't leak.
+  const [filePreviews, setFilePreviews] = useState([]);
+  useEffect(() => {
+    const urls = files.map((f) => URL.createObjectURL(f));
+    setFilePreviews(urls);
+    return () => urls.forEach((u) => URL.revokeObjectURL(u));
+  }, [files]);
 
   const removeKeptImage = (path) => setKeptImages((imgs) => imgs.filter((p) => p !== path));
 
@@ -392,8 +418,37 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
         <div>
           <label className="text-sm font-medium text-gray-700 block mb-1">Height (in) <span className="text-xs text-gray-400 font-normal">optional</span></label>
           <Input type="number" step="0.1" min="0" value={form.heightInches} onChange={set('heightInches')} placeholder="e.g. 22" />
-          <p className="text-[11px] text-gray-400 mt-1">When both are set, the gallery shows the first photo with a ruler overlay too.</p>
+          <p className="text-[11px] text-gray-400 mt-1">
+            {form.isSet
+              ? 'When set, the ruler is drawn on the 2nd uploaded photo (photo 1 stays plain).'
+              : 'When both are set, the gallery shows the first photo with a ruler overlay too.'}
+          </p>
         </div>
+        <div className="sm:col-span-2 flex items-center gap-2 pt-1">
+          <input
+            type="checkbox"
+            id="isSet"
+            checked={form.isSet}
+            onChange={(e) => setForm((f) => ({ ...f, isSet: e.target.checked }))}
+            className="h-4 w-4 rounded border-gray-300"
+          />
+          <label htmlFor="isSet" className="text-sm font-medium text-gray-700">
+            Is this a Set? <span className="text-xs text-gray-400 font-normal">(e.g. Shirt + Trouser — photo 1 plain, photo 2 gets this ruler, photo 3 gets the 2nd item's ruler below)</span>
+          </label>
+        </div>
+        {form.isSet && (
+          <>
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">2nd Item Width (in) <span className="text-xs text-gray-400 font-normal">optional</span></label>
+              <Input type="number" step="0.1" min="0" value={form.set2WidthInches} onChange={set('set2WidthInches')} placeholder="e.g. 12" />
+            </div>
+            <div>
+              <label className="text-sm font-medium text-gray-700 block mb-1">2nd Item Height (in) <span className="text-xs text-gray-400 font-normal">optional</span></label>
+              <Input type="number" step="0.1" min="0" value={form.set2HeightInches} onChange={set('set2HeightInches')} placeholder="e.g. 30" />
+              <p className="text-[11px] text-gray-400 mt-1">When set, the ruler is drawn on the 3rd uploaded photo. Upload photos in order: item 1, item 1 (for scale), item 2 (for scale).</p>
+            </div>
+          </>
+        )}
         <ManagedSelect
           label="Variant"
           options={variants}
@@ -463,7 +518,24 @@ function ProductForm({ product, categoryCatalog, variants, sizes, defaultHsnCode
             />
           )}
           {files.length > 0 && (
-            <p className="text-xs text-gray-400 mt-1">{files.length} new photo{files.length > 1 ? 's' : ''} will be added on save.</p>
+            <>
+              <p className="text-xs text-gray-400 mt-1">{files.length} new photo{files.length > 1 ? 's' : ''} will be added on save.</p>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {files.map((f, i) => (
+                  <div key={`${f.name}-${i}`} className="relative h-16 w-16 rounded-md overflow-hidden border group">
+                    {filePreviews[i] && <img src={filePreviews[i]} alt="" className="h-full w-full object-cover" />}
+                    <button
+                      type="button"
+                      onClick={() => setFiles((prev) => prev.filter((_, idx) => idx !== i))}
+                      title="Remove photo"
+                      className="absolute -top-1.5 -right-1.5 h-5 w-5 rounded-full bg-red-600 text-white flex items-center justify-center shadow hover:bg-red-700"
+                    >
+                      <X size={11} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
           {keptImages.length + files.length >= 5 && (
             <p className="text-xs text-gray-400 mt-1">Maximum of 5 photos. Remove one to add another.</p>
@@ -579,6 +651,100 @@ function StockHistory({ productId, onClose }) {
   );
 }
 
+// Grid-view card — a photo-first tile with left/right arrows to browse the
+// product's own uploaded images in place, instead of opening the preview
+// modal. Mirrors the same row actions the list view's Actions column has.
+function ProductGridCard({ product: p, allowManage, stockBadge, onViewDetails, onViewPhotos, onHistory, onEdit, onDelete, onPrintBarcode }) {
+  const [imgIdx, setImgIdx] = useState(0);
+  const imgs = p.images || [];
+  const hasMultiple = imgs.length > 1;
+
+  const prevImg = (e) => { e.stopPropagation(); setImgIdx((i) => (i - 1 + imgs.length) % imgs.length); };
+  const nextImg = (e) => { e.stopPropagation(); setImgIdx((i) => (i + 1) % imgs.length); };
+
+  return (
+    <div className="border rounded-lg overflow-hidden bg-white hover:shadow-md transition-shadow flex flex-col">
+      <div className="relative aspect-square bg-gray-50">
+        {imgs.length > 0 ? (
+          <img src={imgs[imgIdx]} alt={p.name} className="h-full w-full object-contain" />
+        ) : (
+          <div className="h-full w-full flex items-center justify-center">
+            <Image size={28} className="text-gray-300" />
+          </div>
+        )}
+        {hasMultiple && (
+          <>
+            <button
+              onClick={prevImg}
+              className="absolute left-1.5 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-gray-600"
+              title="Previous photo"
+            >
+              <ChevronLeft size={15} />
+            </button>
+            <button
+              onClick={nextImg}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 w-7 rounded-full bg-white/90 hover:bg-white shadow flex items-center justify-center text-gray-600"
+              title="Next photo"
+            >
+              <ChevronRight size={15} />
+            </button>
+            <span className="absolute bottom-1.5 right-1.5 text-[10px] leading-none bg-black/60 text-white px-1.5 py-0.5 rounded-full">
+              {imgIdx + 1} / {imgs.length}
+            </span>
+          </>
+        )}
+        <div className="absolute top-1.5 left-1.5">{stockBadge(p)}</div>
+      </div>
+
+      <div className="p-3 flex-1 flex flex-col gap-1">
+        <div className="font-medium text-gray-900 text-sm truncate" title={p.name}>{p.name}</div>
+        <div className="text-xs text-gray-400">{p.barcode}</div>
+        <div className="text-xs text-gray-500">
+          {p.category}{p.subCategory ? ` · ${p.subCategory}` : ''}
+        </div>
+        <div className="mt-1 font-medium">
+          {p.discountPrice != null && p.discountPrice > 0 && p.discountPrice < p.price ? (
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-red-600">₹{p.discountPrice.toFixed(2)}</span>
+              <span className="text-xs text-gray-400 line-through">₹{p.price.toFixed(2)}</span>
+            </div>
+          ) : (
+            <>₹{p.price.toFixed(2)}</>
+          )}
+        </div>
+        <div className="text-xs text-gray-400">{p.quantity - p.reservedQty} of {p.quantity} in stock</div>
+      </div>
+
+      <div className="flex gap-1 p-2 border-t justify-end">
+        {p.barcode && (
+          <button onClick={() => onPrintBarcode(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-teal-600" title="Print barcode label">
+            <Barcode size={14} />
+          </button>
+        )}
+        <button onClick={() => onViewDetails(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="View details">
+          <Eye size={14} />
+        </button>
+        <button onClick={() => onViewPhotos(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="View photos">
+          <Images size={14} />
+        </button>
+        <button onClick={() => onHistory(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="Stock history">
+          <History size={14} />
+        </button>
+        {allowManage && (
+          <>
+            <button onClick={() => onEdit(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-blue-600" title="Edit">
+              <Edit size={14} />
+            </button>
+            <button onClick={() => onDelete(p)} className="p-1.5 rounded hover:bg-gray-100 text-gray-500 hover:text-red-600" title="Delete">
+              <Trash2 size={14} />
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Products() {
   const { products, total, pages, loading, fetchProducts, fetchCategories, categories, categoryCatalog, fetchCategoryCatalog, variants, sizes, fetchVariantConfig, deleteProduct } = useProductStore();
   const toast = useToast();
@@ -590,6 +756,9 @@ export default function Products() {
   const [size, setSize] = useState('');
   // Narrow the list to products currently visible on the web store.
   const [webOnly, setWebOnly] = useState(false);
+  // 'list' = the existing table; 'grid' = photo-first cards with left/right
+  // arrows to browse each product's own uploaded images in place.
+  const [viewMode, setViewMode] = useState('list');
   // Price-aging filter: '', 'enabled', 'aged', 'not-aged', or '<min>-<max>' /
   // '<min>+' day windows built from the configured aging steps.
   const [agingBucket, setAgingBucket] = useState('');
@@ -716,6 +885,22 @@ export default function Products() {
           <p className="text-gray-500 text-sm mt-1">{total} products total</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex rounded-lg border overflow-hidden">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`p-2 ${viewMode === 'list' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+              title="List view"
+            >
+              <List size={16} />
+            </button>
+            <button
+              onClick={() => setViewMode('grid')}
+              className={`p-2 border-l ${viewMode === 'grid' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'}`}
+              title="Grid view"
+            >
+              <LayoutGrid size={16} />
+            </button>
+          </div>
           <Button
             variant={barcodePrintMode ? 'default' : 'outline'}
             onClick={() => { setBarcodePrintMode((v) => !v); setCheckedIds(new Set()); }}
@@ -819,13 +1004,30 @@ export default function Products() {
         </CardContent>
       </Card>
 
-      {/* Table */}
+      {/* Table / Grid */}
       <Card>
-        <div className="overflow-x-auto">
+        <div className={viewMode === 'grid' ? 'p-4' : 'overflow-x-auto'}>
           {loading ? (
             <div className="flex justify-center py-12"><Spinner size="lg" /></div>
           ) : products.length === 0 ? (
             <div className="text-center text-gray-400 py-16">No products found</div>
+          ) : viewMode === 'grid' ? (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+              {products.map((p) => (
+                <ProductGridCard
+                  key={p._id}
+                  product={p}
+                  allowManage={allowManage}
+                  stockBadge={stockBadge}
+                  onViewDetails={setDetailsProduct}
+                  onViewPhotos={setPhotoProduct}
+                  onHistory={setHistoryProduct}
+                  onEdit={(prod) => { setEditProduct(prod); setShowForm(true); }}
+                  onDelete={setDeleteTarget}
+                  onPrintBarcode={setBarcodeItem}
+                />
+              ))}
+            </div>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-gray-50 border-b">

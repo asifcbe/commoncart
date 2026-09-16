@@ -3,6 +3,7 @@ const StockMovement = require('../models/StockMovement');
 const generateSKU = require('../utils/generateSKU');
 const { generateEAN13 } = require('../utils/generateBarcode');
 const { deleteProductImageFiles } = require('../utils/productImages');
+const { expandCategoryFilter } = require('./settingsController');
 
 // Parses a form dimension field ('' / undefined / a number string) into
 // Number|null the way Product.widthInches/heightInches expect.
@@ -39,7 +40,13 @@ exports.listProducts = async (req, res) => {
     const query = {};
     if (isActive !== undefined) query.isActive = isActive === 'true';
     if (isWebVisible !== undefined) query.isWebVisible = isWebVisible === 'true';
-    if (category) query.category = category;
+    // A category may be configured to "also include" other categories
+    // (Settings → Categories, e.g. Unisex → Boys, Girls) — expand to $in so
+    // browsing/filtering by it surfaces those products too.
+    if (category) {
+      const expanded = await expandCategoryFilter(category);
+      query.category = expanded.length > 1 ? { $in: expanded } : category;
+    }
     if (subCategory) query.subCategory = subCategory;
     if (color) query.color = color;
     if (size) query.size = size;
@@ -84,7 +91,7 @@ exports.listProducts = async (req, res) => {
 
 exports.createProduct = async (req, res) => {
   try {
-    const { name, description, category, subCategory, color, size, price, discountPrice, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, agingEnabled, hsnCode, gstPercent, widthInches, heightInches } = req.body;
+    const { name, description, category, subCategory, color, size, price, discountPrice, costPrice, quantity, supplier, location, lowStockThreshold, isWebVisible, agingEnabled, hsnCode, gstPercent, widthInches, heightInches, isSet, set2WidthInches, set2HeightInches } = req.body;
     const providedBarcode = (req.body.barcode || '').trim();
     const providedSKU = (req.body.SKU || '').trim();
 
@@ -115,6 +122,9 @@ exports.createProduct = async (req, res) => {
     const images = req.files ? req.files.map((f) => `/uploads/products/${f.filename}`) : [];
     const widthIn = parseDimension(widthInches);
     const heightIn = parseDimension(heightInches);
+    const isSetOn = isSet === true || isSet === 'true';
+    const set2WidthIn = isSetOn ? parseDimension(set2WidthInches) : null;
+    const set2HeightIn = isSetOn ? parseDimension(set2HeightInches) : null;
 
     const product = await Product.create({
       name, description, category, subCategory: (subCategory || '').trim(),
@@ -138,6 +148,7 @@ exports.createProduct = async (req, res) => {
       hsnCode: (hsnCode || '').trim(),
       gstPercent: gstPercent === '' || gstPercent == null ? null : Math.max(0, Math.min(100, Number(gstPercent))),
       widthInches: widthIn, heightInches: heightIn,
+      isSet: isSetOn, set2WidthInches: set2WidthIn, set2HeightInches: set2HeightIn,
       SKU, barcode, images,
     });
 
@@ -201,6 +212,18 @@ exports.updateProduct = async (req, res) => {
 
     if ('widthInches' in updates) updates.widthInches = parseDimension(updates.widthInches);
     if ('heightInches' in updates) updates.heightInches = parseDimension(updates.heightInches);
+
+    // isSet comes from FormData as "true"/"false". The second ruler's
+    // dimensions only mean anything while isSet is on — clear them together
+    // when it's turned off so a stale pair can't resurface if it's re-enabled
+    // without the form resending them.
+    if ('isSet' in updates) {
+      const on = updates.isSet === true || updates.isSet === 'true';
+      updates.isSet = on;
+      if (!on) { updates.set2WidthInches = null; updates.set2HeightInches = null; }
+    }
+    if ('set2WidthInches' in updates) updates.set2WidthInches = parseDimension(updates.set2WidthInches);
+    if ('set2HeightInches' in updates) updates.set2HeightInches = parseDimension(updates.set2HeightInches);
 
     // ── Images ──────────────────────────────────────────────
     // The form may send `keepImages` — a JSON array of existing image paths

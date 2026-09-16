@@ -6,6 +6,7 @@ const Customer = require('../models/Customer');
 const AppSettings = require('../models/AppSettings');
 const Coupon = require('../models/Coupon');
 const { validateAndGetCoupon } = require('./couponController');
+const { expandCategoryFilter } = require('./settingsController');
 
 const DEFAULT_CREDIT = { rupeesPerPoint: 1000, pointValue: 1 };
 
@@ -345,7 +346,11 @@ exports.publicProducts = async (req, res) => {
   try {
     const { search, category, subCategory, color, size, page = 1, limit = 20, sort = '-createdAt', featured } = req.query;
     const query = { isActive: true, isWebVisible: true };
-    if (category) query.category = category;
+    // A category may be configured to "also include" other categories
+    // (Settings → Categories, e.g. Unisex → Boys, Girls) — expand to $in so
+    // browsing/filtering by it surfaces those products too.
+    const expandedCategory = category ? await expandCategoryFilter(category) : [];
+    if (category) query.category = expandedCategory.length > 1 ? { $in: expandedCategory } : category;
     if (subCategory) query.subCategory = subCategory;
     if (color) query.color = color;
     if (size) query.size = size;
@@ -355,7 +360,7 @@ exports.publicProducts = async (req, res) => {
     // Filter facets are scoped to the selected category (or all web-visible
     // products when no category is picked), excluding blanks.
     const facetScope = { isActive: true, isWebVisible: true };
-    if (category) facetScope.category = category;
+    if (category) facetScope.category = expandedCategory.length > 1 ? { $in: expandedCategory } : category;
 
     const skip = (Number(page) - 1) * Number(limit);
     const [products, total, categories, subCategoriesRaw, colorsRaw, sizesRaw, categoryConfig] = await Promise.all([
@@ -410,7 +415,7 @@ exports.publicProductDetail = async (req, res) => {
     // `supplier` / internal `location` are deliberately NOT selected — they
     // must never reach the storefront.
     const product = await Product.findOne({ _id: req.params.id, isActive: true, isWebVisible: true })
-      .select('name description category subCategory color size SKU barcode price discountPrice images quantity reservedQty lowStockThreshold widthInches heightInches');
+      .select('name description category subCategory color size SKU barcode price discountPrice images quantity reservedQty lowStockThreshold widthInches heightInches isSet set2WidthInches set2HeightInches');
     if (!product) return res.status(404).json({ message: 'Product not found' });
     const data = product.toObject();
     data.availableQty = Math.max(0, product.quantity - product.reservedQty);

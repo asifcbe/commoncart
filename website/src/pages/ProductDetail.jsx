@@ -125,10 +125,23 @@ export default function ProductDetail() {
           {(() => {
             const baseImages = product.images || [];
             const hasDims = product.widthInches > 0 && product.heightInches > 0;
-            const galleryItems = [
-              ...baseImages.map((src) => ({ src, ruler: false })),
-              ...(hasDims && baseImages[0] ? [{ src: baseImages[0], ruler: true }] : []),
-            ];
+            // Sets (e.g. shirt + trouser) show the ruler IN PLACE on the
+            // 2nd/3rd photos instead of appending a duplicate: photo 1 as
+            // uploaded, photo 2 gets the 1st item's ruler drawn on it, photo 3
+            // gets the 2nd item's ruler. A photo with no matching dimensions
+            // just renders plain — no overlay, no duplicate.
+            const galleryItems = product.isSet
+              ? baseImages.map((src, i) => {
+                  if (i === 1 && hasDims) return { src, ruler: true, w: product.widthInches, h: product.heightInches };
+                  if (i === 2 && product.set2WidthInches > 0 && product.set2HeightInches > 0) {
+                    return { src, ruler: true, w: product.set2WidthInches, h: product.set2HeightInches };
+                  }
+                  return { src, ruler: false };
+                })
+              : [
+                  ...baseImages.map((src) => ({ src, ruler: false })),
+                  ...(hasDims && baseImages[0] ? [{ src: baseImages[0], ruler: true, w: product.widthInches, h: product.heightInches }] : []),
+                ];
             const active = galleryItems[activeImg] || galleryItems[0];
 
             return (
@@ -139,10 +152,10 @@ export default function ProductDetail() {
                     alt={product.name}
                     iconSize={60}
                     className="h-full w-full"
-                    imgClassName="h-full w-full object-cover"
+                    imgClassName="h-full w-full object-contain"
                   />
                   {active?.ruler && (
-                    <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />
+                    <RulerOverlay widthInches={active.w} heightInches={active.h} />
                   )}
                 </div>
                 {galleryItems.length > 1 && (
@@ -152,10 +165,10 @@ export default function ProductDetail() {
                         key={i}
                         onClick={() => setActiveImg(i)}
                         className={`relative h-16 w-16 rounded-lg overflow-hidden flex-shrink-0 border-2 transition-colors ${activeImg === i ? 'border-[var(--color-primary)]' : 'border-transparent'}`}
-                        title={item.ruler ? `${product.widthInches} in × ${product.heightInches} in` : undefined}
+                        title={item.ruler ? `${item.w} in × ${item.h} in` : undefined}
                       >
                         <Img src={item.src} alt="" iconSize={18} className="h-full w-full" imgClassName="h-full w-full object-cover" />
-                        {item.ruler && <RulerOverlay widthInches={product.widthInches} heightInches={product.heightInches} />}
+                        {item.ruler && <RulerOverlay widthInches={item.w} heightInches={item.h} />}
                       </button>
                     ))}
                   </div>

@@ -434,10 +434,51 @@ function normalizeCategories(raw) {
       const img = cleanImg(rawSubImages[sub]);
       if (img) subImages[sub] = img;
     }
-    categories.push({ name, image: cleanImg(c?.image), subCategories, subImages });
+    // Raw includeCategories carried through as-typed for now — resolved
+    // against the final category name set (and self-references dropped)
+    // in the second pass below, once every category's real name is known.
+    categories.push({ name, image: cleanImg(c?.image), subCategories, subImages, includeCategories: Array.isArray(c?.includeCategories) ? c.includeCategories : [] });
   }
+
+  // Second pass: "Also include items from" — a category may pull in another
+  // category's products when browsed/filtered (e.g. Unisex → Boys, Girls).
+  // Only real, other category names survive; case preserved from the
+  // canonical entry so it matches Product.category exactly.
+  const nameByKey = new Map(categories.map((c) => [c.name.toLowerCase(), c.name]));
+  for (const c of categories) {
+    const incSeen = new Set([c.name.toLowerCase()]); // no self-reference
+    const resolved = [];
+    for (const inc of c.includeCategories) {
+      const s = (inc ?? '').toString().trim();
+      if (!s) continue;
+      const canonical = nameByKey.get(s.toLowerCase());
+      if (!canonical) continue; // not a real category — drop silently
+      const ik = canonical.toLowerCase();
+      if (incSeen.has(ik)) continue;
+      incSeen.add(ik);
+      resolved.push(canonical);
+    }
+    c.includeCategories = resolved;
+  }
+
   return { categories };
 }
+
+// Expands one filter category name into itself + whatever it's configured to
+// "also include" (Settings → Categories → Unisex → Boys, Girls, say), so a
+// Mongo `category` filter becomes `{ $in: [...] }`. Falls back to just the
+// given name when it isn't in the catalog or has no mapping — callers can use
+// the result directly as the `$in` list either way. Not a route handler;
+// used by productController/orderController wherever `category` is filtered.
+exports.expandCategoryFilter = async function expandCategoryFilter(categoryName) {
+  const name = (categoryName ?? '').toString().trim();
+  if (!name) return [];
+  const saved = await AppSettings.get(CATEGORY_KEY, DEFAULT_CATEGORIES);
+  const catalog = Array.isArray(saved?.categories) ? saved.categories : [];
+  const entry = catalog.find((c) => (c?.name ?? '').toString().trim().toLowerCase() === name.toLowerCase());
+  const includes = Array.isArray(entry?.includeCategories) ? entry.includeCategories : [];
+  return [name, ...includes.filter((c) => c && c.toLowerCase() !== name.toLowerCase())];
+};
 
 exports.getCategoryConfig = async (_req, res) => {
   try {

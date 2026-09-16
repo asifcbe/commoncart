@@ -628,11 +628,23 @@ export default function Settings() {
       toast({ message: 'Category already exists', type: 'warning' });
       return;
     }
-    setCategories((prev) => [...prev, { name, image: '', subCategories: [], subImages: {} }]);
+    setCategories((prev) => [...prev, { name, image: '', subCategories: [], subImages: {}, includeCategories: [] }]);
     setNewCat('');
   };
 
-  const removeCategory = (idx) => setCategories((prev) => prev.filter((_, i) => i !== idx));
+  const removeCategory = (idx) => setCategories((prev) => {
+    const removedName = prev[idx]?.name;
+    return prev
+      .filter((_, i) => i !== idx)
+      .map((c) => ({ ...c, includeCategories: (c.includeCategories || []).filter((n) => n !== removedName) }));
+  });
+
+  const toggleIncludeCategory = (idx, otherName) => setCategories((prev) => prev.map((c, i) => {
+    if (i !== idx) return c;
+    const cur = c.includeCategories || [];
+    const next = cur.includes(otherName) ? cur.filter((n) => n !== otherName) : [...cur, otherName];
+    return { ...c, includeCategories: next };
+  }));
 
   // Upload one image file and stash its URL. `sub` omitted → category image;
   // `sub` given → that sub-category's image (in the subImages map).
@@ -1298,6 +1310,30 @@ export default function Settings() {
                           <Plus size={14} />
                         </Button>
                       </div>
+
+                      {/* Also include items from — e.g. Unisex pulling in Boys, Girls */}
+                      {categories.length > 1 && (
+                        <div className="mt-3 pt-3 border-t border-dashed">
+                          <p className="text-xs text-gray-500 mb-1.5">
+                            Also show items from <span className="font-medium text-gray-600">these categories</span> when browsing "{cat.name}"
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {categories.filter((_, i) => i !== idx).map((other) => {
+                              const on = (cat.includeCategories || []).includes(other.name);
+                              return (
+                                <button
+                                  key={other.name}
+                                  type="button"
+                                  onClick={() => toggleIncludeCategory(idx, other.name)}
+                                  className={`text-xs rounded-lg px-2 py-1 border transition-colors ${on ? 'bg-blue-600 border-blue-600 text-white' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+                                >
+                                  {other.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

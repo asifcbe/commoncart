@@ -33,6 +33,16 @@ const productSchema = new mongoose.Schema(
     // view time — no extra image file is ever generated or stored for this.
     widthInches: { type: Number, default: null, min: 0 },
     heightInches: { type: Number, default: null, min: 0 },
+    // A "Set" is two garments sold as one product (e.g. shirt + trouser).
+    // When true, rulers are drawn IN PLACE rather than as extra gallery
+    // slides: images[0] stays plain, images[1] gets widthInches/heightInches'
+    // ruler drawn on it, images[2] gets set2WidthInches/set2HeightInches'
+    // ruler. A slot with no matching dimensions just renders plain. Non-set
+    // products are unaffected (they keep the old "extra ruler slide appended
+    // after images[0]" behaviour).
+    isSet: { type: Boolean, default: false },
+    set2WidthInches: { type: Number, default: null, min: 0 },
+    set2HeightInches: { type: Number, default: null, min: 0 },
     supplier: { type: String, default: '' },
     location: { type: String, default: '' },
     lowStockThreshold: { type: Number, default: 10 },
