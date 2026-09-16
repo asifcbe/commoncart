@@ -353,7 +353,7 @@ exports.processStoreSale = async (req, res) => {
  */
 exports.listSales = async (req, res) => {
   try {
-    const { channel, startDate, endDate, soldBy, search, page = 1, limit = 20 } = req.query;
+    const { channel, startDate, endDate, soldBy, search, customerId, page = 1, limit = 20 } = req.query;
     const skip = (Number(page) - 1) * Number(limit);
 
     const dateFilter = {};
@@ -386,6 +386,7 @@ exports.listSales = async (req, res) => {
     if (!channel || channel === 'STORE') {
       const storeQuery = { ...dateFilter };
       if (soldBy) storeQuery.soldBy = soldBy;
+      if (customerId) storeQuery.customerId = customerId;
       if (searchTerm) {
         storeQuery.$or = [
           { customerPhone: { $regex: searchTerm, $options: 'i' } },
@@ -421,7 +422,8 @@ exports.listSales = async (req, res) => {
     // WEB orders
     if (!channel || channel === 'WEB') {
       const webQuery = { ...dateFilter };
-      if (searchTerm) webQuery.customerId = { $in: matchingCustomerIds };
+      if (customerId) webQuery.customerId = customerId;
+      else if (searchTerm) webQuery.customerId = { $in: matchingCustomerIds };
       const webOrders = await Order.find(webQuery)
         .sort('-createdAt')
         .populate('customerId', 'name email phone')
@@ -773,10 +775,30 @@ exports.getDashboardStats = async (_req, res) => {
       })),
     ].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10);
 
-    const allProducts = await Product.find({ isActive: true }).lean();
-    const inStock  = allProducts.filter((p) => p.quantity - p.reservedQty > p.lowStockThreshold).length;
-    const lowStock = allProducts.filter((p) => p.quantity - p.reservedQty > 0 && p.quantity - p.reservedQty <= p.lowStockThreshold).length;
-    const outOfStock = allProducts.filter((p) => p.quantity - p.reservedQty <= 0).length;
+    // Stock-health bucket counts computed in MongoDB (a single aggregation)
+    // instead of fetching every active product into the app just to
+    // filter/count it three times — this was the main cause of the Dashboard
+    // being slow on a large catalog.
+    const [stockBuckets] = await Product.aggregate([
+      { $match: { isActive: true } },
+      {
+        $project: {
+          available: { $subtract: ['$quantity', '$reservedQty'] },
+          lowStockThreshold: { $ifNull: ['$lowStockThreshold', 0] },
+        },
+      },
+      {
+        $group: {
+          _id: null,
+          inStock: { $sum: { $cond: [{ $gt: ['$available', '$lowStockThreshold'] }, 1, 0] } },
+          lowStock: { $sum: { $cond: [{ $and: [{ $gt: ['$available', 0] }, { $lte: ['$available', '$lowStockThreshold'] }] }, 1, 0] } },
+          outOfStock: { $sum: { $cond: [{ $lte: ['$available', 0] }, 1, 0] } },
+        },
+      },
+    ]);
+    const inStock = stockBuckets?.inStock || 0;
+    const lowStock = stockBuckets?.lowStock || 0;
+    const outOfStock = stockBuckets?.outOfStock || 0;
 
     const storeCount   = todayStoreSales[0]?.count   || 0;
     // Net of today's cash/card/mobile/other refunds — see todayRefundTotal

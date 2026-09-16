@@ -357,10 +357,17 @@ exports.publicProducts = async (req, res) => {
     if (featured === 'true') query.quantity = { $gt: 0 };
     if (search) query.$text = { $search: search };
 
-    // Filter facets are scoped to the selected category (or all web-visible
-    // products when no category is picked), excluding blanks.
+    // Filter facets are scoped to whatever's already selected (category,
+    // sub-category, color) so the Size list only ever shows sizes that
+    // actually exist among the currently-filtered products — narrowing by
+    // category alone (the previous behaviour) could offer a size with zero
+    // matches once a sub-category/color was also picked, or omit the size
+    // that's actually selected via the URL, leaving no button to show it as
+    // selected. Mirrors how the guided filter narrows its own facet queries.
     const facetScope = { isActive: true, isWebVisible: true };
     if (category) facetScope.category = expandedCategory.length > 1 ? { $in: expandedCategory } : category;
+    if (subCategory) facetScope.subCategory = subCategory;
+    if (color) facetScope.color = color;
 
     const skip = (Number(page) - 1) * Number(limit);
     const [products, total, categories, subCategoriesRaw, colorsRaw, sizesRaw, categoryConfig] = await Promise.all([

@@ -112,7 +112,7 @@ function ItemActionRow({ item, remaining, state, onChange, disabled }) {
 }
 
 // ─── Sale detail modal ────────────────────────────────────────
-function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
+export function SaleDetailModal({ saleId, onClose, onDeleted, onSaved }) {
   const toast = useToast();
   const navigate = useNavigate();
   const allowManage = canManage(useAuthStore.getState().user);

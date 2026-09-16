@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Search, ChevronLeft, ChevronRight, Star, Plus, Minus, Users, Edit2, UserPlus, CheckCircle } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, Star, Plus, Minus, Users, Edit2, UserPlus, CheckCircle, Receipt } from 'lucide-react';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -10,7 +10,67 @@ import { Card, CardContent } from '../components/ui/Card';
 import { useToast } from '../components/ui/Toast';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
-import { formatDate } from '../utils/date';
+import { formatDate, formatDateTime } from '../utils/date';
+import { SaleDetailModal } from './SalesHistory';
+
+// Lists a customer's sales (store + web, most recent first). Clicking a row
+// opens the same full sale-detail view SalesHistory uses (return/exchange,
+// print, etc. all work identically from here).
+function CustomerSalesModal({ customer, onClose }) {
+  const toast = useToast();
+  const [sales, setSales] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [openSaleId, setOpenSaleId] = useState(null);
+
+  useEffect(() => {
+    api.get('/sales', { params: { customerId: customer._id, limit: 50 } })
+      .then(({ data }) => setSales(data.sales))
+      .catch(() => toast({ message: 'Failed to load sales', type: 'error' }))
+      .finally(() => setLoading(false));
+  }, [customer._id]);
+
+  const money = (n) => `₹${Number(n || 0).toFixed(2)}`;
+
+  return (
+    <>
+      <Modal open onClose={onClose} title={`Sales — ${customer.name}`} size="lg">
+        {loading ? (
+          <div className="flex justify-center py-10"><Spinner /></div>
+        ) : sales.length === 0 ? (
+          <div className="text-center text-gray-400 py-10">
+            <Receipt size={32} className="mx-auto mb-2 opacity-30" />
+            No sales found for this customer.
+          </div>
+        ) : (
+          <div className="divide-y max-h-[65vh] overflow-y-auto -mx-1">
+            {sales.map((s) => (
+              <button
+                key={s._id}
+                onClick={() => setOpenSaleId(s._id)}
+                className="w-full flex items-center justify-between gap-3 px-1 py-3 text-left hover:bg-gray-50 rounded"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-gray-900">{s.transactionId}</span>
+                    <Badge variant={s.channel === 'WEB' ? 'info' : 'secondary'}>{s.channel}</Badge>
+                    <Badge variant={s.status === 'COMPLETED' ? 'success' : s.status === 'REFUNDED' ? 'destructive' : 'warning'}>{s.status}</Badge>
+                  </div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    {formatDateTime(s.createdAt)} · {s.items?.length || 0} item{s.items?.length !== 1 ? 's' : ''}
+                  </div>
+                </div>
+                <div className="font-semibold text-gray-900 shrink-0">{money(s.totalAmount)}</div>
+              </button>
+            ))}
+          </div>
+        )}
+      </Modal>
+      {openSaleId && (
+        <SaleDetailModal saleId={openSaleId} onClose={() => setOpenSaleId(null)} />
+      )}
+    </>
+  );
+}
 
 function AdjustPointsModal({ customer, onClose, onDone }) {
   const toast = useToast();
@@ -158,6 +218,7 @@ export default function Customers() {
   const [adjustTarget, setAdjustTarget] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
+  const [salesTarget, setSalesTarget] = useState(null);
 
   const fetchCustomers = async () => {
     setLoading(true);
@@ -289,6 +350,14 @@ export default function Customers() {
                         >
                           <Star size={12} className="mr-1" /> Adjust Points
                         </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSalesTarget(c)}
+                          className="text-xs"
+                        >
+                          <Receipt size={12} className="mr-1" /> View Sales
+                        </Button>
                       </div>
                     </td>
                   </tr>
@@ -334,6 +403,10 @@ export default function Customers() {
           onClose={() => setEditTarget(null)}
           onDone={() => { setEditTarget(null); fetchCustomers(); }}
         />
+      )}
+
+      {salesTarget && (
+        <CustomerSalesModal customer={salesTarget} onClose={() => setSalesTarget(null)} />
       )}
     </div>
   );

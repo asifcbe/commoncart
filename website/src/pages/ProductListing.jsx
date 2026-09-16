@@ -53,6 +53,19 @@ export default function ProductListing() {
   const handleColor = (c) => updateParam('color', c);
   const handleSize = (s) => updateParam('size', s);
 
+  // If the selected size no longer exists among the current facet scope
+  // (e.g. it was only valid for a different category/sub-category before the
+  // user changed one), fall back to "All" rather than leaving an invisible
+  // selection — the Size filter should always resolve to something the
+  // buttons can actually show as active. sizes.length is checked so a still-
+  // loading facet list ([] before the first response) never wipes a size the
+  // user just picked.
+  useEffect(() => {
+    if (filters.size && sizes.length > 0 && !sizes.includes(filters.size)) {
+      updateParam('size', '');
+    }
+  }, [sizes, filters.size]);
+
   const handleSort = (sort) => {
     setFilter('sort', sort);
     setPage(1);

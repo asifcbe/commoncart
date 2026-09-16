@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, Plus, Minus, History, Search, Package, IndianRupee } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { AlertTriangle, Plus, Minus, History, Search, Package, IndianRupee, RefreshCw, Barcode } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 import { canViewCostPrice } from '../config/permissions';
 import { useToast } from '../components/ui/Toast';
@@ -11,28 +11,55 @@ import Badge from '../components/ui/Badge';
 import Spinner from '../components/ui/Spinner';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import api from '../utils/api';
-import useAutoRefresh from '../hooks/useAutoRefresh';
 import { formatDateTime } from '../utils/date';
 
-// Inventory needs every active product in memory at once (it does its own
-// client-side totals/grouping/out-of-stock filtering) — unlike Products.jsx,
-// which intentionally paginates. A single capped fetchProducts({ limit: N })
-// silently truncated the dataset once the catalog passed N products (this was
-// the "Inventory shows fewer/wrong products than Products" bug). This walks
-// every page the backend reports (via `pages`) using the largest page size
-// the API accepts in one call, so it always has the true full set regardless
-// of catalog size.
-const FETCH_PAGE_SIZE = 1000;
-async function fetchAllActiveProducts() {
-  const first = await api.get('/products', { params: { limit: FETCH_PAGE_SIZE, page: 1, isActive: true } });
-  let all = first.data.products;
-  const pages = first.data.pages || 1;
-  for (let page = 2; page <= pages; page++) {
-    // eslint-disable-next-line no-await-in-loop
-    const { data } = await api.get('/products', { params: { limit: FETCH_PAGE_SIZE, page, isActive: true } });
-    all = all.concat(data.products);
-  }
-  return all;
+// Popup listing every barcode in one breakdown slice (a category, a
+// sub-category, or a variant+size), fetched on demand from
+// GET /inventory/barcodes — the Overview aggregation itself never carries
+// barcodes, so this only costs a request when someone actually clicks in.
+function BreakdownBarcodesModal({ label, filters, onClose }) {
+  const toast = useToast();
+  const [products, setProducts] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    api.get('/inventory/barcodes', { params: filters })
+      .then(({ data }) => setProducts(data.products))
+      .catch(() => toast({ message: 'Failed to load barcodes', type: 'error' }))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <Modal open onClose={onClose} title={`Barcodes — ${label}`} size="sm">
+      {loading ? (
+        <div className="flex justify-center py-10"><Spinner /></div>
+      ) : !products || products.length === 0 ? (
+        <p className="text-sm text-gray-400 py-4 text-center">No products in this breakdown.</p>
+      ) : (
+        <div className="divide-y max-h-[60vh] overflow-y-auto -mx-1">
+          {products.map((p) => (
+            <div key={p._id} className="flex items-center justify-between gap-3 px-1 py-2">
+              <span className="text-sm text-gray-700 truncate" title={p.name}>{p.name}</span>
+              <span className="font-mono text-sm font-semibold text-gray-900 shrink-0">{p.barcode || p.SKU || '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+// Small inline link used on each Overview breakdown row.
+function ViewBarcodesLink({ onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 font-medium whitespace-nowrap"
+      title="View barcodes"
+    >
+      <Barcode size={12} /> View Barcodes
+    </button>
+  );
 }
 
 function RestockForm({ product, onDone, onClose }) {
@@ -141,13 +168,6 @@ export default function Inventory() {
   const toast = useToast();
   const { user } = useAuthStore();
   const showCost = canViewCostPrice(user);
-  // Inventory keeps its own local copy of the full active-product set rather
-  // than sharing Products.jsx's paginated useProductStore — Inventory needs
-  // ALL products at once (for its own client-side totals/grouping), while
-  // Products.jsx deliberately paginates; sharing one store's `products` array
-  // between the two would make each page stomp on the other's data.
-  const [products, setProducts] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [movements, setMovements] = useState([]);
   const [movLoading, setMovLoading] = useState(false);
   const [tab, setTab] = useState(showCost ? 'overview' : 'out-of-stock');
@@ -156,27 +176,70 @@ export default function Inventory() {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
 
-  // Overview filters
+  // Overview: server-aggregated totals + category/sub-category/variant
+  // breakdown (see GET /inventory/overview) — the browser never downloads
+  // the full product catalog just to sum/group it.
+  const [ovLoading, setOvLoading] = useState(true);
+  const [ovTotals, setOvTotals] = useState({ units: 0, cost: 0, skus: 0, outOfStock: 0 });
+  const [ovGroups, setOvGroups] = useState([]);
+  const [ovCategories, setOvCategories] = useState([]);
+  const [ovSubCategories, setOvSubCategories] = useState([]);
   const [ovCategory, setOvCategory] = useState('');
   const [ovSubCategory, setOvSubCategory] = useState('');
-  const [ovStockStatus, setOvStockStatus] = useState(''); // '', 'in', 'low', 'out'
+  const [ovStockStatus, setOvStockStatus] = useState(''); // '', 'in', 'out'
   const [ovSplitVariant, setOvSplitVariant] = useState(false); // show Variant/Size columns
+  // { label, filters } of the breakdown row whose "View Barcodes" was clicked
+  const [barcodesTarget, setBarcodesTarget] = useState(null);
 
-  // isActive: true matches Products.jsx's default — without it, deactivated
-  // Product docs (kept only for invoice history after a purchase is deleted
-  // post-sale) leaked into every Inventory total/breakdown/out-of-stock count,
-  // which is why Inventory and Products disagreed. fetchAllActiveProducts
-  // pages through the full catalog instead of a hardcoded limit — with 1600+
-  // products, a single capped fetch was silently truncating the dataset.
-  const loadProducts = () => {
-    setLoading(true);
-    fetchAllActiveProducts()
-      .then(setProducts)
-      .catch(() => toast({ message: 'Failed to load products', type: 'error' }))
-      .finally(() => setLoading(false));
+  // Out of Stock / All Products: paginated product lists (see GET /products)
+  // instead of the old "fetch every active product, filter in the browser"
+  // approach — that was the main cause of Inventory's slow, ever-refreshing load.
+  const [oosProducts, setOosProducts] = useState([]);
+  const [oosLoading, setOosLoading] = useState(true);
+  const [oosTotal, setOosTotal] = useState(0);
+  const [oosPage, setOosPage] = useState(1);
+  const [allProducts, setAllProducts] = useState([]);
+  const [allLoading, setAllLoading] = useState(true);
+  const [allTotal, setAllTotal] = useState(0);
+  const [allPage, setAllPage] = useState(1);
+  const PAGE_SIZE = 20;
+
+  const loadOverview = () => {
+    setOvLoading(true);
+    api.get('/inventory/overview', { params: { category: ovCategory || undefined, subCategory: ovSubCategory || undefined, stockStatus: ovStockStatus || undefined } })
+      .then(({ data }) => { setOvTotals(data.totals); setOvGroups(data.groups); })
+      .catch(() => toast({ message: 'Failed to load inventory overview', type: 'error' }))
+      .finally(() => setOvLoading(false));
   };
+  useEffect(() => { if (showCost) loadOverview(); }, [showCost, ovCategory, ovSubCategory, ovStockStatus]);
 
-  useEffect(() => { loadProducts(); }, []);
+  useEffect(() => {
+    api.get('/inventory/overview-filters', { params: { category: ovCategory || undefined } })
+      .then(({ data }) => { setOvCategories(data.categories); setOvSubCategories(data.subCategories); })
+      .catch(() => {});
+  }, [ovCategory]);
+
+  const loadOutOfStock = () => {
+    setOosLoading(true);
+    api.get('/products', { params: { isActive: true, stockStatus: 'out', page: oosPage, limit: PAGE_SIZE } })
+      .then(({ data }) => { setOosProducts(data.products); setOosTotal(data.total); })
+      .catch(() => toast({ message: 'Failed to load out-of-stock products', type: 'error' }))
+      .finally(() => setOosLoading(false));
+  };
+  // Loaded on mount too (not just when the tab is active) so the "Out of
+  // Stock (N)" tab label has a real count immediately, not "(0)" until clicked.
+  useEffect(() => { loadOutOfStock(); }, []);
+  useEffect(() => { if (tab === 'out-of-stock') loadOutOfStock(); }, [tab, oosPage]);
+
+  const loadAllProducts = () => {
+    setAllLoading(true);
+    api.get('/products', { params: { isActive: true, search: search || undefined, page: allPage, limit: PAGE_SIZE } })
+      .then(({ data }) => { setAllProducts(data.products); setAllTotal(data.total); })
+      .catch(() => toast({ message: 'Failed to load products', type: 'error' }))
+      .finally(() => setAllLoading(false));
+  };
+  useEffect(() => { if (tab === 'all') loadAllProducts(); }, [tab, allPage, search]);
+  useEffect(() => { setAllPage(1); }, [search]);
 
   const loadMovements = () => {
     api.get('/inventory/movements', { params: { limit: 100, type: typeFilter || undefined } })
@@ -188,88 +251,21 @@ export default function Inventory() {
     if (tab === 'movements') { setMovLoading(true); loadMovements(); setMovLoading(false); }
   }, [tab, typeFilter]);
 
-  // Auto-refresh inventory data (skip while a restock/adjust modal is open)
-  const invBusy = !!(restockProduct || adjustProduct);
-  useAutoRefresh(() => {
-    if (invBusy) return;
-    loadProducts();
-    if (tab === 'movements') loadMovements();
-  }, 30000, [tab, typeFilter, invBusy]);
-
-  // No "low stock" — every unit is its own qty:1 product, so a product is
-  // simply in stock or sold out; this tab surfaces the ones that need restocking.
-  const outOfStockProducts = products.filter((p) => (p.quantity - p.reservedQty) <= 0);
-
-  const allProducts = products.filter((p) =>
-    !search || p.name.toLowerCase().includes(search.toLowerCase()) || p.SKU?.includes(search)
-  );
-
-  // ─── Overview: cost valuation of pending (on-hand) stock ───
-  // No "low" status — every unit is its own qty:1 product, so it's simply
-  // in stock or sold out, never "running low".
-  const stockStatusOf = (p) => {
-    const avail = p.quantity - p.reservedQty;
-    return avail <= 0 ? 'out' : 'in';
-  };
-
-  // Category list (only active products) and the sub-categories of the picked category
-  const ovCategories = useMemo(
-    () => [...new Set(products.map((p) => p.category).filter(Boolean))].sort(),
-    [products]
-  );
-  const ovSubCategories = useMemo(() => {
-    const pool = ovCategory ? products.filter((p) => p.category === ovCategory) : products;
-    return [...new Set(pool.map((p) => p.subCategory).filter(Boolean))].sort();
-  }, [products, ovCategory]);
-
-  const ovFiltered = useMemo(() => products.filter((p) => {
-    if (ovCategory && p.category !== ovCategory) return false;
-    if (ovSubCategory && (p.subCategory || '') !== ovSubCategory) return false;
-    if (ovStockStatus && stockStatusOf(p) !== ovStockStatus) return false;
-    return true;
-  }), [products, ovCategory, ovSubCategory, ovStockStatus]);
-
-  // Totals over the filtered set. Stock value is valued at cost (qty × costPrice).
-  const ovTotals = useMemo(() => ovFiltered.reduce((acc, p) => {
-    const cost = (p.costPrice || 0) * p.quantity;
-    acc.units += p.quantity;
-    acc.cost += cost;
-    acc.skus += 1;
-    if (stockStatusOf(p) === 'out') acc.outOfStock += 1;
-    return acc;
-  }, { units: 0, cost: 0, skus: 0, outOfStock: 0 }), [ovFiltered]);
-
-  // Group by category → sub-category for the breakdown table. When the
-  // variant/size split is on, each sub-category further breaks down by
-  // variant + size combinations.
-  const ovGroups = useMemo(() => {
-    const map = new Map();
-    for (const p of ovFiltered) {
-      const cat = p.category || 'Uncategorized';
-      const sub = p.subCategory || '—';
-      const cost = (p.costPrice || 0) * p.quantity;
-      if (!map.has(cat)) map.set(cat, { category: cat, units: 0, cost: 0, skus: 0, subs: new Map() });
-      const g = map.get(cat);
-      g.units += p.quantity; g.cost += cost; g.skus += 1;
-      if (!g.subs.has(sub)) g.subs.set(sub, { sub, units: 0, cost: 0, skus: 0, vs: new Map() });
-      const s = g.subs.get(sub);
-      s.units += p.quantity; s.cost += cost; s.skus += 1;
-      if (ovSplitVariant) {
-        const vsKey = `${p.color || '—'}|${p.size || '—'}`;
-        if (!s.vs.has(vsKey)) s.vs.set(vsKey, { variant: p.color || '—', size: p.size || '—', units: 0, cost: 0, skus: 0 });
-        const v = s.vs.get(vsKey);
-        v.units += p.quantity; v.cost += cost; v.skus += 1;
-      }
+  // Manual refresh — reloads whichever tab is currently active. No more
+  // auto-refresh: it was re-fetching the full catalog every 30s, which is
+  // both the "page keeps refreshing" complaint and a chunk of the slowness.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    try {
+      if (tab === 'overview') loadOverview();
+      else if (tab === 'out-of-stock') loadOutOfStock();
+      else if (tab === 'all') loadAllProducts();
+      else if (tab === 'movements') loadMovements();
+    } finally {
+      setTimeout(() => setRefreshing(false), 300);
     }
-    return [...map.values()]
-      .map((g) => ({
-        ...g,
-        subs: [...g.subs.values()]
-          .map((s) => ({ ...s, vs: [...s.vs.values()].sort((a, b) => b.cost - a.cost) }))
-          .sort((a, b) => b.cost - a.cost),
-      }))
-      .sort((a, b) => b.cost - a.cost);
-  }, [ovFiltered, ovSplitVariant]);
+  };
 
   const inr = (n) => `₹${Number(n || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -288,16 +284,21 @@ export default function Inventory() {
 
   const tabs = [
     ...(showCost ? [{ id: 'overview', label: 'Overview' }] : []),
-    { id: 'out-of-stock', label: `Out of Stock (${outOfStockProducts.length})` },
+    { id: 'out-of-stock', label: `Out of Stock (${oosTotal})` },
     { id: 'all', label: 'All Products' },
     { id: 'movements', label: 'Stock Movements' },
   ];
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Inventory Control</h1>
-        <p className="text-gray-500 text-sm mt-1">Manage stock levels, restocking, and adjustments</p>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Inventory Control</h1>
+          <p className="text-gray-500 text-sm mt-1">Manage stock levels, restocking, and adjustments</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={handleRefresh} disabled={refreshing}>
+          <RefreshCw size={14} className={`mr-1.5 ${refreshing ? 'animate-spin' : ''}`} /> Refresh
+        </Button>
       </div>
 
       {/* Tabs */}
@@ -401,16 +402,16 @@ export default function Inventory() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
-                    {['Category', 'Sub-category', ...(ovSplitVariant ? ['Variant / Size'] : []), 'SKUs', 'Units in Stock', 'Stock Value (cost)'].map((h) => (
+                    {['Category', 'Sub-category', ...(ovSplitVariant ? ['Variant / Size'] : []), 'SKUs', 'Units in Stock', 'Stock Value (cost)', ''].map((h) => (
                       <th key={h} className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody className="divide-y">
-                  {loading ? (
-                    <tr><td colSpan={ovSplitVariant ? 6 : 5} className="py-8 text-center"><Spinner /></td></tr>
+                  {ovLoading ? (
+                    <tr><td colSpan={ovSplitVariant ? 7 : 6} className="py-8 text-center"><Spinner /></td></tr>
                   ) : ovGroups.length === 0 ? (
-                    <tr><td colSpan={ovSplitVariant ? 6 : 5} className="py-8 text-center text-gray-400">No products match these filters</td></tr>
+                    <tr><td colSpan={ovSplitVariant ? 7 : 6} className="py-8 text-center text-gray-400">No products match these filters</td></tr>
                   ) : ovGroups.map((g) => (
                     <React.Fragment key={g.category}>
                       <tr className="bg-gray-50/60 font-semibold">
@@ -420,6 +421,12 @@ export default function Inventory() {
                         <td className="px-4 py-2.5">{g.skus}</td>
                         <td className="px-4 py-2.5">{g.units.toLocaleString('en-IN')}</td>
                         <td className="px-4 py-2.5 text-blue-700">{inr(g.cost)}</td>
+                        <td className="px-4 py-2.5">
+                          <ViewBarcodesLink onClick={() => setBarcodesTarget({
+                            label: g.category,
+                            filters: { category: g.category, stockStatus: ovStockStatus || undefined },
+                          })} />
+                        </td>
                       </tr>
                       {g.subs.map((s) => (
                         <React.Fragment key={g.category + '|' + s.sub}>
@@ -430,6 +437,12 @@ export default function Inventory() {
                             <td className="px-4 py-2 text-gray-600">{s.skus}</td>
                             <td className="px-4 py-2 text-gray-600">{s.units.toLocaleString('en-IN')}</td>
                             <td className="px-4 py-2 text-gray-700">{inr(s.cost)}</td>
+                            <td className="px-4 py-2">
+                              <ViewBarcodesLink onClick={() => setBarcodesTarget({
+                                label: `${g.category} · ${s.sub}`,
+                                filters: { category: g.category, subCategory: s.sub, stockStatus: ovStockStatus || undefined },
+                              })} />
+                            </td>
                           </tr>
                           {ovSplitVariant && s.vs.map((v) => (
                             <tr key={g.category + '|' + s.sub + '|' + v.variant + '|' + v.size} className="hover:bg-gray-50">
@@ -441,6 +454,12 @@ export default function Inventory() {
                               <td className="px-4 py-1.5 text-gray-500 text-xs">{v.skus}</td>
                               <td className="px-4 py-1.5 text-gray-500 text-xs">{v.units.toLocaleString('en-IN')}</td>
                               <td className="px-4 py-1.5 text-gray-600 text-xs">{inr(v.cost)}</td>
+                              <td className="px-4 py-1.5">
+                                <ViewBarcodesLink onClick={() => setBarcodesTarget({
+                                  label: `${g.category} · ${s.sub} · ${[v.variant !== '—' ? v.variant : null, v.size !== '—' ? v.size : null].filter(Boolean).join(' / ') || 'Unspecified'}`,
+                                  filters: { category: g.category, subCategory: s.sub, color: v.variant, size: v.size, stockStatus: ovStockStatus || undefined },
+                                })} />
+                              </td>
                             </tr>
                           ))}
                         </React.Fragment>
@@ -455,6 +474,7 @@ export default function Inventory() {
                       <td className="px-4 py-3">{ovTotals.skus}</td>
                       <td className="px-4 py-3">{ovTotals.units.toLocaleString('en-IN')}</td>
                       <td className="px-4 py-3 text-blue-700">{inr(ovTotals.cost)}</td>
+                      <td className="px-4 py-3"></td>
                     </tr>
                   </tfoot>
                 )}
@@ -467,33 +487,46 @@ export default function Inventory() {
 
       {tab === 'out-of-stock' && (
         <div className="space-y-4">
-          {outOfStockProducts.length === 0 ? (
+          {oosLoading ? (
+            <div className="flex justify-center py-12"><Spinner /></div>
+          ) : oosProducts.length === 0 ? (
             <Card><CardContent className="text-center py-12 text-gray-400">Everything is in stock</CardContent></Card>
           ) : (
-            outOfStockProducts.map((p) => (
-              <Card key={p._id} className="border-red-200">
-                <CardContent className="pt-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between flex-wrap gap-4">
-                    <div className="flex items-center gap-3">
-                      <AlertTriangle size={18} className="text-red-500" />
-                      <div>
-                        <div className="font-medium">{p.name}</div>
-                        <div className="text-xs text-gray-500">SKU: {p.SKU}</div>
+            <>
+              {oosProducts.map((p) => (
+                <Card key={p._id} className="border-red-200">
+                  <CardContent className="pt-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between flex-wrap gap-4">
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle size={18} className="text-red-500" />
+                        <div>
+                          <div className="font-medium">{p.name}</div>
+                          <div className="text-xs text-gray-500">SKU: {p.SKU}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4 flex-wrap">
+                        <Badge variant="destructive">Out of Stock</Badge>
+                        <Button size="sm" variant="success" onClick={() => setRestockProduct(p)}>
+                          <Plus size={14} className="mr-1" /> Restock
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setAdjustProduct(p)}>
+                          Adjust
+                        </Button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4 flex-wrap">
-                      <Badge variant="destructive">Out of Stock</Badge>
-                      <Button size="sm" variant="success" onClick={() => setRestockProduct(p)}>
-                        <Plus size={14} className="mr-1" /> Restock
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => setAdjustProduct(p)}>
-                        Adjust
-                      </Button>
-                    </div>
+                  </CardContent>
+                </Card>
+              ))}
+              {oosTotal > PAGE_SIZE && (
+                <div className="flex items-center justify-between px-1 py-2">
+                  <span className="text-sm text-gray-500">Page {oosPage} of {Math.ceil(oosTotal / PAGE_SIZE)}</span>
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" disabled={oosPage === 1} onClick={() => setOosPage((p) => p - 1)}>Prev</Button>
+                    <Button size="sm" variant="outline" disabled={oosPage >= Math.ceil(oosTotal / PAGE_SIZE)} onClick={() => setOosPage((p) => p + 1)}>Next</Button>
                   </div>
-                </CardContent>
-              </Card>
-            ))
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -516,8 +549,10 @@ export default function Inventory() {
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {loading ? (
+                {allLoading ? (
                   <tr><td colSpan={6} className="py-8 text-center"><Spinner /></td></tr>
+                ) : allProducts.length === 0 ? (
+                  <tr><td colSpan={6} className="py-8 text-center text-gray-400">No products found</td></tr>
                 ) : allProducts.map((p) => {
                   const avail = p.quantity - p.reservedQty;
                   return (
@@ -547,6 +582,15 @@ export default function Inventory() {
               </tbody>
             </table>
           </div>
+          {allTotal > PAGE_SIZE && (
+            <div className="flex items-center justify-between px-4 py-3 border-t">
+              <span className="text-sm text-gray-500">Page {allPage} of {Math.ceil(allTotal / PAGE_SIZE)}</span>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" disabled={allPage === 1} onClick={() => setAllPage((p) => p - 1)}>Prev</Button>
+                <Button size="sm" variant="outline" disabled={allPage >= Math.ceil(allTotal / PAGE_SIZE)} onClick={() => setAllPage((p) => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
         </Card>
       )}
 
@@ -609,6 +653,14 @@ export default function Inventory() {
       <Modal open={!!adjustProduct} onClose={() => setAdjustProduct(null)} title="Manual Adjustment">
         {adjustProduct && <AdjustForm product={adjustProduct} onDone={handleDone} onClose={() => setAdjustProduct(null)} />}
       </Modal>
+
+      {barcodesTarget && (
+        <BreakdownBarcodesModal
+          label={barcodesTarget.label}
+          filters={barcodesTarget.filters}
+          onClose={() => setBarcodesTarget(null)}
+        />
+      )}
     </div>
   );
 }

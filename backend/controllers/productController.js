@@ -35,11 +35,14 @@ function agingWindowFilter(minDays, maxDays) {
 
 exports.listProducts = async (req, res) => {
   try {
-    const { search, category, subCategory, color, size, page = 1, limit = 20, sort = '-createdAt', isActive, isWebVisible, agingBucket } = req.query;
+    const { search, category, subCategory, color, size, page = 1, limit = 20, sort = '-createdAt', isActive, isWebVisible, agingBucket, stockStatus } = req.query;
 
     const query = {};
     if (isActive !== undefined) query.isActive = isActive === 'true';
     if (isWebVisible !== undefined) query.isWebVisible = isWebVisible === 'true';
+    // "out" = nothing available to sell (quantity - reservedQty <= 0); "in" = the opposite.
+    if (stockStatus === 'out') query.$expr = { $lte: [{ $subtract: ['$quantity', '$reservedQty'] }, 0] };
+    else if (stockStatus === 'in') query.$expr = { $gt: [{ $subtract: ['$quantity', '$reservedQty'] }, 0] };
     // A category may be configured to "also include" other categories
     // (Settings → Categories, e.g. Unisex → Boys, Girls) — expand to $in so
     // browsing/filtering by it surfaces those products too.

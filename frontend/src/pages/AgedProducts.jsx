@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Clock, Zap, Package, TrendingDown, Tag, ChevronDown, ChevronRight, Image as ImageIcon, ChevronLeft } from 'lucide-react';
+import { Clock, Zap, Package, TrendingDown, Tag, ChevronDown, ChevronRight, Image as ImageIcon, ChevronLeft, Barcode } from 'lucide-react';
 import { useToast } from '../components/ui/Toast';
 import Button from '../components/ui/Button';
 import Spinner from '../components/ui/Spinner';
@@ -7,6 +7,28 @@ import Modal from '../components/ui/Modal';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/Card';
 import api from '../utils/api';
 import useAutoRefresh from '../hooks/useAutoRefresh';
+
+// Small popup listing every product's barcode in a step, so an admin can
+// glance at (or copy) barcodes for a whole age bracket without scrolling the
+// full breakdown table. Opened from the step header's "View Barcodes" button.
+function BarcodeListModal({ step, items, onClose }) {
+  return (
+    <Modal open onClose={onClose} title={`Barcodes — ${step?.label || ''}`} size="sm">
+      {!items || items.length === 0 ? (
+        <p className="text-sm text-gray-400 py-4 text-center">No products in this step.</p>
+      ) : (
+        <div className="divide-y max-h-[60vh] overflow-y-auto -mx-1">
+          {items.map((p) => (
+            <div key={p._id} className="flex items-center justify-between gap-3 px-1 py-2">
+              <span className="text-sm text-gray-700 truncate" title={p.name}>{p.name}</span>
+              <span className="font-mono text-sm font-semibold text-gray-900 shrink-0">{p.barcode || p.SKU || '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
 
 // Small lightbox for a product's photos, opened from a row thumbnail so the
 // user can eyeball which item a row is.
@@ -62,7 +84,7 @@ function AgeBadge({ days }) {
   );
 }
 
-function StepGroup({ step, items, onPreview }) {
+function StepGroup({ step, items, onPreview, onViewBarcodes }) {
   const [open, setOpen] = useState(true);
 
   const totalValue = items.reduce((s, p) => s + p.price * Math.max(0, p.availableQty), 0);
@@ -84,6 +106,15 @@ function StepGroup({ step, items, onPreview }) {
           <div className="flex items-center gap-4 text-sm text-gray-500 shrink-0">
             <span><strong className="text-gray-800">{items.length}</strong> product{items.length !== 1 ? 's' : ''}</span>
             <span>Stock value: <strong className="text-gray-800">₹{totalValue.toFixed(0)}</strong></span>
+            {items.length > 0 && (
+              <button
+                onClick={() => onViewBarcodes(step, items)}
+                className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-700 font-medium"
+                title="View barcodes for this step"
+              >
+                <Barcode size={14} /> View Barcodes
+              </button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -181,6 +212,7 @@ export default function AgedProducts() {
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
   const [previewProduct, setPreviewProduct] = useState(null);
+  const [barcodeStep, setBarcodeStep] = useState(null);
 
   const load = (silent = false) => {
     if (!silent) setLoading(true);
@@ -265,12 +297,16 @@ export default function AgedProducts() {
       {/* Grouped steps */}
       <div className="space-y-4">
         {groups.map((g, i) => (
-          <StepGroup key={i} step={g.step} items={g.items} onPreview={setPreviewProduct} />
+          <StepGroup key={i} step={g.step} items={g.items} onPreview={setPreviewProduct}
+            onViewBarcodes={(step, items) => setBarcodeStep({ step, items })} />
         ))}
       </div>
 
       {previewProduct && (
         <PhotoLightbox product={previewProduct} onClose={() => setPreviewProduct(null)} />
+      )}
+      {barcodeStep && (
+        <BarcodeListModal step={barcodeStep.step} items={barcodeStep.items} onClose={() => setBarcodeStep(null)} />
       )}
     </div>
   );

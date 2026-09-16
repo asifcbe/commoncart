@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Plus, Trash2, Edit2, UserCog, AlertTriangle, ShieldAlert, Eye, EyeOff, Star, Clock, Zap,
   Building2, FolderTree, PackageX, X, Printer, Palette, User, Hash, Receipt,
-  ChevronRight, Menu, Wallet, DownloadCloud, ImagePlus, GalleryHorizontal, ArrowUp, ArrowDown,
+  ChevronRight, Menu, Wallet, DownloadCloud, ImagePlus, GalleryHorizontal, ArrowUp, ArrowDown, Images,
 } from 'lucide-react';
 import useAuthStore from '../store/useAuthStore';
 import { useToast } from '../components/ui/Toast';
@@ -337,6 +337,7 @@ export default function Settings() {
   const [savingCredit, setSavingCredit] = useState(false);
   const [backupSummary, setBackupSummary] = useState(null);
   const [downloadingBackup, setDownloadingBackup] = useState(false);
+  const [downloadingBackupImages, setDownloadingBackupImages] = useState(false);
   const [restoreFile, setRestoreFile] = useState(null);
   const [restoreConfirm, setRestoreConfirm] = useState('');
   const [restoring, setRestoring] = useState(false);
@@ -471,23 +472,33 @@ export default function Settings() {
     }
   }, [tab, backupSummary]);
 
-  const handleDownloadBackup = async () => {
-    setDownloadingBackup(true);
+  // Shared by both buttons — `withImages` picks the endpoint/filename; the
+  // busy-flag setter is passed in so each button gets its own spinner.
+  const downloadBackup = async (withImages, setBusy) => {
+    setBusy(true);
     try {
-      const { data } = await api.get('/backup/download', { responseType: 'blob' });
+      const { data } = await api.get('/backup/download', {
+        responseType: 'blob',
+        params: withImages ? { images: '1' } : undefined,
+        // Images bundled in means a much larger download for a shop with many
+        // product photos — the app-wide 15s default would abort it early.
+        timeout: withImages ? 10 * 60 * 1000 : 15000,
+      });
       const stamp = new Date().toISOString().replace(/[:.]/g, '-');
       const url = URL.createObjectURL(data);
       const a = document.createElement('a');
-      a.href = url; a.download = `commoncart-backup-${stamp}.ndjson.gz`;
+      a.href = url; a.download = `commoncart-backup${withImages ? '-with-images' : ''}-${stamp}.ndjson.gz`;
       document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
       toast({ message: 'Backup downloaded', type: 'success' });
     } catch (err) {
       toast({ message: err.response?.data?.message || 'Failed to create backup', type: 'error' });
     } finally {
-      setDownloadingBackup(false);
+      setBusy(false);
     }
   };
+  const handleDownloadBackup = () => downloadBackup(false, setDownloadingBackup);
+  const handleDownloadBackupWithImages = () => downloadBackup(true, setDownloadingBackupImages);
 
   const handleRestoreBackup = async () => {
     if (!restoreFile || restoreConfirm.trim() !== 'RESTORE') return;
@@ -2268,7 +2279,9 @@ export default function Settings() {
               <p className="text-sm text-gray-500">
                 Downloads a complete, read-only snapshot of every collection in the database (products, sales,
                 purchases, customers, settings, and more) as a single compressed file. Nothing is changed on the
-                server — this only reads data.
+                server — this only reads data. This does <span className="font-medium">not</span> include the
+                uploaded product/category/carousel photo files themselves — use "Download Backup with Images"
+                below for that.
               </p>
               {backupSummary && (
                 <div className="text-xs text-gray-500 border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
@@ -2283,12 +2296,20 @@ export default function Settings() {
                   </div>
                 </div>
               )}
-              <Button onClick={handleDownloadBackup} disabled={downloadingBackup}>
-                {downloadingBackup ? <Spinner size="sm" className="mr-2" /> : <DownloadCloud size={16} className="mr-2" />}
-                {downloadingBackup ? 'Preparing backup…' : 'Download Backup'}
-              </Button>
+              <div className="flex flex-wrap gap-2">
+                <Button onClick={handleDownloadBackup} disabled={downloadingBackup || downloadingBackupImages}>
+                  {downloadingBackup ? <Spinner size="sm" className="mr-2" /> : <DownloadCloud size={16} className="mr-2" />}
+                  {downloadingBackup ? 'Preparing backup…' : 'Download Backup'}
+                </Button>
+                <Button variant="outline" onClick={handleDownloadBackupWithImages} disabled={downloadingBackup || downloadingBackupImages}>
+                  {downloadingBackupImages ? <Spinner size="sm" className="mr-2" /> : <Images size={16} className="mr-2" />}
+                  {downloadingBackupImages ? 'Preparing backup…' : 'Download Backup with Images'}
+                </Button>
+              </div>
               <p className="text-[0.65rem] text-gray-400">
                 Keep downloaded backups somewhere safe — the file contains all customer, sales, and account data.
+                The "with Images" version also bundles every uploaded photo and is significantly larger —
+                it may take a while to prepare and download on a shop with many product photos.
               </p>
             </CardContent>
           </Card>

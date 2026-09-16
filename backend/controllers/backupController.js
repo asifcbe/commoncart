@@ -1,10 +1,39 @@
 const mongoose = require('mongoose');
 const zlib = require('zlib');
+const fs = require('fs');
+const path = require('path');
 const { EJSON, ObjectId } = require('bson');
 
 // Collections never touched by backup/restore — they're server-managed and
 // restoring stale copies would do more harm than good.
 const SKIP_COLLECTIONS = new Set(['sessions']);
+
+const UPLOADS_ROOT = path.join(__dirname, '..', 'uploads');
+const IMAGE_EXTENSIONS = new Set(['.webp', '.jpg', '.jpeg', '.png', '.gif']);
+
+// Walks backend/uploads/ and yields every image file's web path
+// ("/uploads/...") alongside its absolute path on disk. Recursive so it picks
+// up every sub-folder (products/categories/carousel/...) without hardcoding
+// names — a new upload sub-folder added later needs no change here. Filtered
+// to known image extensions so stray non-photo files (.DS_Store, .gitkeep)
+// never end up embedded in the backup.
+function* walkUploadFiles(dir, webPrefix = '/uploads') {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return; // uploads/ missing entirely — nothing to walk
+  }
+  for (const entry of entries) {
+    const abs = path.join(dir, entry.name);
+    const web = `${webPrefix}/${entry.name}`;
+    if (entry.isDirectory()) {
+      yield* walkUploadFiles(abs, web);
+    } else if (entry.isFile() && IMAGE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+      yield { abs, web };
+    }
+  }
+}
 
 // Full-database backup, admin only. Deliberately implemented with the plain
 // Mongoose/MongoDB driver instead of shelling out to `mongodump` — this app's
@@ -14,21 +43,32 @@ const SKIP_COLLECTIONS = new Set(['sessions']);
 // written, locked, or mutated.
 //
 // Format: a single gzip-compressed stream of NDJSON. Line 1 is a plain-JSON
-// manifest ({ createdAt, format, collections: [names] }). Then, per
-// collection: a `{"__collection__":"<name>"}` marker line, followed by one
-// line per document. Documents are serialised with **canonical Extended JSON**
-// (EJSON, relaxed:false) so ObjectIds, Dates and every other BSON type
-// round-trip losslessly on restore — a plain JSON.stringify would flatten
-// _id to a bare string and break every cross-collection reference.
+// manifest ({ createdAt, format, collections: [names], includesImages }).
+// Then, per collection: a `{"__collection__":"<name>"}` marker line, followed
+// by one line per document. Documents are serialised with **canonical
+// Extended JSON** (EJSON, relaxed:false) so ObjectIds, Dates and every other
+// BSON type round-trip losslessly on restore — a plain JSON.stringify would
+// flatten _id to a bare string and break every cross-collection reference.
+//
+// `?images=1` additionally appends every file under backend/uploads/ after
+// the documents: a `{"__images__":true}` marker line, then one line per file
+// as `{"path":"/uploads/...","data":"<base64>"}` — `path` matches exactly
+// what's stored in Product.images etc, so a future restore could write these
+// straight back to disk. Adds real weight to the download (base64 is ~33%
+// larger than the raw bytes, on top of files already being ≤250KB WebP each
+// per imageCompress.js) — opt-in, not the default.
 exports.createBackup = async (req, res) => {
   try {
+    const includeImages = req.query.images === '1' || req.query.images === 'true';
+
     const db = mongoose.connection.db;
     const collections = await db.listCollections().toArray();
     const names = collections.map((c) => c.name).filter((n) => !SKIP_COLLECTIONS.has(n)).sort();
 
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const suffix = includeImages ? '-with-images' : '';
     res.setHeader('Content-Type', 'application/gzip');
-    res.setHeader('Content-Disposition', `attachment; filename="commoncart-backup-${stamp}.ndjson.gz"`);
+    res.setHeader('Content-Disposition', `attachment; filename="commoncart-backup${suffix}-${stamp}.ndjson.gz"`);
 
     const gzip = zlib.createGzip();
     gzip.pipe(res);
@@ -36,7 +76,7 @@ exports.createBackup = async (req, res) => {
     gzip.on('error', () => { try { res.end(); } catch { /* response already ended */ } });
     req.on('close', () => { gzip.destroy(); }); // client disconnected mid-stream — stop reading collections
 
-    const manifest = { createdAt: new Date().toISOString(), format: 'ejson-ndjson-1', collections: names };
+    const manifest = { createdAt: new Date().toISOString(), format: 'ejson-ndjson-1', collections: names, includesImages: includeImages };
     gzip.write(JSON.stringify(manifest) + '\n');
 
     for (const name of names) {
@@ -45,6 +85,19 @@ exports.createBackup = async (req, res) => {
       // eslint-disable-next-line no-await-in-loop
       for await (const doc of cursor) {
         if (!gzip.write(EJSON.stringify(doc, { relaxed: false }) + '\n')) {
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise((resolve) => gzip.once('drain', resolve));
+        }
+      }
+    }
+
+    if (includeImages) {
+      gzip.write(JSON.stringify({ __images__: true }) + '\n');
+      for (const { abs, web } of walkUploadFiles(UPLOADS_ROOT)) {
+        // eslint-disable-next-line no-await-in-loop
+        const bytes = await fs.promises.readFile(abs);
+        const line = JSON.stringify({ path: web, data: bytes.toString('base64') }) + '\n';
+        if (!gzip.write(line)) {
           // eslint-disable-next-line no-await-in-loop
           await new Promise((resolve) => gzip.once('drain', resolve));
         }
@@ -117,12 +170,30 @@ exports.restoreBackup = async (req, res) => {
     }
 
     // Walk the NDJSON body, grouping docs under their preceding marker line.
+    // Once the `__images__` marker is hit, remaining lines are image entries
+    // ({ path, data }) instead of documents — collected separately and
+    // written to disk after the DB restore succeeds below.
     const grouped = new Map(); // collName -> docs[]
+    const images = []; // { path, data(base64) }
     let current = null;
+    let inImages = false;
     for (let i = 1; i < lines.length; i++) {
       const line = lines[i];
+      if (inImages) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry && typeof entry.path === 'string' && typeof entry.data === 'string') images.push(entry);
+        } catch (e) {
+          return res.status(400).json({ message: `Corrupt image entry: ${e.message}` });
+        }
+        continue;
+      }
       let marker;
       try { marker = JSON.parse(line); } catch { marker = null; }
+      if (marker && marker.__images__ === true) {
+        inImages = true;
+        continue;
+      }
       if (marker && typeof marker.__collection__ === 'string') {
         current = marker.__collection__;
         if (!grouped.has(current)) grouped.set(current, []);
@@ -159,10 +230,29 @@ exports.restoreBackup = async (req, res) => {
       report.push({ collection: name, restored: inserted, inBackup: docs.length });
     }
 
+    // Write any bundled images back to disk. `path` is untrusted (came from
+    // an uploaded file) — resolve it under UPLOADS_ROOT and reject anything
+    // that escapes it (e.g. "../../etc/passwd") before writing.
+    let imagesWritten = 0;
+    for (const { path: webPath, data } of images) {
+      if (typeof webPath !== 'string' || !webPath.startsWith('/uploads/')) continue;
+      const rel = webPath.slice('/uploads/'.length);
+      const abs = path.join(UPLOADS_ROOT, rel);
+      if (!abs.startsWith(UPLOADS_ROOT + path.sep)) continue; // path traversal guard
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await fs.promises.mkdir(path.dirname(abs), { recursive: true });
+        // eslint-disable-next-line no-await-in-loop
+        await fs.promises.writeFile(abs, Buffer.from(data, 'base64'));
+        imagesWritten++;
+      } catch { /* one bad image entry shouldn't abort the rest */ }
+    }
+
     res.json({
       message: 'Restore complete.',
       restoredFrom: manifest.createdAt || null,
       collections: report,
+      images: images.length ? { inBackup: images.length, written: imagesWritten } : null,
     });
   } catch (err) {
     res.status(500).json({ message: err.message });
