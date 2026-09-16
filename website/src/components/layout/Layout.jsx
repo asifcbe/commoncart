@@ -6,10 +6,14 @@ import ScrollToTop from '../ScrollToTop';
 import { connectSocket, disconnectSocket, getSocket } from '../../utils/socket';
 import useShopStore from '../../store/useShopStore';
 import useCartStore from '../../store/useCartStore';
+import useBusinessStore from '../../store/useBusinessStore';
 
 export default function Layout() {
   const patchStock = useShopStore((s) => s.patchStock);
   const updateAvailable = useCartStore((s) => s.updateAvailable);
+  const fetchBusiness = useBusinessStore((s) => s.fetchBusiness);
+
+  useEffect(() => { fetchBusiness(); }, [fetchBusiness]);
 
   useEffect(() => {
     const socket = connectSocket();

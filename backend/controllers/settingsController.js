@@ -24,6 +24,18 @@ const DEFAULT_BUSINESS = {
   defaultHsnCode: '',        // pre-filled into new Product/Purchase HSN fields; no fallback at sale time
   stateName: '',
   footerNote: 'Thank you for shopping!',
+  // Storefront-facing fields — surfaced on the website (header/footer) via
+  // the public business-public endpoint below. Previously hardcoded in
+  // website/src/config/shop.config.js; that file now only holds true
+  // white-label constants (theme colors, feature flags) that aren't
+  // per-shop data an admin would change day to day.
+  tagline: '',               // short line under the shop name (e.g. hero, header)
+  description: '',           // footer "about" blurb
+  whatsapp: '',              // digits only, for a wa.me link
+  businessHours: '',         // free text, e.g. "Mon–Sat: 10am – 8pm"
+  mapUrl: '',                // Google Maps link for the address
+  logoUrl: '',                // uploaded logo path; blank = fall back to the built-in wordmark
+  facebook: '', instagram: '', twitter: '', youtube: '', tiktok: '',
 };
 
 // Managed category catalog. Shape: { categories: [{ name, subCategories: [string] }] }
@@ -370,6 +382,44 @@ exports.getBusinessConfig = async (_req, res) => {
   }
 };
 
+// POST /settings/business-logo (multipart, field name "image") — same
+// compress-to-WebP pipeline as category/carousel images.
+exports.uploadBusinessLogo = async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: 'No image uploaded' });
+    const { compressToFile } = require('../utils/imageCompress');
+    const { filename } = await compressToFile(req.file.buffer, 'business');
+    res.json({ url: `/uploads/business/${filename}` });
+  } catch (err) {
+    res.status(500).json({ message: `Image processing failed: ${err.message}` });
+  }
+};
+
+// GET /settings/business-public — no auth. Storefront-safe subset only:
+// identity/contact/social fields the website's Header/Footer need. Deliberately
+// excludes GST/tax internals (gstin, gstPercent, defaultHsnCode, stateName)
+// and the invoice footerNote, none of which belong on a public page.
+exports.getBusinessPublicConfig = async (_req, res) => {
+  try {
+    const saved = await AppSettings.get(BUSINESS_KEY, {});
+    const full = { ...DEFAULT_BUSINESS, ...saved };
+    const {
+      businessName, addressLine, phone, email,
+      tagline, description, whatsapp, businessHours, mapUrl, logoUrl,
+      facebook, instagram, twitter, youtube, tiktok,
+    } = full;
+    res.json({
+      config: {
+        businessName, addressLine, phone, email,
+        tagline, description, whatsapp, businessHours, mapUrl, logoUrl,
+        facebook, instagram, twitter, youtube, tiktok,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
 exports.updateBusinessConfig = async (req, res) => {
   try {
     const b = req.body || {};
@@ -385,6 +435,17 @@ exports.updateBusinessConfig = async (req, res) => {
       defaultHsnCode: (b.defaultHsnCode ?? '').toString().trim(),
       stateName: (b.stateName ?? '').toString().trim(),
       footerNote: (b.footerNote ?? '').toString().trim(),
+      tagline: (b.tagline ?? '').toString().trim(),
+      description: (b.description ?? '').toString().trim(),
+      whatsapp: (b.whatsapp ?? '').toString().replace(/\D/g, ''), // digits only, for wa.me
+      businessHours: (b.businessHours ?? '').toString().trim(),
+      mapUrl: (b.mapUrl ?? '').toString().trim(),
+      logoUrl: cleanImg(b.logoUrl),
+      facebook: (b.facebook ?? '').toString().trim(),
+      instagram: (b.instagram ?? '').toString().trim(),
+      twitter: (b.twitter ?? '').toString().trim(),
+      youtube: (b.youtube ?? '').toString().trim(),
+      tiktok: (b.tiktok ?? '').toString().trim(),
     };
     await AppSettings.set(BUSINESS_KEY, config);
     res.json({ config });
@@ -651,50 +712,55 @@ exports.updatePaymentModesConfig = async (req, res) => {
 
 // Merge (category, subCategory) pairs typed ad hoc elsewhere (e.g. the
 // Purchase form) into the managed catalog, so they show up as real options
-// everywhere next time instead of only living on that one record.
-// `pairs`: [{ category, subCategory }]. Blank category entries are ignored.
-exports.ensureCategoryEntries = async function ensureCategoryEntries(pairs) {
-  const clean = (pairs || []).filter((p) => p?.category?.trim());
-  if (!clean.length) return;
+// Category, sub-category, color and size may ONLY be created in Settings
+// (Settings → Categories / Settings → Sizes) — a Purchase can no longer add
+// new ones ad hoc. This validates a Purchase's items/overrides against the
+// managed catalogs and THROWS a descriptive error naming exactly which value
+// is missing if anything isn't already defined; callers should let that
+// error propagate as a 400 and save nothing. Replaces the old
+// ensureCategoryEntries/ensureVariantSizeEntries, which used to silently
+// auto-add whatever was typed.
+// `pairs`: [{ category, subCategory }]. Blank category entries are ignored
+// (an item with no category at all isn't this validator's concern).
+exports.validateCatalogEntries = async function validateCatalogEntries(pairs, { colors, sizes } = {}) {
+  const [catSaved, varSaved] = await Promise.all([
+    AppSettings.get(CATEGORY_KEY, DEFAULT_CATEGORIES),
+    AppSettings.get(VARIANT_KEY, DEFAULT_VARIANTS),
+  ]);
+  const categories = Array.isArray(catSaved?.categories) ? catSaved.categories : [];
+  const catByKey = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
+  const knownVariants = new Set((varSaved?.variants || []).map((v) => v.toLowerCase()));
+  const knownSizes = new Set((varSaved?.sizes || []).map((s) => s.toLowerCase()));
 
-  const saved = await AppSettings.get(CATEGORY_KEY, DEFAULT_CATEGORIES);
-  const categories = Array.isArray(saved?.categories) ? saved.categories.map((c) => ({ ...c, subCategories: [...(c.subCategories || [])] })) : [];
-  const byKey = new Map(categories.map((c) => [c.name.toLowerCase(), c]));
-  let changed = false;
+  // Tagged so callers can tell this apart from an unexpected server error and
+  // return 400 (bad request) instead of 500.
+  const invalid = (message) => { const e = new Error(message); e.isCatalogValidation = true; return e; };
 
-  for (const { category, subCategory } of clean) {
-    const name = category.trim();
-    const key = name.toLowerCase();
-    let entry = byKey.get(key);
+  for (const { category, subCategory } of pairs || []) {
+    const name = (category || '').trim();
+    if (!name) continue;
+    const entry = catByKey.get(name.toLowerCase());
     if (!entry) {
-      entry = { name, subCategories: [] };
-      categories.push(entry);
-      byKey.set(key, entry);
-      changed = true;
+      throw invalid(`Category "${name}" doesn't exist. Add it in Settings → Categories first.`);
     }
     const sub = (subCategory || '').trim();
     if (sub && !entry.subCategories.some((s) => s.toLowerCase() === sub.toLowerCase())) {
-      entry.subCategories.push(sub);
-      changed = true;
+      throw invalid(`Sub-category "${sub}" doesn't exist under "${name}". Add it in Settings → Categories first.`);
     }
   }
 
-  if (changed) await AppSettings.set(CATEGORY_KEY, normalizeCategories(categories));
-};
-
-// Merge colors/sizes typed ad hoc elsewhere into the managed master lists.
-exports.ensureVariantSizeEntries = async function ensureVariantSizeEntries({ colors, sizes } = {}) {
-  const newColors = (colors || []).map((c) => (c || '').trim()).filter(Boolean);
-  const newSizes = (sizes || []).map((s) => (s || '').trim()).filter(Boolean);
-  if (!newColors.length && !newSizes.length) return;
-
-  const saved = await AppSettings.get(VARIANT_KEY, DEFAULT_VARIANTS);
-  const config = {
-    variants: normalizeStringList([...(saved?.variants || []), ...newColors]),
-    sizes: normalizeStringList([...(saved?.sizes || []), ...newSizes]),
-    variantSelectorEnabled: !!saved?.variantSelectorEnabled,
-  };
-  await AppSettings.set(VARIANT_KEY, config);
+  for (const c of colors || []) {
+    const v = (c || '').trim();
+    if (v && !knownVariants.has(v.toLowerCase())) {
+      throw invalid(`Variant "${v}" doesn't exist. Add it in Settings → Sizes first.`);
+    }
+  }
+  for (const s of sizes || []) {
+    const v = (s || '').trim();
+    if (v && !knownSizes.has(v.toLowerCase())) {
+      throw invalid(`Size "${v}" doesn't exist. Add it in Settings → Sizes first.`);
+    }
+  }
 };
 
 // ─── Auto-delete out-of-stock products ───────────────────────

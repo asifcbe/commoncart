@@ -6,7 +6,7 @@ const SaleTransaction = require('../models/SaleTransaction');
 const Order = require('../models/Order');
 const { generateEAN13 } = require('../utils/generateBarcode');
 const { withUniqueDocNumber } = require('../utils/invoiceNumber');
-const { ensureCategoryEntries, ensureVariantSizeEntries } = require('./settingsController');
+const { validateCatalogEntries } = require('./settingsController');
 
 // Resolve items: each unit (qty=1 each) gets its own unique barcode and product entry.
 // Items sent from the frontend are already collapsed by variant (name+color+size, qty>1).
@@ -101,6 +101,15 @@ exports.createPurchase = async (req, res) => {
     if (!items || !items.length)
       return res.status(400).json({ message: 'At least one item is required' });
 
+    // Category/sub-category/color/size may only be created in Settings — this
+    // throws (caught below, → 400) naming exactly what's missing, BEFORE any
+    // product is created, if this purchase references something not already
+    // in the managed catalog.
+    await validateCatalogEntries(
+      items.map((it) => ({ category: it.category, subCategory: it.subCategory })),
+      { colors: items.map((it) => it.color), sizes: items.map((it) => it.size) }
+    );
+
     // Resolve supplier
     let resolvedSupplierName = supplierName || '';
     let resolvedSupplierId = null;
@@ -111,13 +120,6 @@ exports.createPurchase = async (req, res) => {
     }
 
     const { resolvedItems, totalCost, createdProducts } = await resolveItems(items, resolvedSupplierName, purchaseDate);
-
-    // New category/sub-category/color/size typed ad hoc on this purchase join
-    // the managed catalog so they appear as real options everywhere next time.
-    await Promise.all([
-      ensureCategoryEntries(items.map((it) => ({ category: it.category, subCategory: it.subCategory }))),
-      ensureVariantSizeEntries({ colors: items.map((it) => it.color), sizes: items.map((it) => it.size) }),
-    ]);
 
     // withUniqueDocNumber retries with a fresh purchaseId if the PUR counter
     // has drifted behind an existing document (self-heals instead of failing
@@ -166,7 +168,7 @@ exports.createPurchase = async (req, res) => {
 
     res.status(201).json({ purchase });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.isCatalogValidation ? 400 : 500).json({ message: err.message });
   }
 };
 
@@ -176,6 +178,17 @@ exports.updatePurchase = async (req, res) => {
 
     const purchase = await Purchase.findById(req.params.id);
     if (!purchase) return res.status(404).json({ message: 'Purchase not found' });
+
+    // Category/sub-category/color/size may only be created in Settings —
+    // validated up front, before any field on this purchase is touched, so a
+    // rejected edit never leaves the purchase half-updated.
+    if (itemOverrides && typeof itemOverrides === 'object') {
+      const overrides = Object.values(itemOverrides);
+      await validateCatalogEntries(
+        overrides.map((ov) => ({ category: ov.category, subCategory: ov.subCategory })),
+        { colors: overrides.map((ov) => ov.color), sizes: overrides.map((ov) => ov.size) }
+      );
+    }
 
     let resolvedSupplierName = supplierName !== undefined ? supplierName : purchase.supplier;
     let resolvedSupplierId = purchase.supplierId;
@@ -206,13 +219,9 @@ exports.updatePurchase = async (req, res) => {
     }
 
     // Apply full item overrides to purchase items + underlying products
+    // (already validated against the managed catalogs above)
     if (itemOverrides && typeof itemOverrides === 'object') {
       const overrides = Object.values(itemOverrides);
-      await Promise.all([
-        ensureCategoryEntries(overrides.map((ov) => ({ category: ov.category, subCategory: ov.subCategory }))),
-        ensureVariantSizeEntries({ colors: overrides.map((ov) => ov.color), sizes: overrides.map((ov) => ov.size) }),
-      ]);
-
       for (const [idxStr, ov] of Object.entries(itemOverrides)) {
         const idx = Number(idxStr);
         const purchaseItem = purchase.items[idx];
@@ -320,7 +329,7 @@ exports.updatePurchase = async (req, res) => {
     await purchase.save();
     res.json({ purchase });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.isCatalogValidation ? 400 : 500).json({ message: err.message });
   }
 };
 

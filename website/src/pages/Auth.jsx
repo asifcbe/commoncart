@@ -4,6 +4,7 @@ import { Eye, EyeOff } from 'lucide-react';
 import useCustomerStore from '../store/useCustomerStore';
 import { useToast } from '../components/ui/Toast';
 import shopConfig from '../config/shop.config';
+import { useBusiness } from '../store/useBusinessStore';
 import Spinner from '../components/ui/Spinner';
 import { applyMeta } from '../utils/theme';
 
@@ -17,6 +18,7 @@ export default function Auth() {
   const toast = useToast();
   const [searchParams] = useSearchParams();
   const redirect = searchParams.get('redirect') || '/';
+  const business = useBusiness();
 
   useEffect(() => {
     applyMeta(isLogin ? 'Sign In' : 'Create Account');
@@ -49,8 +51,8 @@ export default function Auth() {
         <div className="card p-8">
           {/* Brand */}
           <div className="text-center mb-8">
-            {shopConfig.brand.logoUrl ? (
-              <img src={shopConfig.brand.logoUrl} alt={shopConfig.brand.logoAltText} className="h-10 mx-auto mb-3" />
+            {business.logoUrl ? (
+              <img src={business.logoUrl} alt={shopConfig.brand.logoAltText} className="h-10 mx-auto mb-3" />
             ) : (
               <div
                 className="h-12 w-12 rounded-xl text-white font-bold text-lg flex items-center justify-center mx-auto mb-3"

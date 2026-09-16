@@ -3,7 +3,7 @@ const StockMovement = require('../models/StockMovement');
 const generateSKU = require('../utils/generateSKU');
 const { generateEAN13 } = require('../utils/generateBarcode');
 const { deleteProductImageFiles } = require('../utils/productImages');
-const { expandCategoryFilter } = require('./settingsController');
+const { expandCategoryFilter, validateCatalogEntries } = require('./settingsController');
 
 // Parses a form dimension field ('' / undefined / a number string) into
 // Number|null the way Product.widthInches/heightInches expect.
@@ -101,6 +101,9 @@ exports.createProduct = async (req, res) => {
     if (!name || !category || price === undefined)
       return res.status(400).json({ message: 'name, category and price are required' });
 
+    // Category/sub-category/color/size may only be created in Settings.
+    await validateCatalogEntries([{ category, subCategory }], { colors: [color], sizes: [size] });
+
     // Use the provided barcode if given (e.g. an existing product's barcode);
     // otherwise auto-generate one. Reject duplicates up front for a clear message.
     let barcode;
@@ -157,7 +160,7 @@ exports.createProduct = async (req, res) => {
 
     res.status(201).json({ product });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.isCatalogValidation ? 400 : 500).json({ message: err.message });
   }
 };
 
@@ -177,6 +180,17 @@ exports.updateProduct = async (req, res) => {
     delete updates.SKU;
     delete updates.barcode;
     delete updates._id;
+
+    // Category/sub-category/color/size may only be created in Settings —
+    // validate whenever any of these are part of this update.
+    if ('category' in updates || 'subCategory' in updates || 'color' in updates || 'size' in updates) {
+      const current = await Product.findById(req.params.id).select('category subCategory color size');
+      if (!current) return res.status(404).json({ message: 'Product not found' });
+      await validateCatalogEntries(
+        [{ category: updates.category ?? current.category, subCategory: updates.subCategory ?? current.subCategory }],
+        { colors: [updates.color ?? current.color], sizes: [updates.size ?? current.size] }
+      );
+    }
     // Unlike hsnCode (a String field where '' is valid), gstPercent is a
     // Number field — an empty-string value from the form must become null
     // ("use shop default"), not fail Mongoose's Number cast.
@@ -268,7 +282,7 @@ exports.updateProduct = async (req, res) => {
 
     res.json({ product });
   } catch (err) {
-    res.status(500).json({ message: err.message });
+    res.status(err.isCatalogValidation ? 400 : 500).json({ message: err.message });
   }
 };
 

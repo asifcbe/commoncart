@@ -24,10 +24,12 @@ backend/connectionstring.txt
 backend/uploads/products/*
 backend/uploads/categories/*
 backend/uploads/carousel/*
+backend/uploads/business/*
 
 !backend/uploads/products/.gitkeep
 !backend/uploads/categories/.gitkeep
 !backend/uploads/carousel/.gitkeep
+!backend/uploads/business/.gitkeep
 
 # ─── Logs ────────────────────────────────────────────────────
 logs/

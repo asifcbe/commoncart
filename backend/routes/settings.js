@@ -17,6 +17,7 @@ const {
   getDocNumberingConfig, updateDocNumberingConfig,
   uploadCategoryImage,
   getCarouselConfig, updateCarouselConfig, uploadCarouselImage,
+  getBusinessPublicConfig, uploadBusinessLogo,
 } = require('../controllers/settingsController');
 const { protect, adminOnly, manageOnly } = require('../middleware/auth');
 const upload = require('../utils/multerConfig');
@@ -27,6 +28,7 @@ router.put('/credit-config', protect, adminOnly, updateCreditConfig);
 // Business / GST — readable by any logged-in user (POS needs it for bills), writable by admin
 router.get('/business-config', protect, getBusinessConfig);
 router.put('/business-config', protect, adminOnly, updateBusinessConfig);
+router.post('/business-logo', protect, adminOnly, upload.single('image'), uploadBusinessLogo);
 
 // Category catalog — readable by any logged-in user (product form needs it), writable by admin
 router.get('/category-config', protect, getCategoryConfig);
@@ -85,8 +87,9 @@ router.get('/carousel-config', protect, getCarouselConfig);
 router.put('/carousel-config', protect, adminOnly, updateCarouselConfig);
 router.post('/carousel-image', protect, adminOnly, upload.single('image'), uploadCarouselImage);
 
-// Public (storefront clearance page / hero carousel — no auth needed)
+// Public (storefront clearance page / hero carousel / business info — no auth needed)
 router.get('/clearance', getClearanceProducts);
 router.get('/carousel', getCarouselConfig);
+router.get('/business-public', getBusinessPublicConfig);
 
 module.exports = router;

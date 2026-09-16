@@ -1,27 +1,19 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Input from './ui/Input';
 import Combobox from './ui/Combobox';
 import Button from './ui/Button';
-import { Plus, X } from 'lucide-react';
 
-// Category + sub-category pickers driven by the managed catalog, with a
-// dedicated "+ New" button next to the dropdown (same pattern as the
-// Supplier quick-create field) that opens an inline text panel instead of
-// burying "add new" inside the dropdown's option list.
-//
-// A typed category/sub-category isn't persisted to the managed catalog here
-// (that needs adminOnly access) — it's held as plain text and registered into
-// the catalog automatically when the parent form (Purchase/Product) is
-// submitted. `onRegisterNew(category, subCategory)` (optional) lets the parent
-// also add it to its *local* catalog copy immediately, so a just-created value
-// stays a real, re-selectable dropdown option in the same session instead of
-// collapsing into a locked "(new)" chip.
+// Category + sub-category pickers driven by the managed catalog only —
+// Settings → Categories is the sole place a category/sub-category may be
+// created (user requirement: staff must not be able to type a new one into a
+// Product/Purchase form). Typing still filters the dropdown to matching
+// existing categories, but there is no "+ New" affordance and no
+// Combobox onCreateNew here.
 //
 //   <CategoryFields
 //     catalog={catalog}
 //     category={cat} subCategory={sub}
 //     onCategoryChange={setCat} onSubCategoryChange={setSub}
-//     onRegisterNew={(c, s) => mergeIntoLocalCatalog(c, s)}
 //   />
 // Changing the category clears the sub-category.
 export default function CategoryFields({
@@ -30,138 +22,59 @@ export default function CategoryFields({
   subCategory = '',
   onCategoryChange,
   onSubCategoryChange,
-  onRegisterNew,
   required = false,
   labelClass = 'text-sm font-medium text-gray-700 block mb-1',
   inputClass = '',
   onKeyDown,
 }) {
   const knownCat = catalog.some((c) => c.name === category);
-  // A category value that's set but not in the catalog AND can't be merged in
-  // locally (no onRegisterNew) — falls back to an editable "(new)" chip.
-  const customCat = category && !knownCat && !onRegisterNew ? category : '';
-  const [showNewCat, setShowNewCat] = useState(false);
-  const [newCatDraft, setNewCatDraft] = useState('');
+  // A category value that's set but no longer in the catalog (e.g. renamed
+  // or removed in Settings since this product/purchase was created) — shown
+  // read-only with a "Pick from list" escape hatch, same pattern as
+  // ManagedSelect's legacy-value handling.
+  const customCat = category && !knownCat ? category : '';
 
   const selectedCat = catalog.find((c) => c.name === category);
   const subs = selectedCat?.subCategories || [];
   const knownSub = subs.includes(subCategory);
-  const customSub = subCategory && !knownSub && !onRegisterNew ? subCategory : '';
-  const [showNewSub, setShowNewSub] = useState(false);
-  const [newSubDraft, setNewSubDraft] = useState('');
+  const customSub = subCategory && !knownSub ? subCategory : '';
 
   const setCategory = (val) => { onCategoryChange?.(val); onSubCategoryChange?.(''); };
-
-  const onCatSelect = (val) => setCategory(val);
-  const createCat = (val) => {
-    const v = (val || '').trim();
-    if (!v) return;
-    onRegisterNew?.(v);       // land it in the local catalog now
-    setCategory(v);
-  };
-
-  const openNewCat = () => { setShowNewCat(true); setNewCatDraft(''); };
-  const confirmNewCat = () => {
-    const v = newCatDraft.trim();
-    if (!v) return;
-    createCat(v);
-    setShowNewCat(false);
-  };
-
-  const onSubSelect = (val) => onSubCategoryChange?.(val);
-  const createSub = (val) => {
-    const v = (val || '').trim();
-    if (!v) return;
-    onRegisterNew?.(category, v); // land "category → v" in the local catalog now
-    onSubCategoryChange?.(v);
-  };
-
-  const openNewSub = () => { setShowNewSub(true); setNewSubDraft(''); };
-  const confirmNewSub = () => {
-    const v = newSubDraft.trim();
-    if (!v) return;
-    createSub(v);
-    setShowNewSub(false);
-  };
 
   return (
     <>
       <div>
         <label className={labelClass}>Category {required ? '*' : ''}</label>
         {customCat ? (
-          <div className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
-            <span className="flex-1 truncate">{customCat} <span className="text-blue-500 text-xs">(new)</span></span>
-            <button type="button" onClick={() => setCategory('')} className="text-gray-400 hover:text-red-500" title="Clear">
-              <X size={14} />
-            </button>
-          </div>
-        ) : (
           <div className="flex gap-2">
-            <Combobox
-              options={catalog.map((c) => ({ value: c.name, label: c.name }))}
-              value={category} onChange={onCatSelect} onCreateNew={createCat} onKeyDown={onKeyDown} required={required}
-              placeholder="Select a category…" className={`flex-1 ${inputClass}`}
-            />
-            <Button type="button" size="sm" variant="outline" onClick={openNewCat}>
-              <Plus size={13} className="mr-1" /> New
+            <Input value={customCat} readOnly className={`flex-1 ${inputClass}`} />
+            <Button type="button" variant="outline" size="sm" onClick={() => setCategory('')}>
+              Pick
             </Button>
           </div>
-        )}
-        {showNewCat && (
-          <div className="border rounded-lg p-3 bg-blue-50 space-y-2 mt-2">
-            <p className="text-xs font-medium text-blue-700">New category</p>
-            <div className="flex gap-2">
-              <Input
-                value={newCatDraft}
-                onChange={(e) => setNewCatDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewCat(); } }}
-                autoFocus
-                placeholder="New category name"
-                className="text-sm flex-1"
-              />
-              <Button type="button" size="sm" variant="ghost" onClick={() => { setShowNewCat(false); setNewCatDraft(''); }}>Cancel</Button>
-              <Button type="button" size="sm" onClick={confirmNewCat} disabled={!newCatDraft.trim()}>Use</Button>
-            </div>
-          </div>
+        ) : (
+          <Combobox
+            options={catalog.map((c) => ({ value: c.name, label: c.name }))}
+            value={category} onChange={setCategory} onKeyDown={onKeyDown} required={required}
+            placeholder="Select a category…" className={inputClass}
+          />
         )}
       </div>
       <div>
         <label className={labelClass}>Sub-category</label>
         {customSub ? (
-          <div className="flex items-center gap-2 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm">
-            <span className="flex-1 truncate">{customSub} <span className="text-blue-500 text-xs">(new)</span></span>
-            <button type="button" onClick={() => onSubCategoryChange?.('')} className="text-gray-400 hover:text-red-500" title="Clear">
-              <X size={14} />
-            </button>
-          </div>
-        ) : (
           <div className="flex gap-2">
-            <Combobox
-              options={subs.map((s) => ({ value: s, label: s }))}
-              value={subCategory} onChange={onSubSelect} onCreateNew={createSub} onKeyDown={onKeyDown} disabled={!category}
-              placeholder={category ? 'None' : 'Select a category first'} className={`flex-1 ${inputClass}`}
-            />
-            <Button type="button" size="sm" variant="outline" onClick={openNewSub} disabled={!category}>
-              <Plus size={13} className="mr-1" /> New
+            <Input value={customSub} readOnly className={`flex-1 ${inputClass}`} />
+            <Button type="button" variant="outline" size="sm" onClick={() => onSubCategoryChange?.('')}>
+              Pick
             </Button>
           </div>
-        )}
-        {showNewSub && (
-          <div className="border rounded-lg p-3 bg-blue-50 space-y-2 mt-2">
-            <p className="text-xs font-medium text-blue-700">New sub-category</p>
-            <div className="flex gap-2">
-              <Input
-                value={newSubDraft}
-                onChange={(e) => setNewSubDraft(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); confirmNewSub(); } }}
-                autoFocus
-                placeholder="New sub-category name"
-                className="text-sm flex-1"
-              />
-              <Button type="button" size="sm" variant="ghost" onClick={() => { setShowNewSub(false); setNewSubDraft(''); }}>Cancel</Button>
-              <Button type="button" size="sm" onClick={confirmNewSub} disabled={!newSubDraft.trim()}>Use</Button>
-            </div>
-          </div>
+        ) : (
+          <Combobox
+            options={subs.map((s) => ({ value: s, label: s }))}
+            value={subCategory} onChange={(v) => onSubCategoryChange?.(v)} onKeyDown={onKeyDown} disabled={!category}
+            placeholder={category ? 'None' : 'Select a category first'} className={inputClass}
+          />
         )}
       </div>
     </>

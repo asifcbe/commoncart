@@ -2,10 +2,11 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Phone, Mail, MapPin, Facebook, Instagram, Twitter, Youtube, Heart } from 'lucide-react';
 import shopConfig from '../../config/shop.config';
+import { useBusiness } from '../../store/useBusinessStore';
 import BrandLogo from '../ui/BrandLogo';
 
 export default function Footer() {
-  const { brand, contact, social } = shopConfig;
+  const business = useBusiness();
   const year = new Date().getFullYear();
 
   const socialLinks = [
@@ -13,7 +14,7 @@ export default function Footer() {
     { key: 'instagram', Icon: Instagram, label: 'Instagram' },
     { key: 'twitter', Icon: Twitter, label: 'Twitter' },
     { key: 'youtube', Icon: Youtube, label: 'YouTube' },
-  ].filter((s) => social[s.key]);
+  ].filter((s) => business[s.key]);
 
   return (
     <footer className="mt-24" style={{ background: 'var(--color-ink)', color: '#EAD9C4', borderTop: '1px solid rgba(255,255,255,.08)' }}>
@@ -22,21 +23,21 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <div className="mb-4">
-              {brand.logoUrl
-                ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-14" />
+              {business.logoUrl
+                ? <img src={business.logoUrl} alt={shopConfig.brand.logoAltText} className="h-14" />
                 : <BrandLogo size={52} animated={false} />}
             </div>
             <p className="text-xl leading-none" style={{ fontFamily: "'Fraunces', Georgia, serif", color: '#fff' }}>
               Tom <span style={{ color: 'var(--color-primary)' }}>&amp;</span> Jerry
               <span className="block text-[0.62rem] font-medium tracking-[0.3em] uppercase mt-1.5" style={{ color: '#C9B49B' }}>Kids Wear</span>
             </p>
-            <p className="text-sm mt-3 leading-relaxed" style={{ color: '#C9B49B' }}>{brand.description}</p>
+            <p className="text-sm mt-3 leading-relaxed" style={{ color: '#C9B49B' }}>{business.description}</p>
             {socialLinks.length > 0 && (
               <div className="flex gap-3 mt-4">
                 {socialLinks.map(({ key, Icon, label }) => (
                   <a
                     key={key}
-                    href={social[key]}
+                    href={business[key]}
                     target="_blank"
                     rel="noopener noreferrer"
                     aria-label={label}
@@ -71,26 +72,30 @@ export default function Footer() {
           <div>
             <h3 className="font-semibold text-white mb-4">Contact Us</h3>
             <ul className="space-y-3 text-sm">
-              {contact.phone && (
+              {business.phone && (
                 <li className="flex items-start gap-2">
                   <Phone size={15} className="mt-0.5 flex-shrink-0 text-gray-500" />
-                  <a href={`tel:${contact.phone}`} className="hover:text-white">{contact.phone}</a>
+                  <a href={`tel:${business.phone}`} className="hover:text-white">{business.phone}</a>
                 </li>
               )}
-              {contact.email && (
+              {business.email && (
                 <li className="flex items-start gap-2">
                   <Mail size={15} className="mt-0.5 flex-shrink-0 text-gray-500" />
-                  <a href={`mailto:${contact.email}`} className="hover:text-white break-all">{contact.email}</a>
+                  <a href={`mailto:${business.email}`} className="hover:text-white break-all">{business.email}</a>
                 </li>
               )}
-              {contact.address && (
+              {business.addressLine && (
                 <li className="flex items-start gap-2">
                   <MapPin size={15} className="mt-0.5 flex-shrink-0 text-gray-500" />
-                  <span>{contact.address}</span>
+                  {business.mapUrl ? (
+                    <a href={business.mapUrl} target="_blank" rel="noopener noreferrer" className="hover:text-white">{business.addressLine}</a>
+                  ) : (
+                    <span>{business.addressLine}</span>
+                  )}
                 </li>
               )}
-              {contact.businessHours && (
-                <li className="text-gray-500 text-xs mt-2">{contact.businessHours}</li>
+              {business.businessHours && (
+                <li className="text-gray-500 text-xs mt-2">{business.businessHours}</li>
               )}
             </ul>
           </div>
@@ -122,7 +127,7 @@ export default function Footer() {
 
       <div className="py-4" style={{ borderTop: '1px solid rgba(255,255,255,.08)' }}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 text-center text-xs flex items-center justify-center gap-1.5" style={{ color: '#9C8973' }}>
-          {brand.footerText.replace('2024', year.toString())}
+          {shopConfig.brand.footerText.replace('2024', year.toString())}
           <span className="mx-1">·</span> made with <Heart size={11} style={{ color: 'var(--color-danger)' }} /> for little ones
         </div>
       </div>

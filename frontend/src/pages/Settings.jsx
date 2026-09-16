@@ -360,8 +360,11 @@ export default function Settings() {
     businessName: '', addressLine: '', phone: '', email: '',
     gstin: '', gstEnabled: false, gstPercent: 18, gstInclusive: true,
     defaultHsnCode: '', stateName: '', footerNote: 'Thank you for shopping!',
+    tagline: '', description: '', whatsapp: '', businessHours: '', mapUrl: '', logoUrl: '',
+    facebook: '', instagram: '', twitter: '', youtube: '', tiktok: '',
   });
   const [savingBusiness, setSavingBusiness] = useState(false);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
 
   // Category catalog: [{ name, image, subCategories: [], subImages: { <sub>: url } }]
   const [categories, setCategories] = useState([]);
@@ -805,6 +808,21 @@ export default function Settings() {
     }
   };
 
+  const handleUploadLogo = async (file) => {
+    if (!file) return;
+    if (!/^image\//.test(file.type)) { toast({ message: 'Please choose an image file', type: 'warning' }); return; }
+    setUploadingLogo(true);
+    try {
+      const fd = new FormData();
+      fd.append('image', file);
+      const { data } = await api.post('/settings/business-logo', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      setBusiness((b) => ({ ...b, logoUrl: data.url }));
+      toast({ message: 'Logo uploaded — remember to Save', type: 'success' });
+    } catch (err) {
+      toast({ message: err.response?.data?.message || 'Upload failed', type: 'error' });
+    } finally { setUploadingLogo(false); }
+  };
+
   const handleDelete = async (u) => {
     if (u._id === currentUser?.id) { toast({ message: "You can't delete yourself", type: 'warning' }); return; }
     if (!confirm(`Delete user "${u.name}"?`)) return;
@@ -1216,6 +1234,79 @@ export default function Settings() {
                   <label className="text-sm font-medium block mb-1">Bill Footer Note</label>
                   <p className="text-xs text-gray-500 mb-1">Printed at the bottom of every bill — e.g. an exchange/return policy. Press Enter for a new line.</p>
                   <Textarea value={business.footerNote} onChange={(e) => setBusiness((b) => ({ ...b, footerNote: e.target.value }))} placeholder="Thank you for shopping!" rows={3} />
+                </div>
+
+                {/* Storefront-facing info — shown on the website's header/footer */}
+                <div className="border-t pt-4 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-800">Website Info</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Shown on the customer-facing website (header/footer) instead of being hard-coded.
+                      Business Name, Address, Phone and Email above are reused there too.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block mb-1">Logo</label>
+                    <div className="flex items-center gap-3">
+                      <span className="relative inline-flex items-center justify-center h-16 w-16 rounded-lg overflow-hidden border border-dashed border-gray-300 bg-gray-50 shrink-0">
+                        {uploadingLogo ? (
+                          <Spinner size="sm" />
+                        ) : business.logoUrl ? (
+                          <img src={business.logoUrl} alt="" className="h-full w-full object-contain" />
+                        ) : (
+                          <ImagePlus size={18} className="text-gray-400" />
+                        )}
+                      </span>
+                      <div>
+                        <label className="text-xs font-medium text-blue-600 hover:text-blue-700 cursor-pointer">
+                          {business.logoUrl ? 'Change logo' : 'Upload logo'}
+                          <input type="file" accept="image/*" className="hidden" onChange={(e) => handleUploadLogo(e.target.files?.[0])} />
+                        </label>
+                        {business.logoUrl && (
+                          <button type="button" onClick={() => setBusiness((b) => ({ ...b, logoUrl: '' }))} className="block text-xs text-gray-400 hover:text-red-500 mt-1">
+                            Remove — use built-in wordmark
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block mb-1">Tagline</label>
+                    <Input value={business.tagline} onChange={(e) => setBusiness((b) => ({ ...b, tagline: e.target.value }))} placeholder="e.g. Adorable kids wear, stitched with love." />
+                  </div>
+
+                  <div>
+                    <label className="text-sm font-medium block mb-1">About / Footer Description</label>
+                    <Textarea value={business.description} onChange={(e) => setBusiness((b) => ({ ...b, description: e.target.value }))} placeholder="Shown in the website footer" rows={2} />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-sm font-medium block mb-1">WhatsApp Number</label>
+                      <Input value={business.whatsapp} onChange={(e) => setBusiness((b) => ({ ...b, whatsapp: e.target.value }))} placeholder="919000000000 (digits only)" />
+                    </div>
+                    <div>
+                      <label className="text-sm font-medium block mb-1">Business Hours</label>
+                      <Input value={business.businessHours} onChange={(e) => setBusiness((b) => ({ ...b, businessHours: e.target.value }))} placeholder="Mon–Sat: 10am – 8pm" />
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-sm font-medium block mb-1">Google Maps Link</label>
+                      <Input value={business.mapUrl} onChange={(e) => setBusiness((b) => ({ ...b, mapUrl: e.target.value }))} placeholder="https://maps.google.com/..." />
+                    </div>
+                  </div>
+
+                  <div>
+                    <h4 className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Social Links</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <Input value={business.facebook} onChange={(e) => setBusiness((b) => ({ ...b, facebook: e.target.value }))} placeholder="Facebook URL" />
+                      <Input value={business.instagram} onChange={(e) => setBusiness((b) => ({ ...b, instagram: e.target.value }))} placeholder="Instagram URL" />
+                      <Input value={business.twitter} onChange={(e) => setBusiness((b) => ({ ...b, twitter: e.target.value }))} placeholder="Twitter / X URL" />
+                      <Input value={business.youtube} onChange={(e) => setBusiness((b) => ({ ...b, youtube: e.target.value }))} placeholder="YouTube URL" />
+                      <Input value={business.tiktok} onChange={(e) => setBusiness((b) => ({ ...b, tiktok: e.target.value }))} placeholder="TikTok URL" />
+                    </div>
+                  </div>
                 </div>
 
                 <div className="flex justify-end">

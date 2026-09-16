@@ -4,10 +4,12 @@ import { ShoppingCart, User, Search, Menu, X, LogOut, Package } from 'lucide-rea
 import shopConfig from '../../config/shop.config';
 import useCartStore from '../../store/useCartStore';
 import useCustomerStore from '../../store/useCustomerStore';
+import { useBusiness } from '../../store/useBusinessStore';
 import BrandLogo from '../ui/BrandLogo';
 
 export default function Header() {
   const { brand } = shopConfig;
+  const business = useBusiness();
   const navigate = useNavigate();
   const cartItems = useCartStore((s) => s.items);
   const cartCount = cartItems.reduce((n, i) => n + i.qty, 0);
@@ -39,8 +41,8 @@ export default function Header() {
               actually anchor the header instead of disappearing next to
               the search bar. */}
           <Link to="/" className="flex-shrink-0" aria-label={brand.name}>
-            {brand.logoUrl
-              ? <img src={brand.logoUrl} alt={brand.logoAltText} className="h-12 sm:h-14 w-auto" />
+            {business.logoUrl
+              ? <img src={business.logoUrl} alt={brand.logoAltText} className="h-12 sm:h-14 w-auto" />
               : <BrandLogo size={48} animated={false} showText />}
           </Link>
 
@@ -177,10 +179,10 @@ export default function Header() {
             style={{ color: 'var(--color-secondary-dark)' }}>
             Clearance Sale
           </Link>
-          {shopConfig.contact.phone && (
-            <a href={`tel:${shopConfig.contact.phone}`}
+          {business.phone && (
+            <a href={`tel:${business.phone}`}
               className="text-sm font-medium whitespace-nowrap ml-auto" style={{ color: 'var(--color-ink-soft)' }}>
-              {shopConfig.contact.phone}
+              {business.phone}
             </a>
           )}
         </div>

@@ -345,25 +345,6 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
   }, []);
   useEffect(() => { loadCatalogs(); }, [loadCatalogs]);
 
-  // Optimistically register a just-typed new category / sub-category into the
-  // local catalog so it stays selectable (and re-pickable) in this session,
-  // before the purchase is even saved. The server-side ensureCategoryEntries
-  // persists it for good on submit; loadCatalogs() after save reconciles.
-  const registerLocalCategory = React.useCallback((category, subCategory) => {
-    const cat = (category || '').trim();
-    if (!cat) return;
-    const sub = (subCategory || '').trim();
-    setCategoryCatalog((prev) => {
-      const list = prev.map((c) => ({ ...c, subCategories: [...(c.subCategories || [])] }));
-      let entry = list.find((c) => c.name.toLowerCase() === cat.toLowerCase());
-      if (!entry) { entry = { name: cat, subCategories: [] }; list.push(entry); }
-      if (sub && !entry.subCategories.some((s) => s.toLowerCase() === sub.toLowerCase())) {
-        entry.subCategories.push(sub);
-      }
-      return list;
-    });
-  }, []);
-
   // ── EDIT: per-item overrides
   const [itemOverrides, setItemOverrides] = useState({});
   const [saving, setSaving] = useState(false);
@@ -637,7 +618,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
       try {
         await api.put(`/purchases/${purchaseId}`, { supplierId: supplierId || undefined, supplier: supplierName, note, purchaseDate: localDateTimeInputToISO(purchaseDate), itemOverrides });
         toast({ message: 'Purchase updated', type: 'success' });
-        loadCatalogs(); // pick up any category/sub-category the edit just registered
+        loadCatalogs(); // refresh in case Settings changed the catalog since this form loaded
         onSaved();
       } catch (err) {
         toast({ message: err.response?.data?.message || 'Failed to update purchase', type: 'error' });
@@ -670,7 +651,7 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
     try {
       await api.post('/purchases', { supplierId: supplierId || undefined, supplier: supplierName, items, note, purchaseDate: localDateTimeInputToISO(purchaseDate) });
       toast({ message: 'Purchase recorded — products created / stock updated', type: 'success' });
-      loadCatalogs(); // pick up any new category/sub-category / colour / size just registered
+      loadCatalogs(); // refresh in case Settings changed the catalog since this form loaded
       // Offer to print labels before handing off to the list (onSaved) — the
       // barcodes are only available from this local form state, not after.
       setShowPostSaveConfirm(true);
@@ -785,7 +766,6 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                     subCategory={prodSubCategory}
                     onCategoryChange={setProdCategory}
                     onSubCategoryChange={setProdSubCategory}
-                    onRegisterNew={registerLocalCategory}
                     onKeyDown={productStepEnterNav}
                     labelClass="text-xs font-medium text-gray-600 block mb-1"
                   />
@@ -1129,7 +1109,6 @@ function PurchaseForm({ purchaseId, onClose, onSaved, onDeleted }) {
                           catalog={categoryCatalog} category={category} subCategory={subCategory}
                           onCategoryChange={(v) => setAllField('category', v)}
                           onSubCategoryChange={(v) => setAllField('subCategory', v)}
-                          onRegisterNew={registerLocalCategory}
                           onKeyDown={enterNav}
                           labelClass="text-xs font-medium text-gray-600 block mb-1"
                         />
