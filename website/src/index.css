@@ -88,6 +88,15 @@
   .badge-stock-low  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold; background: #F5EBD8; color: #8A6A2E; }
   .badge-stock-out  { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold; background: var(--color-primary-light); color: var(--color-danger); }
 
+  /* Mild-red "sold out" state for the Add to Cart button — signals unavailability without the alarm of a solid red */
+  .btn-sold-out {
+    @apply relative inline-flex items-center justify-center gap-2 font-semibold rounded-lg px-6 py-3
+           cursor-not-allowed;
+    background: #FFE1E5;
+    color: var(--color-danger);
+    box-shadow: none;
+  }
+
   /* Pill used by the guided Category → Sub → Size flow — quiet, not chunky */
   .pick-pill {
     @apply inline-flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium transition-all duration-200;

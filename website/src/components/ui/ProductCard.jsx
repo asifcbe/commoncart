@@ -79,7 +79,7 @@ export default function ProductCard({ product }) {
         <button
           onClick={handleAdd}
           disabled={available <= 0 && !inCart}
-          className={`w-full mt-3 py-2.5 text-sm ${inCart ? 'btn-candy-pink' : 'btn-primary'}`}
+          className={`w-full mt-3 py-2.5 text-sm ${inCart ? 'btn-candy-pink' : available <= 0 ? 'btn-sold-out' : 'btn-primary'}`}
         >
           {inCart ? (
             <>Go to Cart <ArrowRight size={15} /></>

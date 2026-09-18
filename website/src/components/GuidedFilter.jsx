@@ -1,32 +1,44 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, RotateCcw, Sparkles } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, Check, RotateCcw, Sparkles } from 'lucide-react';
 import api from '../utils/api';
 import Img from './ui/Img';
 
 /**
  * Landing-page guided flow: Category → Sub-category → Size.
  * Each step reveals the next; at the end it routes to the product listing
- * with all three filters applied. Any step can be revisited or skipped
- * ("Any …" advances without narrowing that facet).
+ * with all three filters applied. Each pick pushes its own URL (query params
+ * on "/"), so browser/back-button navigation and the in-widget Back button
+ * both move one step at a time through real history entries.
  */
 const STEPS = ['category', 'subCategory', 'size'];
 
-// Per-step identity — label, prompt, and a colour token used for the rail
-// node, tiles, and the prompt gradient so each step feels distinct.
+// Per-step identity — label, prompt, and a colour token used for the
+// tiles and the prompt gradient so each step feels distinct.
 const STEP_META = {
-  category:    { label: 'Style', prompt: () => 'What are we shopping for?',
+  category:    { prompt: () => 'What are we shopping for?',
                  color: 'var(--color-primary)',   dark: 'var(--color-primary-dark)',   light: 'var(--color-primary-light)' },
-  subCategory: { label: 'Type',  prompt: (p) => `Which kind of ${p.category || 'outfit'}?`,
+  subCategory: { prompt: (p) => `Which kind of ${p.category || 'outfit'}?`,
                  color: 'var(--color-accent)',    dark: '#E0A500',                     light: '#FFF3D6' },
-  size:        { label: 'Size',  prompt: () => 'And the size?',
+  size:        { prompt: () => 'And the size?',
                  color: 'var(--color-secondary)', dark: 'var(--color-secondary-dark)', light: 'var(--color-secondary-light)' },
 };
 
 export default function GuidedFilter() {
   const navigate = useNavigate();
-  const [step, setStep] = useState(0);
-  const [picked, setPicked] = useState({ category: '', subCategory: '', size: '' });
+  const [searchParams] = useSearchParams();
+
+  // Picks and step both derive from the URL — the guided flow's state IS
+  // the address bar, so each choice pushing a new URL is what makes browser
+  // back (and the widget's own Back button, via navigate(-1)) land on the
+  // previous step.
+  const picked = useMemo(() => ({
+    category: searchParams.get('category') || '',
+    subCategory: searchParams.get('subCategory') || '',
+    size: searchParams.get('size') || '',
+  }), [searchParams]);
+  const step = picked.category ? (picked.subCategory ? 2 : 1) : 0;
+
   const [opts, setOpts] = useState({ categories: [], subCategories: [], sizes: [] });
   // Image lookup by "<category>" and "<category>|<sub>" so category and
   // sub-category steps can show a photo tile instead of a plain pill.
@@ -62,20 +74,27 @@ export default function GuidedFilter() {
     } catch { /* fall back to text pills */ }
   };
 
-  useEffect(() => { loadOptions({}); loadCategoryImages(); }, []);
+  useEffect(() => { loadCategoryImages(); }, []);
+  // Re-fetch options whenever the URL-derived picks change (covers forward
+  // choices, Back, forward-again, and a bookmarked/shared URL alike).
+  useEffect(() => {
+    loadOptions({
+      category: picked.category || undefined,
+      subCategory: picked.subCategory || undefined,
+    });
+  }, [picked.category, picked.subCategory]);
 
-  const choose = async (key, value) => {
+  const choose = (key, value) => {
     const next = { ...picked, [key]: value };
     const idx = STEPS.indexOf(key);
     STEPS.slice(idx + 1).forEach((k) => { next[k] = ''; });
-    setPicked(next);
 
     if (step === STEPS.length - 1) { goToResults(next); return; }
-    setStep(step + 1);
-    await loadOptions({
-      category: next.category || undefined,
-      subCategory: next.subCategory || undefined,
-    });
+
+    const q = new URLSearchParams();
+    if (next.category) q.set('category', next.category);
+    if (next.subCategory) q.set('subCategory', next.subCategory);
+    navigate(`/?${q.toString()}`);
   };
 
   const goToResults = (p = picked) => {
@@ -86,11 +105,9 @@ export default function GuidedFilter() {
     navigate(`/products${q.toString() ? `?${q}` : ''}`);
   };
 
-  const reset = () => {
-    setPicked({ category: '', subCategory: '', size: '' });
-    setStep(0);
-    loadOptions({});
-  };
+  const back = () => navigate(-1);
+
+  const reset = () => navigate('/');
 
   const currentKey = STEPS[step];
   const meta = STEP_META[currentKey];
@@ -182,22 +199,9 @@ export default function GuidedFilter() {
               </button>
             );
           })}
-          <button
-            onClick={() => choose(currentKey, '')}
-            className="card card-hover anim-rise flex items-center justify-center aspect-square font-extrabold text-base"
-            style={{ borderColor: 'var(--color-toffee)', color: 'var(--color-ink-soft)' }}
-          >
-            Any {meta.label}
-          </button>
         </div>
       ) : (
         <div className="min-h-[64px] flex flex-wrap justify-center gap-3">
-          <button
-            className="pick-pill text-base px-5 py-3 lift"
-            onClick={() => choose(currentKey, '')}
-          >
-            Any {meta.label}
-          </button>
           {currentOptions.map((o, idx) => {
             const on = picked[currentKey] === o;
             return (
@@ -227,14 +231,24 @@ export default function GuidedFilter() {
 
       {/* ── Footer ────────────────────────────────────── */}
       <div className="relative flex items-center justify-between mt-8 pt-5 border-t-[3px] border-dashed" style={{ borderColor: 'var(--color-toffee)' }}>
-        <button
-          onClick={reset}
-          disabled={!anyPicked && step === 0}
-          className="inline-flex items-center gap-1.5 text-sm font-extrabold disabled:opacity-40"
-          style={{ color: 'var(--color-ink-soft)' }}
-        >
-          <RotateCcw size={15} /> Start over
-        </button>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={back}
+            disabled={step === 0}
+            className="inline-flex items-center gap-1.5 text-sm font-extrabold disabled:opacity-40"
+            style={{ color: 'var(--color-ink-soft)' }}
+          >
+            <ArrowLeft size={15} /> Back
+          </button>
+          <button
+            onClick={reset}
+            disabled={!anyPicked && step === 0}
+            className="inline-flex items-center gap-1.5 text-sm font-extrabold disabled:opacity-40"
+            style={{ color: 'var(--color-ink-soft)' }}
+          >
+            <RotateCcw size={15} /> Start over
+          </button>
+        </div>
         <button onClick={() => goToResults()} className="btn-candy-pink py-3 px-6 text-base">
           <Sparkles size={18} /> Show me outfits <ArrowRight size={18} />
         </button>
